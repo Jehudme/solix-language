@@ -89,24 +89,24 @@ pub unsafe extern "C" fn solix_register_natives(
 ```
 
 ### 3.3. `ffi/rust` (`solix-ffi`) & `ffi/c` (`solix::ffi`) Native Extension SDKs
-- **Rust SDK ([`ffi/rust/`](../../ffi/rust/src/lib.rs)):** The `solix-ffi` crate provides typed wrappers over `SolixCValue`, full `SolixVmContext` accessors (`alloc_string`, `alloc_chars`, `alloc_byte_array`, `alloc_array`, `alloc_object`, `read_field_u64`/`write_field_u64`, `get_vm_metric`, `collect_cycles`), and registration macros (`solix_export!`).
-- **C11 / C++17 CMake SDK ([`ffi/c/`](../../ffi/c/include/solix_ffi.h)):** Exports interface target `solix::ffi` (`CMakeLists.txt` with `SOURCE_SUBDIR ffi/c`) and [`solix_ffi.h`](../../ffi/c/include/solix_ffi.h) providing exact ABI-matched `SolixCValue`, `SolixVmContext` (verified with `SOLIX_VM_CONTEXT_MAGIC == 0x534F4C4958564D43`), inline value constructors/unwrappers, `solix_vm_*` host heap helpers, `solix_vm_set_error`, and cross-platform export macros (`SOLIX_REGISTER_MODULE` / `SOLIX_EXPORT_NATIVES_BEGIN`).
+- **Rust SDK ([`ffi/rust/`](../../ffi/rust/src/lib.rs)):** The `solix-ffi` crate provides typed wrappers over `SolixCValue`, `NativeCFunctionPtr = unsafe extern "C-unwind" fn(...)`, complete `SOLIX_ARRAY_TAG_*` constants (`I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, `F64`, `BOOL`, `CHAR`, `REF`), explicit `*_by_index` / `*_by_offset` `SolixVmContext` field accessors, and null/panic-guarded `solix_export!` trampolines (`invoke_caught` wrapping user callbacks in `std::panic::catch_unwind`).
+- **C11 / C++17 CMake SDK ([`ffi/c/`](../../ffi/c/include/solix_ffi.h)):** Exports interface target `solix::ffi` (`CMakeLists.txt` with `SOURCE_SUBDIR ffi/c`) and [`solix_ffi.h`](../../ffi/c/include/solix_ffi.h) providing exact ABI-matched `SolixCValue`, `SolixVmContext` (verified with `SOLIX_VM_CONTEXT_MAGIC == 0x534F4C4958564D43`), inline value constructors/unwrappers, `solix_vm_*` host heap and explicit `*_by_index` / `*_by_offset` field helpers, `solix_vm_set_error`, and cross-platform export macros (`SOLIX_REGISTER_MODULE` / `SOLIX_EXPORT_NATIVES_BEGIN`).
 
 ---
 
 ## 4. Host Memory Operations via `SolixVmContext`
 
-Native functions can read and write heap structures via VM helper callbacks:
+Native functions can read and write heap structures via VM helper callbacks (all arithmetic uses `checked_add`/`checked_mul` and validates VM pointers via `resolve_vm`):
 - `alloc_byte_array`: Allocates contiguous byte buffer on virtual heap using checked arithmetic.
 - `alloc_string`: Allocates immutable raw UTF-8 string buffer (`BlockTag::String`) and tracks its address for clean teardown upon runtime shutdown.
-- `alloc_chars`: Allocates unpacked `char[]` array buffer for Solix character slice operations using checked arithmetic.
+- `alloc_chars` & `read_bytes`: Transcode seamlessly between UTF-8 host strings and Solix `char[]` arrays (`type_tag == 12`) holding Unicode scalar values (`alloc_chars` decodes UTF-8 scalar code points with an ASCII fast path; `read_bytes` encodes `char[]` code points back into UTF-8 and returns full byte count).
 - `alloc_array`: Allocates typed array of specified length with checked capacity bounds.
 - `array_len`: Returns element count of heap array.
-- `array_get_u64` & `array_set_u64`: Accesses elements by index. For `float32[]` arrays (`type_tag == 9`), transparently normalizes between 32-bit heap bit-patterns and standard IEEE-754 64-bit float representations.
+- `array_get_u64` & `array_set_u64`: Accesses elements by index using checked slot offset math. For `float32[]` arrays (`type_tag == 9`), transparently normalizes between 32-bit heap bit-patterns and standard IEEE-754 64-bit float representations.
 - `alloc_object`: Allocates an object instance on the virtual heap, reserving `class_descriptor.instance_size.max(8 + field_count * 8)` bytes via checked arithmetic to prevent integer overflow.
 - `get_class_vtable_id`: Resolves the unique virtual table index for a class by name (`*const c_char`), enabling typed object instantiation via `alloc_object`.
-- `read_field_u64`: Reads a field slot from a heap object using resolved field index or direct byte offset, adapting byte width and IEEE-754 bit-encoding according to class type tags (e.g. reading 32-bit `float32` bits without clobbering adjacent fields, and extracting untagged addresses from Tag 12 `Value::Ref`).
-- `write_field_u64`: Writes a field value to a heap object's slot according to resolved type tags, writing only the defined field size (1, 2, 4, or 8 bytes), storing `float32` bits into 4-byte slots, and applying `Value::TAG_REF` boxing for Tag 12 reference fields.
+- `get_field_i32_by_index` / `set_field_i32_by_index` & `get_field_i32_by_offset` / `set_field_i32_by_offset`: Unambiguous 32-bit integer field accessors indexed strictly by 0-based `field_index` or direct payload `byte_offset`, avoiding threshold collisions on classes with `>= 8` fields.
+- `read_field_u64_by_index` / `write_field_u64_by_index` & `read_field_u64_by_offset` / `write_field_u64_by_offset`: Unambiguous width- and tag-aware field accessors indexed strictly by 0-based `field_index` or direct payload `byte_offset` (handling sub-64-bit widths, `float32` slots, and Tag 12 `Value::Ref` boxing without colliding on offsets `< 64`). Legacy heuristic `get_field_i32`, `set_field_i32`, `read_field_u64`, and `write_field_u64` remain preserved for existing plugins.
 
 ---
 

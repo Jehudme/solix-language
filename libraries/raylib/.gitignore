@@ -1,6 +1,7 @@
 /build/
 /target/
 /natives/raylib/target/
+/natives/raylib/Cargo.lock
 *.slxb
 *.slxarc
 __pycache__/

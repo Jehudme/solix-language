@@ -1809,7 +1809,8 @@ fn decode_array_element_slow(elem_type_tag: u8, elem_size: usize, raw_word: u64)
         1 => Value::I32(raw_word as i8 as i32),
         2 => Value::I32(raw_word as i16 as i32),
         4 | 8 => Value::I64(raw_word as i64),
-        5 | 12 => Value::I32(raw_word as u8 as i32),
+        5 => Value::I32(raw_word as u8 as i32),
+        12 => Value::I32(raw_word as i32),
         6 => Value::I32(raw_word as u16 as i32),
         7 => Value::I32(raw_word as u32 as i32),
         9 => {

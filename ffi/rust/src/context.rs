@@ -7,12 +7,26 @@ pub const SOLIX_VM_CONTEXT_MAGIC: u64 = 0x534F_4C49_5856_4D43;
 
 /// Element tag for `int8[]` arrays passed to [`SolixVmContext::alloc_array`].
 pub const SOLIX_ARRAY_TAG_I8: u8 = 1;
+/// Element tag for `int16[]` arrays passed to [`SolixVmContext::alloc_array`].
+pub const SOLIX_ARRAY_TAG_I16: u8 = 2;
+/// Element tag for `int32[]` arrays passed to [`SolixVmContext::alloc_array`].
+pub const SOLIX_ARRAY_TAG_I32: u8 = 3;
 /// Element tag for `int64[]` arrays passed to [`SolixVmContext::alloc_array`].
 pub const SOLIX_ARRAY_TAG_I64: u8 = 4;
+/// Element tag for `uint8[]` arrays passed to [`SolixVmContext::alloc_array`].
+pub const SOLIX_ARRAY_TAG_U8: u8 = 5;
+/// Element tag for `uint16[]` arrays passed to [`SolixVmContext::alloc_array`].
+pub const SOLIX_ARRAY_TAG_U16: u8 = 6;
+/// Element tag for `uint32[]` arrays passed to [`SolixVmContext::alloc_array`].
+pub const SOLIX_ARRAY_TAG_U32: u8 = 7;
+/// Element tag for `uint64[]` arrays passed to [`SolixVmContext::alloc_array`].
+pub const SOLIX_ARRAY_TAG_U64: u8 = 8;
 /// Element tag for `float32[]` arrays passed to [`SolixVmContext::alloc_array`].
 pub const SOLIX_ARRAY_TAG_F32: u8 = 9;
 /// Element tag for `float64[]` arrays passed to [`SolixVmContext::alloc_array`].
 pub const SOLIX_ARRAY_TAG_F64: u8 = 10;
+/// Element tag for `bool[]` arrays passed to [`SolixVmContext::alloc_array`].
+pub const SOLIX_ARRAY_TAG_BOOL: u8 = 11;
 /// Element tag for `char[]` arrays passed to [`SolixVmContext::alloc_array`].
 pub const SOLIX_ARRAY_TAG_CHAR: u8 = 12;
 /// Element tag for `string[]` / reference arrays passed to [`SolixVmContext::alloc_array`].
@@ -79,6 +93,46 @@ pub struct SolixVmContext {
     pub collect_cycles: unsafe extern "C" fn(vm_ptr: *mut c_void) -> u64,
     /// Updates the cycle collector candidate threshold.
     pub set_cycle_threshold: unsafe extern "C" fn(vm_ptr: *mut c_void, threshold: u32),
+    /// Reads a 32-bit signed integer field from an object instance by explicit 0-based index.
+    pub get_field_i32_by_index:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, object_address: u32, field_index: u32) -> i32,
+    /// Writes a 32-bit signed integer field to an object instance by explicit 0-based index.
+    pub set_field_i32_by_index: unsafe extern "C" fn(
+        vm_ptr: *mut c_void,
+        object_address: u32,
+        field_index: u32,
+        value: i32,
+    ),
+    /// Reads a 32-bit signed integer field from an object instance by explicit byte offset.
+    pub get_field_i32_by_offset:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, object_address: u32, byte_offset: u32) -> i32,
+    /// Writes a 32-bit signed integer field to an object instance by explicit byte offset.
+    pub set_field_i32_by_offset: unsafe extern "C" fn(
+        vm_ptr: *mut c_void,
+        object_address: u32,
+        byte_offset: u32,
+        value: i32,
+    ),
+    /// Reads a 64-bit (or sub-64-bit normalized) field by explicit 0-based index.
+    pub read_field_u64_by_index:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, object_address: u32, field_index: u32) -> u64,
+    /// Writes a 64-bit (or sub-64-bit normalized) field by explicit 0-based index.
+    pub write_field_u64_by_index: unsafe extern "C" fn(
+        vm_ptr: *mut c_void,
+        object_address: u32,
+        field_index: u32,
+        raw_value: u64,
+    ),
+    /// Reads a 64-bit (or sub-64-bit normalized) field by explicit byte offset.
+    pub read_field_u64_by_offset:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, object_address: u32, byte_offset: u32) -> u64,
+    /// Writes a 64-bit (or sub-64-bit normalized) field by explicit byte offset.
+    pub write_field_u64_by_offset: unsafe extern "C" fn(
+        vm_ptr: *mut c_void,
+        object_address: u32,
+        byte_offset: u32,
+        raw_value: u64,
+    ),
 }
 
 impl SolixVmContext {
@@ -166,7 +220,11 @@ impl SolixVmContext {
         if raw_context.is_null() {
             return None;
         }
-        let context_ref = unsafe { &*(raw_context as *const Self) };
+        let typed_ptr = raw_context as *const Self;
+        if !typed_ptr.is_aligned() {
+            return None;
+        }
+        let context_ref = unsafe { &*typed_ptr };
         if context_ref.magic == SOLIX_VM_CONTEXT_MAGIC && !context_ref.vm_ptr.is_null() {
             Some(context_ref)
         } else {
@@ -271,5 +329,116 @@ impl SolixVmContext {
     /// `self.vm_ptr` must point to a valid, live VM instance.
     pub unsafe fn write_field_u64(&self, object_address: u32, field_offset: u32, raw_value: u64) {
         unsafe { (self.write_field_u64)(self.vm_ptr, object_address, field_offset, raw_value) }
+    }
+
+    /// Reads a 32-bit signed integer field from an object instance by explicit 0-based field index.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn get_field_i32_by_index(&self, object_address: u32, field_index: u32) -> i32 {
+        unsafe { (self.get_field_i32_by_index)(self.vm_ptr, object_address, field_index) }
+    }
+
+    /// Writes a 32-bit signed integer field to an object instance by explicit 0-based field index.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn set_field_i32_by_index(
+        &self,
+        object_address: u32,
+        field_index: u32,
+        field_value: i32,
+    ) {
+        unsafe {
+            (self.set_field_i32_by_index)(self.vm_ptr, object_address, field_index, field_value);
+        }
+    }
+
+    /// Reads a 32-bit signed integer field from an object instance by explicit byte offset.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn get_field_i32_by_offset(&self, object_address: u32, byte_offset: u32) -> i32 {
+        unsafe { (self.get_field_i32_by_offset)(self.vm_ptr, object_address, byte_offset) }
+    }
+
+    /// Writes a 32-bit signed integer field to an object instance by explicit byte offset.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn set_field_i32_by_offset(
+        &self,
+        object_address: u32,
+        byte_offset: u32,
+        field_value: i32,
+    ) {
+        unsafe {
+            (self.set_field_i32_by_offset)(self.vm_ptr, object_address, byte_offset, field_value);
+        }
+    }
+
+    /// Reads a 64-bit (or width-normalized sub-64-bit) field by explicit 0-based field index.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn read_field_u64_by_index(&self, object_address: u32, field_index: u32) -> u64 {
+        unsafe { (self.read_field_u64_by_index)(self.vm_ptr, object_address, field_index) }
+    }
+
+    /// Writes a 64-bit (or width-normalized sub-64-bit) field by explicit 0-based field index.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn write_field_u64_by_index(
+        &self,
+        object_address: u32,
+        field_index: u32,
+        raw_value: u64,
+    ) {
+        unsafe {
+            (self.write_field_u64_by_index)(self.vm_ptr, object_address, field_index, raw_value);
+        }
+    }
+
+    /// Reads a 64-bit (or width-normalized sub-64-bit) field by explicit byte offset.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn read_field_u64_by_offset(&self, object_address: u32, byte_offset: u32) -> u64 {
+        unsafe { (self.read_field_u64_by_offset)(self.vm_ptr, object_address, byte_offset) }
+    }
+
+    /// Writes a 64-bit (or width-normalized sub-64-bit) field by explicit byte offset.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn write_field_u64_by_offset(
+        &self,
+        object_address: u32,
+        byte_offset: u32,
+        raw_value: u64,
+    ) {
+        unsafe {
+            (self.write_field_u64_by_offset)(self.vm_ptr, object_address, byte_offset, raw_value);
+        }
+    }
+
+    /// Allocates an error string on the VM heap and populates `*out_error`.
+    /// Falls back to a non-null boolean tag if heap allocation returns `0`.
+    ///
+    /// # Safety
+    /// If non-null, `out_error` must point to writable `SolixCValue` storage.
+    pub unsafe fn set_error(&self, out_error: *mut crate::value::SolixCValue, message: &str) {
+        if out_error.is_null() {
+            return;
+        }
+        let msg_addr = unsafe { self.alloc_string(message) };
+        unsafe {
+            *out_error = if msg_addr != 0 {
+                crate::value::SolixCValue::from_ref(msg_addr)
+            } else {
+                crate::value::SolixCValue::from_bool(false)
+            };
+        }
     }
 }

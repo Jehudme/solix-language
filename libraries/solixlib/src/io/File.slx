@@ -87,6 +87,24 @@ public class File {
         return File::read_all_text(file_path);
     }
 
+    public static int8[] read_all_bytes(string file_path) {
+        if (file_path == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        return File::read_all_bytes(new String(file_path));
+    }
+
+    public static int8[] read_all_bytes(String file_path) {
+        if (file_path == null || file_path.data == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        String effective_path = File::resolve_mount_path(file_path, false);
+        if (!File::exists(effective_path)) {
+            throw new FileNotFoundException(effective_path, new String("File not found"));
+        }
+        return File::native_read_all_bytes(effective_path.to_chars());
+    }
+
     public static void write_all_text(string file_path, string file_contents) {
         if (file_path == null) {
             throw new ArgumentNullException("file_path", "File path cannot be null");
@@ -254,6 +272,7 @@ public class File {
 
     private static native bool native_exists(char[] file_path);
     private static native char[] native_read_all_text(char[] file_path);
+    private static native int8[] native_read_all_bytes(char[] file_path);
     private static native bool native_write_all_text(char[] file_path, char[] file_contents);
     private static native bool native_append_all_text(char[] file_path, char[] file_contents);
     private static native bool native_delete(char[] file_path);

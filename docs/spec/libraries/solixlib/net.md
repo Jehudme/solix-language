@@ -23,15 +23,20 @@ public class TcpListener {
 
 public class TcpStream {
     public static TcpStream connect(string host_port);
-    public int32 send(char[] buffer, int32 count);
-    public int32 receive(char[] buffer, int32 count);
+    public static TcpStream connect_timeout(string host_port, int32 timeout_ms);
+    public int32 write(int8[] buffer);
+    public int8[] read(int32 max_bytes);
+    public bool set_read_timeout(int32 timeout_ms);
+    public bool set_write_timeout(int32 timeout_ms);
     public void close();
 }
 
 public class UdpSocket {
     public static UdpSocket bind(string host_port);
-    public int32 send_to(char[] buffer, int32 count, string target_host_port);
-    public int32 receive_from(char[] buffer, int32 count);
+    public int32 send_to(int8[] buffer, string target_address);
+    public int8[] recv_from(int32 max_bytes);
+    public bool set_read_timeout(int32 timeout_ms);
+    public bool set_write_timeout(int32 timeout_ms);
     public void close();
 }
 

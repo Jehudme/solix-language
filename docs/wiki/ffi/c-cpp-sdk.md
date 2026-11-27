@@ -81,9 +81,16 @@ endif()
 | `SOLIX_TAG_REF` | `5u` | Heap reference (`string`, `class`, array) |
 | `SOLIX_TAG_FNPTR` | `6u` | Function pointer identifier |
 | `SOLIX_ARRAY_TAG_I8` | `1u` | Element tag for `int8[]` |
+| `SOLIX_ARRAY_TAG_I16` | `2u` | Element tag for `int16[]` |
+| `SOLIX_ARRAY_TAG_I32` | `3u` | Element tag for `int32[]` |
 | `SOLIX_ARRAY_TAG_I64` | `4u` | Element tag for `int64[]` |
+| `SOLIX_ARRAY_TAG_U8` | `5u` | Element tag for `uint8[]` |
+| `SOLIX_ARRAY_TAG_U16` | `6u` | Element tag for `uint16[]` |
+| `SOLIX_ARRAY_TAG_U32` | `7u` | Element tag for `uint32[]` |
+| `SOLIX_ARRAY_TAG_U64` | `8u` | Element tag for `uint64[]` |
 | `SOLIX_ARRAY_TAG_F32` | `9u` | Element tag for `float32[]` |
 | `SOLIX_ARRAY_TAG_F64` | `10u` | Element tag for `float64[]` |
+| `SOLIX_ARRAY_TAG_BOOL` | `11u` | Element tag for `bool[]` |
 | `SOLIX_ARRAY_TAG_CHAR` | `12u` | Element tag for `char[]` |
 | `SOLIX_ARRAY_TAG_REF` | `13u` | Element tag for `string[]` and object reference arrays |
 
@@ -93,9 +100,9 @@ endif()
 | :--- | :--- | :--- |
 | `SolixCValue` | `{ uint32_t tag; uint32_t flags; uint64_t payload; }` | 16-byte C-ABI value container |
 | `SolixNativeFunctionPtr` | `SolixCValue (*)(void* vm_context, const SolixCValue* args, uint32_t arg_count, SolixCValue* out_error)` | Canonical native function pointer signature |
-| `SolixRegisterCallback` | `void (*)(const char* symbol_name, SolixNativeFunctionPtr fn_ptr)` | VM registration callback passed into `solix_register_natives` |
+| `SolixRegisterCallback` | `void (*)(void* collector_context, const char* symbol_name, SolixNativeFunctionPtr fn_ptr)` | VM registration callback passed into `solix_register_natives` |
 | `SolixNativeEntry` | `{ const char* symbol_name; SolixNativeFunctionPtr fn_ptr; }` | Symbol-to-function descriptor used by `SOLIX_REGISTER_MODULE` |
-| `SolixVmContext` | `{ magic, vm_ptr, get_field_i32, set_field_i32, read_bytes, alloc_string, alloc_chars, alloc_byte_array, alloc_array, array_len, array_get_u64, array_set_u64, alloc_object, read_field_u64, write_field_u64, get_class_vtable_id, get_vm_metric, collect_cycles, set_cycle_threshold }` | Live VM callback vtable supplied by `vm_context` |
+| `SolixVmContext` | `{ magic, vm_ptr, get_field_i32, set_field_i32, read_bytes, alloc_string, alloc_chars, alloc_byte_array, alloc_array, array_len, array_get_u64, array_set_u64, alloc_object, read_field_u64, write_field_u64, get_class_vtable_id, get_vm_metric, collect_cycles, set_cycle_threshold, get_field_i32_by_index, set_field_i32_by_index, get_field_i32_by_offset, set_field_i32_by_offset, read_field_u64_by_index, write_field_u64_by_index, read_field_u64_by_offset, write_field_u64_by_offset }` | Live VM callback vtable supplied by `vm_context` |
 
 ---
 
@@ -130,11 +137,11 @@ Always extract and validate `const SolixVmContext*` with `solix_vm_context_from_
 | Helper Function | Parameters | Return Value | Behavior |
 | :--- | :--- | :--- | :--- |
 | `solix_vm_context_from_ptr` | `(void* raw_context)` | `const SolixVmContext*` | Returns `NULL` if pointer is `NULL`, `magic != SOLIX_VM_CONTEXT_MAGIC`, or `vm_ptr == NULL` |
-| `solix_vm_read_bytes` | `(const SolixVmContext* ctx, uint32_t heap_addr, uint8_t* dest, uint32_t max_len)` | `uint32_t` | Copies UTF-8/byte payload from `heap_addr`; returns total byte length |
-| `solix_vm_read_string_alloc` | `(const SolixVmContext* ctx, uint32_t heap_addr, uint32_t* out_len)` | `char*` | Heap-allocates a NUL-terminated C string via `malloc` (**caller must `free()`**) |
+| `solix_vm_read_bytes` | `(const SolixVmContext* ctx, uint32_t heap_addr, uint8_t* dest, uint32_t max_len)` | `uint32_t` | Copies UTF-8/byte payload from `heap_addr` (transcoding Unicode `char[]` elements to UTF-8); returns full byte length |
+| `solix_vm_read_string_alloc` | `(const SolixVmContext* ctx, uint32_t heap_addr, size_t* out_len)` | `char*` | Heap-allocates a NUL-terminated C string via `malloc` (**caller must `free()`**) |
 | `solix_vm_alloc_string` | `(const SolixVmContext* ctx, const char* c_str)` | `uint32_t` | Allocates a VM guest `string` from NUL-terminated UTF-8 |
 | `solix_vm_alloc_string_len` | `(const SolixVmContext* ctx, const char* utf8, uint32_t byte_len)` | `uint32_t` | Allocates a VM guest `string` with explicit length |
-| `solix_vm_alloc_chars` | `(const SolixVmContext* ctx, const char* utf8, uint32_t byte_len)` | `uint32_t` | Allocates a mutable guest `char[]` array |
+| `solix_vm_alloc_chars` | `(const SolixVmContext* ctx, const char* utf8, uint32_t byte_len)` | `uint32_t` | Allocates a mutable guest `char[]` array decoded as Unicode scalar code points from UTF-8 |
 | `solix_vm_alloc_byte_array` | `(const SolixVmContext* ctx, const uint8_t* raw_bytes, uint32_t byte_len)` | `uint32_t` | Allocates a guest `int8[]` array |
 | `solix_vm_alloc_array` | `(const SolixVmContext* ctx, uint32_t element_count, uint8_t type_tag)` | `uint32_t` | Allocates an `ArrayRef` with element tag `SOLIX_ARRAY_TAG_*` |
 | `solix_vm_array_len` | `(const SolixVmContext* ctx, uint32_t array_addr)` | `uint32_t` | Returns array element length (or string byte length) |
@@ -142,10 +149,18 @@ Always extract and validate `const SolixVmContext*` with `solix_vm_context_from_
 | `solix_vm_array_set_u64` | `(const SolixVmContext* ctx, uint32_t array_addr, uint32_t index, uint64_t raw_value)` | `void` | Writes raw 64-bit value into element `index` |
 | `solix_vm_get_class_vtable_id` | `(const SolixVmContext* ctx, const char* class_name)` | `uint32_t` | Looks up class VTable ID by qualified or simple name (`0` if not found) |
 | `solix_vm_alloc_object` | `(const SolixVmContext* ctx, uint32_t vtable_id, uint32_t field_count)` | `uint32_t` | Allocates an instance of the target class on the ARC heap |
-| `solix_vm_get_field_i32` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_index)` | `int32_t` | Reads a 32-bit integer field slot |
-| `solix_vm_set_field_i32` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_index, int32_t value)` | `void` | Writes a 32-bit integer field slot |
-| `solix_vm_read_field_u64` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_offset)` | `uint64_t` | Reads an arbitrary 64-bit field slot (handles sub-64-bit widths and reference tags) |
-| `solix_vm_write_field_u64` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_offset, uint64_t raw_value)` | `void` | Writes an arbitrary 64-bit field slot |
+| `solix_vm_get_field_i32` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t offset)` | `int32_t` | Legacy heuristic 32-bit field read (prefer explicit `*_by_index` / `*_by_offset`) |
+| `solix_vm_set_field_i32` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t offset, int32_t value)` | `void` | Legacy heuristic 32-bit field write (prefer explicit `*_by_index` / `*_by_offset`) |
+| `solix_vm_read_field_u64` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t offset)` | `uint64_t` | Legacy heuristic 64-bit field read (prefer explicit `*_by_index` / `*_by_offset`) |
+| `solix_vm_write_field_u64` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t offset, uint64_t raw_value)` | `void` | Legacy heuristic 64-bit field write (prefer explicit `*_by_index` / `*_by_offset`) |
+| `solix_vm_get_field_i32_by_index` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_index)` | `int32_t` | Reads a 32-bit integer field using explicit 0-based `field_index` |
+| `solix_vm_set_field_i32_by_index` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_index, int32_t value)` | `void` | Writes a 32-bit integer field using explicit 0-based `field_index` |
+| `solix_vm_get_field_i32_by_offset` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t byte_offset)` | `int32_t` | Reads a 32-bit integer field using explicit payload `byte_offset` |
+| `solix_vm_set_field_i32_by_offset` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t byte_offset, int32_t value)` | `void` | Writes a 32-bit integer field using explicit payload `byte_offset` |
+| `solix_vm_read_field_u64_by_index` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_index)` | `uint64_t` | Reads a field using explicit 0-based `field_index` (handles sub-64-bit widths and reference tags) |
+| `solix_vm_write_field_u64_by_index` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t field_index, uint64_t raw_value)` | `void` | Writes a field using explicit 0-based `field_index` |
+| `solix_vm_read_field_u64_by_offset` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t byte_offset)` | `uint64_t` | Reads a field using explicit payload `byte_offset` (handles sub-64-bit widths and reference tags) |
+| `solix_vm_write_field_u64_by_offset` | `(const SolixVmContext* ctx, uint32_t obj_addr, uint32_t byte_offset, uint64_t raw_value)` | `void` | Writes a field using explicit payload `byte_offset` |
 | `solix_vm_get_metric` | `(const SolixVmContext* ctx, uint32_t metric_id)` | `uint64_t` | Reads a VM runtime metric (`0..=55`) |
 | `solix_vm_collect_cycles` | `(const SolixVmContext* ctx)` | `uint64_t` | Runs the Bacon & Rajan cycle collector and returns reclaimed object count |
 | `solix_vm_set_cycle_threshold` | `(const SolixVmContext* ctx, uint32_t threshold)` | `void` | Adjusts the cycle collector candidate threshold |

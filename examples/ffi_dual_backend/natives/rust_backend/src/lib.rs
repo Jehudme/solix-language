@@ -54,7 +54,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_echo_null(
+    pub unsafe extern "C-unwind" fn native_echo_null(
         _vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -68,7 +68,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_invert_bool(
+    pub unsafe extern "C-unwind" fn native_invert_bool(
         _vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -81,7 +81,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_add_i32(
+    pub unsafe extern "C-unwind" fn native_add_i32(
         _vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -90,14 +90,13 @@ mod solix_bridge {
         if argc < 2 || args.is_null() {
             return SolixCValue::from_i32(0);
         }
-        SolixCValue::from_i32(matrix_add_i32(
-            unsafe { (*args.add(0)).as_i32() },
-            unsafe { (*args.add(1)).as_i32() },
-        ))
+        SolixCValue::from_i32(matrix_add_i32(unsafe { (*args.add(0)).as_i32() }, unsafe {
+            (*args.add(1)).as_i32()
+        }))
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_mul_i64(
+    pub unsafe extern "C-unwind" fn native_mul_i64(
         _vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -106,14 +105,13 @@ mod solix_bridge {
         if argc < 2 || args.is_null() {
             return SolixCValue::from_i64(0);
         }
-        SolixCValue::from_i64(matrix_mul_i64(
-            unsafe { (*args.add(0)).as_i64() },
-            unsafe { (*args.add(1)).as_i64() },
-        ))
+        SolixCValue::from_i64(matrix_mul_i64(unsafe { (*args.add(0)).as_i64() }, unsafe {
+            (*args.add(1)).as_i64()
+        }))
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_fma_f64(
+    pub unsafe extern "C-unwind" fn native_fma_f64(
         _vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -130,7 +128,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_reverse_string(
+    pub unsafe extern "C-unwind" fn native_reverse_string(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -149,7 +147,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_upper_chars(
+    pub unsafe extern "C-unwind" fn native_upper_chars(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -173,7 +171,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_xor_bytes(
+    pub unsafe extern "C-unwind" fn native_xor_bytes(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -197,7 +195,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_scale_i64_array(
+    pub unsafe extern "C-unwind" fn native_scale_i64_array(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -221,7 +219,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_sum_f64_array(
+    pub unsafe extern "C-unwind" fn native_sum_f64_array(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -244,7 +242,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_make_pair_strings(
+    pub unsafe extern "C-unwind" fn native_make_pair_strings(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -269,7 +267,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_create_box(
+    pub unsafe extern "C-unwind" fn native_create_box(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -290,15 +288,15 @@ mod solix_bridge {
         }
         let box_addr = unsafe { ctx.alloc_object(vtable_id, 3) };
         unsafe {
-            ctx.set_field_i32(box_addr, 0, (*args.add(0)).as_i32());
-            ctx.write_field_u64(box_addr, 1, (*args.add(1)).as_i64() as u64);
-            ctx.write_field_u64(box_addr, 2, u64::from((*args.add(2)).as_ref()));
+            ctx.set_field_i32_by_index(box_addr, 0, (*args.add(0)).as_i32());
+            ctx.write_field_u64_by_index(box_addr, 1, (*args.add(1)).as_i64() as u64);
+            ctx.write_field_u64_by_index(box_addr, 2, u64::from((*args.add(2)).as_ref()));
         }
         SolixCValue::from_ref(box_addr)
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_mutate_box(
+    pub unsafe extern "C-unwind" fn native_mutate_box(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,
@@ -312,14 +310,14 @@ mod solix_bridge {
         }
         let box_addr = unsafe { (*args.add(0)).as_ref() };
         let delta = unsafe { (*args.add(1)).as_i32() };
-        let next_tag = unsafe { ctx.get_field_i32(box_addr, 0) } + delta;
-        unsafe { ctx.set_field_i32(box_addr, 0, next_tag) };
-        let weight = unsafe { ctx.read_field_u64(box_addr, 1) } as i64;
+        let next_tag = unsafe { ctx.get_field_i32_by_index(box_addr, 0) } + delta;
+        unsafe { ctx.set_field_i32_by_index(box_addr, 0, next_tag) };
+        let weight = unsafe { ctx.read_field_u64_by_index(box_addr, 1) } as i64;
         SolixCValue::from_i64(i64::from(next_tag) + weight)
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_exercise_gc_and_metrics(
+    pub unsafe extern "C-unwind" fn native_exercise_gc_and_metrics(
         vm: *mut c_void,
         _args: *const SolixCValue,
         _argc: u32,
@@ -335,7 +333,7 @@ mod solix_bridge {
     }
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn native_checked_div(
+    pub unsafe extern "C-unwind" fn native_checked_div(
         vm: *mut c_void,
         args: *const SolixCValue,
         argc: u32,

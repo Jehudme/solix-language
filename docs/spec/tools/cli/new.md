@@ -70,7 +70,7 @@ Creates a standalone and Solix-compatible native library in C (CMake C11), C++ (
 
 ### Dual-Mode CMake & Cargo Behavior
 * **C / C++ (CMake):** Generated `CMakeLists.txt` defines `option(SOLIX_NATIVE_BUILD ... OFF)`. When built directly via `cmake -B build && cmake --build build`, it produces a standalone C/C++ library with CTest unit tests (`ctest`). When built via `solix build`, Solix passes `-DSOLIX_NATIVE_BUILD=ON`, which fetches `solix::ffi` via `FetchContent` (`GIT_TAG dev` or release tag `vX.Y.Z`, or `SOLIX_FFI_SOURCE_DIR` locally) and compiles the `SHARED` Solix plugin.
-* **Rust (Cargo):** Generated `Cargo.toml` uses `crate-type = ["cdylib", "rlib"]` with an optional `solix-native = ["dep:solix-ffi"]` feature so `cargo build` / `cargo test` work standalone, while `solix build` automatically passes `--features solix-native`.
+* **Rust (Cargo):** Generated `Cargo.toml` uses `crate-type = ["cdylib", "rlib"]` with an optional `solix-native = ["dep:solix-ffi"]` feature so `cargo build` / `cargo test` work standalone, while `solix build` automatically passes `--features solix-native`. Generated native entrypoints use `extern "C-unwind"` via `solix_export!` and explicit `*_by_index` struct field accessors for layout-safe FFI interop.
 
 ---
 

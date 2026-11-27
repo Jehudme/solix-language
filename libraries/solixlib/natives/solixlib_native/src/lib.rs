@@ -2,15 +2,15 @@
 
 #![allow(clippy::missing_safety_doc)]
 
+pub mod compress_bridge;
 pub mod console_io;
 pub mod crypto;
 pub mod fs_path;
+pub mod json_bridge;
 pub mod math_time;
+pub mod net_bridge;
 pub mod string_prim;
 pub mod sys_process;
-pub mod compress_bridge;
-pub mod json_bridge;
-pub mod net_bridge;
 
 use std::ffi::{c_char, c_void};
 
@@ -100,8 +100,13 @@ impl SolixCValue {
     }
 
     #[must_use]
-    pub fn as_ref(&self) -> u32 {
+    pub const fn as_ref(&self) -> u32 {
         self.payload as u32
+    }
+
+    #[must_use]
+    pub const fn is_null(&self) -> bool {
+        self.tag == 0 || (self.tag == 5 && self.payload == 0)
     }
 }
 
@@ -133,12 +138,68 @@ pub struct SolixVmContext {
         unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32, raw_val: u64),
     pub get_class_vtable_id:
         unsafe extern "C" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,
-    pub get_vm_metric:
-        unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
-    pub collect_cycles:
-        unsafe extern "C" fn(vm_ptr: *mut c_void) -> u64,
-    pub set_cycle_threshold:
-        unsafe extern "C" fn(vm_ptr: *mut c_void, threshold: u32),
+    pub get_vm_metric: unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
+    pub collect_cycles: unsafe extern "C" fn(vm_ptr: *mut c_void) -> u64,
+    pub set_cycle_threshold: unsafe extern "C" fn(vm_ptr: *mut c_void, threshold: u32),
+    pub get_field_i32_by_index: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
+    pub set_field_i32_by_index: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+    pub get_field_i32_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
+    pub set_field_i32_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+    pub read_field_u64_by_index:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, field_index: u32) -> u64,
+    pub write_field_u64_by_index:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, field_index: u32, raw_val: u64),
+    pub read_field_u64_by_offset:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, byte_offset: u32) -> u64,
+    pub write_field_u64_by_offset:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, byte_offset: u32, raw_val: u64),
+}
+
+/// Acquires a mutex lock while recovering cleanly if a prior holder panicked.
+pub(crate) fn lock_poison_safe<GuardValue>(
+    mutex: &std::sync::Mutex<GuardValue>,
+) -> std::sync::MutexGuard<'_, GuardValue> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned_guard| poisoned_guard.into_inner())
+}
+
+/// Validates `vm_context` alignment, magic tag, and non-null `vm_ptr`.
+pub(crate) unsafe fn validate_vm_context<'ctx>(
+    vm_context: *mut c_void,
+) -> Option<&'ctx SolixVmContext> {
+    if vm_context.is_null() {
+        return None;
+    }
+    let context_ptr = vm_context as *const SolixVmContext;
+    if !context_ptr.is_aligned() {
+        return None;
+    }
+    let context_ref = unsafe { &*context_ptr };
+    if context_ref.magic == SOLIX_VM_CONTEXT_MAGIC && !context_ref.vm_ptr.is_null() {
+        Some(context_ref)
+    } else {
+        None
+    }
+}
+
+/// Signals an error back to the Solix VM via `out_error` using an immutable heap `string`.
+pub(crate) unsafe fn set_native_error(
+    vm_context: *mut c_void,
+    out_error: *mut SolixCValue,
+    message: &str,
+) {
+    if out_error.is_null() {
+        return;
+    }
+    let err_addr = unsafe { alloc_solix_string(vm_context, message) };
+    unsafe {
+        *out_error = if err_addr != 0 {
+            SolixCValue::ref_val(err_addr)
+        } else {
+            SolixCValue::bool_val(false)
+        };
+    }
 }
 
 pub type NativeCFunctionPtr = unsafe extern "C" fn(
@@ -156,17 +217,16 @@ pub type RegisterNativeCallback = unsafe extern "C" fn(
 
 /// Reads a Solix `string` or `char[]` at `address` into a Rust `String`.
 pub unsafe fn read_solix_chars(vm_context: *mut c_void, mut address: u32) -> String {
-    if address == 0 || vm_context.is_null() {
+    let Some(context_ref) = (unsafe { validate_vm_context(vm_context) }) else {
         return String::new();
-    }
-    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
-    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
+    };
+    if address == 0 {
         return String::new();
     }
     let mut length = unsafe { (context_ref.array_len)(context_ref.vm_ptr, address) };
     if length == 0 {
         let inner_data_addr =
-            unsafe { (context_ref.read_field_u64)(context_ref.vm_ptr, address, 0) as u32 };
+            unsafe { (context_ref.read_field_u64_by_index)(context_ref.vm_ptr, address, 0) as u32 };
         if inner_data_addr != 0 {
             length = unsafe { (context_ref.array_len)(context_ref.vm_ptr, inner_data_addr) };
             if length > 0 {
@@ -181,17 +241,29 @@ pub unsafe fn read_solix_chars(vm_context: *mut c_void, mut address: u32) -> Str
     let actual_read = unsafe {
         (context_ref.read_bytes)(context_ref.vm_ptr, address, buffer.as_mut_ptr(), length)
     };
-    buffer.truncate(actual_read as usize);
-    String::from_utf8(buffer).unwrap_or_default()
+    if actual_read > length {
+        buffer.resize(actual_read as usize, 0);
+        unsafe {
+            (context_ref.read_bytes)(
+                context_ref.vm_ptr,
+                address,
+                buffer.as_mut_ptr(),
+                actual_read,
+            );
+        }
+    } else {
+        buffer.truncate(actual_read as usize);
+    }
+    String::from_utf8(buffer)
+        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
 }
 
 /// Reads a Solix byte array or `char[]` at `address` into a Rust `Vec<u8>`.
 pub unsafe fn read_solix_bytes(vm_context: *mut c_void, address: u32) -> Vec<u8> {
-    if address == 0 || vm_context.is_null() {
+    let Some(context_ref) = (unsafe { validate_vm_context(vm_context) }) else {
         return Vec::new();
-    }
-    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
-    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
+    };
+    if address == 0 {
         return Vec::new();
     }
     let length = unsafe { (context_ref.array_len)(context_ref.vm_ptr, address) };
@@ -202,7 +274,19 @@ pub unsafe fn read_solix_bytes(vm_context: *mut c_void, address: u32) -> Vec<u8>
     let actual_read = unsafe {
         (context_ref.read_bytes)(context_ref.vm_ptr, address, buffer.as_mut_ptr(), length)
     };
-    buffer.truncate(actual_read as usize);
+    if actual_read > length {
+        buffer.resize(actual_read as usize, 0);
+        unsafe {
+            (context_ref.read_bytes)(
+                context_ref.vm_ptr,
+                address,
+                buffer.as_mut_ptr(),
+                actual_read,
+            );
+        }
+    } else {
+        buffer.truncate(actual_read as usize);
+    }
     buffer
 }
 
@@ -331,15 +415,21 @@ pub unsafe fn register_symbol_variants(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn solix_register_natives(
     collector_context: *mut c_void,
-    register_callback: RegisterNativeCallback,
+    register_callback: Option<RegisterNativeCallback>,
 ) {
-    console_io::register_console_io_natives(collector_context, register_callback);
-    fs_path::register_fs_path_natives(collector_context, register_callback);
-    string_prim::register_string_prim_natives(collector_context, register_callback);
-    math_time::register_math_time_natives(collector_context, register_callback);
-    sys_process::register_sys_process_natives(collector_context, register_callback);
-    crypto::register_crypto_natives(collector_context, register_callback);
-    json_bridge::register_json_natives(collector_context, register_callback);
-    compress_bridge::register_compress_natives(collector_context, register_callback);
-    net_bridge::register_net_natives(collector_context, register_callback);
+    let Some(callback) = register_callback else {
+        return;
+    };
+    if collector_context.is_null() {
+        return;
+    }
+    console_io::register_console_io_natives(collector_context, callback);
+    fs_path::register_fs_path_natives(collector_context, callback);
+    string_prim::register_string_prim_natives(collector_context, callback);
+    math_time::register_math_time_natives(collector_context, callback);
+    sys_process::register_sys_process_natives(collector_context, callback);
+    crypto::register_crypto_natives(collector_context, callback);
+    json_bridge::register_json_natives(collector_context, callback);
+    compress_bridge::register_compress_natives(collector_context, callback);
+    net_bridge::register_net_natives(collector_context, callback);
 }

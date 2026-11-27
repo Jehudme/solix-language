@@ -1079,15 +1079,17 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             raw_type = field_obj.raw_type
 
             if raw_type in ("bool", "_Bool"):
-                lines.append(f"    ctx.set_field_i32(addr, {field_idx}, if val.{field_name} {{ 1 }} else {{ 0 }});")
-            elif raw_type in ("unsigned char", "uint8", "uchar", "char", "int8", "short", "int16", "unsigned short", "uint16", "ushort", "int", "i32", "unsigned int", "uint", "u32"):
-                lines.append(f"    ctx.set_field_i32(addr, {field_idx}, val.{field_name} as i32);")
+                lines.append(f"    ctx.set_field_i32_by_index(addr, {field_idx}, if val.{field_name} {{ 1 }} else {{ 0 }});")
+            elif raw_type in ("char", "int8", "short", "int16", "int", "i32"):
+                lines.append(f"    ctx.set_field_i32_by_index(addr, {field_idx}, val.{field_name} as i32);")
+            elif raw_type in ("unsigned char", "uint8", "uchar", "unsigned short", "uint16", "ushort", "unsigned int", "uint", "u32"):
+                lines.append(f"    ctx.write_field_u64_by_index(addr, {field_idx}, val.{field_name} as u64);")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name}.to_bits() as u64);")
+                lines.append(f"    ctx.write_field_u64_by_index(addr, {field_idx}, val.{field_name}.to_bits() as u64);")
             elif raw_type in ("double", "f64"):
-                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name}.to_bits());")
+                lines.append(f"    ctx.write_field_u64_by_index(addr, {field_idx}, val.{field_name}.to_bits());")
             elif raw_type in ("long", "long long", "int64", "unsigned long", "unsigned long long", "uint64"):
-                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name} as u64);")
+                lines.append(f"    ctx.write_field_u64_by_index(addr, {field_idx}, val.{field_name} as u64);")
             elif field_obj.is_array:
                 base_elem = field_obj.array_base_type or ""
                 size_str = str(field_obj.array_size or 0)
@@ -1096,8 +1098,12 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append(f"    while str_len_{field_idx} < {size_str} && val.{field_name}[str_len_{field_idx}] != 0 {{")
                     lines.append(f"        str_len_{field_idx} += 1;")
                     lines.append("    }")
-                    lines.append(f"    let str_addr_{field_idx} = (ctx.alloc_string)(ctx.vm_ptr, val.{field_name}.as_ptr() as *const u8, str_len_{field_idx} as u32);")
-                    lines.append(f"    ctx.write_field_u64(addr, {field_idx}, str_addr_{field_idx} as u64);")
+                    lines.append(f"    let raw_slice_{field_idx} = std::slice::from_raw_parts(val.{field_name}.as_ptr().cast::<u8>(), str_len_{field_idx});")
+                    lines.append(f"    let sanitized_{field_idx} = String::from_utf8_lossy(raw_slice_{field_idx});")
+                    lines.append(f"    let str_addr_{field_idx} = ctx.alloc_string(sanitized_{field_idx}.as_ref());")
+                    lines.append(f"    if str_addr_{field_idx} != 0 {{")
+                    lines.append(f"        ctx.write_field_u64_by_index(addr, {field_idx}, str_addr_{field_idx} as u64);")
+                    lines.append("    }")
                 elif base_elem in ir.struct_map or resolve_alias_recursively(base_elem, ir.alias_map) in ir.struct_map:
                     resolved_struct = (
                         base_elem if base_elem in ir.struct_map
@@ -1105,24 +1111,28 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     )
                     nested_snake = to_snake_case(resolved_struct)
                     lines.append(f"    let arr_addr_{field_idx} = ctx.alloc_array({size_str}, 0);")
-                    lines.append(f"    for elem_idx in 0..{size_str}u32 {{")
-                    lines.append(f"        let child_addr = pack_{nested_snake}(vm_context, val.{field_name}[elem_idx as usize]);")
-                    lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, child_addr as u64);")
+                    lines.append(f"    if arr_addr_{field_idx} != 0 {{")
+                    lines.append(f"        for elem_idx in 0..{size_str}u32 {{")
+                    lines.append(f"            let child_addr = pack_{nested_snake}(vm_context, val.{field_name}[elem_idx as usize]);")
+                    lines.append(f"            ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, child_addr as u64);")
+                    lines.append("        }")
+                    lines.append(f"        ctx.write_field_u64_by_index(addr, {field_idx}, arr_addr_{field_idx} as u64);")
                     lines.append("    }")
-                    lines.append(f"    ctx.write_field_u64(addr, {field_idx}, arr_addr_{field_idx} as u64);")
                 else:
                     lines.append(f"    let arr_addr_{field_idx} = ctx.alloc_array({size_str}, 0);")
-                    lines.append(f"    for elem_idx in 0..{size_str}u32 {{")
+                    lines.append(f"    if arr_addr_{field_idx} != 0 {{")
+                    lines.append(f"        for elem_idx in 0..{size_str}u32 {{")
                     if base_elem in ("float", "f32"):
-                        lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, (val.{field_name}[elem_idx as usize] as f64).to_bits());")
+                        lines.append(f"            ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, (val.{field_name}[elem_idx as usize] as f64).to_bits());")
                     elif base_elem in ("double", "f64"):
-                        lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize].to_bits());")
+                        lines.append(f"            ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize].to_bits());")
                     else:
-                        lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize] as u64);")
+                        lines.append(f"            ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize] as u64);")
+                    lines.append("        }")
+                    lines.append(f"        ctx.write_field_u64_by_index(addr, {field_idx}, arr_addr_{field_idx} as u64);")
                     lines.append("    }")
-                    lines.append(f"    ctx.write_field_u64(addr, {field_idx}, arr_addr_{field_idx} as u64);")
             elif field_obj.is_pointer:
-                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name} as usize as u64);")
+                lines.append(f"    ctx.write_field_u64_by_index(addr, {field_idx}, val.{field_name} as usize as u64);")
             elif raw_type in ir.struct_map or resolve_alias_recursively(raw_type, ir.alias_map) in ir.struct_map:
                 resolved_struct = (
                     raw_type if raw_type in ir.struct_map
@@ -1130,9 +1140,9 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                 )
                 nested_snake = to_snake_case(resolved_struct)
                 lines.append(f"    let child_{field_idx} = pack_{nested_snake}(vm_context, val.{field_name});")
-                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, child_{field_idx} as u64);")
+                lines.append(f"    ctx.write_field_u64_by_index(addr, {field_idx}, child_{field_idx} as u64);")
             elif raw_type.endswith("*") or raw_type.startswith("void") or "*" in resolve_alias_recursively(raw_type, ir.alias_map):
-                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name} as usize as u64);")
+                lines.append(f"    ctx.write_field_u64_by_index(addr, {field_idx}, val.{field_name} as usize as u64);")
 
         lines.append("}")
         lines.append("")
@@ -1160,32 +1170,32 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             raw_type = field_obj.raw_type
 
             if raw_type in ("bool", "_Bool"):
-                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) != 0;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32_by_index(addr, {field_idx}) != 0;")
             elif raw_type in ("unsigned char", "uint8", "uchar"):
-                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as u8;")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64_by_index(addr, {field_idx}) as u8;")
             elif raw_type in ("char", "int8"):
-                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_char;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32_by_index(addr, {field_idx}) as c_char;")
             elif raw_type in ("short", "int16"):
-                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_short;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32_by_index(addr, {field_idx}) as c_short;")
             elif raw_type in ("unsigned short", "uint16", "ushort"):
-                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_ushort;")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64_by_index(addr, {field_idx}) as c_ushort;")
             elif raw_type in ("int", "i32"):
-                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_int;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32_by_index(addr, {field_idx}) as c_int;")
             elif raw_type in ("unsigned int", "uint", "u32"):
-                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_uint;")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64_by_index(addr, {field_idx}) as c_uint;")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    result.{field_name} = f32::from_bits(ctx.read_field_u64(addr, {field_idx}) as u32);")
+                lines.append(f"    result.{field_name} = f32::from_bits(ctx.read_field_u64_by_index(addr, {field_idx}) as u32);")
             elif raw_type in ("double", "f64"):
-                lines.append(f"    result.{field_name} = f64::from_bits(ctx.read_field_u64(addr, {field_idx}));")
+                lines.append(f"    result.{field_name} = f64::from_bits(ctx.read_field_u64_by_index(addr, {field_idx}));")
             elif raw_type in ("long", "long long", "int64"):
-                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as c_longlong;")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64_by_index(addr, {field_idx}) as c_longlong;")
             elif raw_type in ("unsigned long", "unsigned long long", "uint64"):
-                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as c_ulonglong;")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64_by_index(addr, {field_idx}) as c_ulonglong;")
             elif field_obj.is_array:
                 base_elem = field_obj.array_base_type or ""
                 size_str = str(field_obj.array_size or 0)
                 if base_elem in ("char", "const char"):
-                    lines.append(f"    let str_addr_{field_idx} = ctx.read_field_u64(addr, {field_idx}) as u32;")
+                    lines.append(f"    let str_addr_{field_idx} = ctx.read_field_u64_by_index(addr, {field_idx}) as u32;")
                     lines.append(f"    if str_addr_{field_idx} > 0 && {size_str} > 0 {{")
                     lines.append(f"        let max_copy = ({size_str}usize).saturating_sub(1);")
                     lines.append(f"        let out_slice = std::slice::from_raw_parts_mut(result.{field_name}.as_mut_ptr().cast::<u8>(), max_copy);")
@@ -1198,7 +1208,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                         else resolve_alias_recursively(base_elem, ir.alias_map)
                     )
                     nested_snake = to_snake_case(resolved_struct)
-                    lines.append(f"    let arr_addr_{field_idx} = ctx.read_field_u64(addr, {field_idx}) as u32;")
+                    lines.append(f"    let arr_addr_{field_idx} = ctx.read_field_u64_by_index(addr, {field_idx}) as u32;")
                     lines.append(f"    if arr_addr_{field_idx} > 0 {{")
                     lines.append(f"        let arr_len = ctx.array_len(arr_addr_{field_idx}).min({size_str});")
                     lines.append("        for elem_idx in 0..arr_len {")
@@ -1207,7 +1217,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append("        }")
                     lines.append("    }")
                 else:
-                    lines.append(f"    let arr_addr_{field_idx} = ctx.read_field_u64(addr, {field_idx}) as u32;")
+                    lines.append(f"    let arr_addr_{field_idx} = ctx.read_field_u64_by_index(addr, {field_idx}) as u32;")
                     lines.append(f"    if arr_addr_{field_idx} > 0 {{")
                     lines.append(f"        let arr_len = ctx.array_len(arr_addr_{field_idx}).min({size_str});")
                     lines.append("        for elem_idx in 0..arr_len {")
@@ -1222,16 +1232,16 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append("        }")
                     lines.append("    }")
             elif field_obj.is_pointer:
-                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as usize as {field_obj.rust_type};")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64_by_index(addr, {field_idx}) as usize as {field_obj.rust_type};")
             elif raw_type in ir.struct_map or resolve_alias_recursively(raw_type, ir.alias_map) in ir.struct_map:
                 resolved_struct = (
                     raw_type if raw_type in ir.struct_map
                     else resolve_alias_recursively(raw_type, ir.alias_map)
                 )
                 nested_snake = to_snake_case(resolved_struct)
-                lines.append(f"    result.{field_name} = unpack_{nested_snake}(vm_context, ctx.read_field_u64(addr, {field_idx}) as u32);")
+                lines.append(f"    result.{field_name} = unpack_{nested_snake}(vm_context, ctx.read_field_u64_by_index(addr, {field_idx}) as u32);")
             elif raw_type.endswith("*") or raw_type.startswith("void") or "*" in resolve_alias_recursively(raw_type, ir.alias_map):
-                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as usize as {field_obj.rust_type};")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64_by_index(addr, {field_idx}) as usize as {field_obj.rust_type};")
 
         lines.append("    result")
         lines.append("}")
@@ -1275,7 +1285,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
         raw_ret = func_obj.return_type
 
         lines.append("#[unsafe(no_mangle)]")
-        lines.append(f"pub unsafe extern \"C\" fn {wrapper_name}(")
+        lines.append(f"pub unsafe extern \"C-unwind\" fn {wrapper_name}(")
         lines.append("    vm_context: *mut c_void,")
         lines.append("    args: *const SolixCValue,")
         lines.append("    arg_count: u32,")
@@ -1287,6 +1297,17 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
         post_call_lines: list[str] = []
 
         non_variadic_params = [param for param in func_obj.params if not param.is_variadic]
+        if non_variadic_params:
+            lines.append(
+                f"    if args.is_null() || (arg_count as usize) < {len(non_variadic_params)} {{"
+            )
+            lines.append("        if let Some(ctx) = SolixVmContext::validate(vm_context) {")
+            lines.append(
+                f'            ctx.set_error(out_error, "{func_obj.name} expected {len(non_variadic_params)} arguments");'
+            )
+            lines.append("        }")
+            lines.append("        return SolixCValue::null();")
+            lines.append("    }")
 
         for param_idx, param in enumerate(non_variadic_params):
             arg_expr = f"(*args.add({param_idx}))"
@@ -1453,8 +1474,9 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             lines.append("    if call_result.is_null() { return SolixCValue::null(); }")
             lines.append("    let Some(ctx) = SolixVmContext::validate(vm_context) else { return SolixCValue::null(); };")
             lines.append("    let c_str = CStr::from_ptr(call_result);")
-            lines.append("    let bytes = c_str.to_bytes();")
-            lines.append("    let addr = (ctx.alloc_string)(ctx.vm_ptr, bytes.as_ptr(), bytes.len() as u32);")
+            lines.append("    let sanitized_str = c_str.to_string_lossy();")
+            lines.append("    let addr = ctx.alloc_string(sanitized_str.as_ref());")
+            lines.append("    if addr == 0 { return SolixCValue::null(); }")
             lines.append("    SolixCValue::from_ref(addr)")
         elif ret_ptr_depth == 0 and (base_ret in ir.struct_map or resolved_ret in ir.struct_map):
             concrete_st = base_ret if base_ret in ir.struct_map else resolved_ret

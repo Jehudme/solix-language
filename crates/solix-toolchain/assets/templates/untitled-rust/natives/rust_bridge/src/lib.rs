@@ -8,7 +8,7 @@ pub struct SolixCValue {
     pub payload: u64,
 }
 
-pub type NativeCFunctionPtr = unsafe extern "C" fn(
+pub type NativeCFunctionPtr = unsafe extern "C-unwind" fn(
     *mut std::ffi::c_void,
     *const SolixCValue,
     u32,
@@ -22,7 +22,7 @@ pub type RegisterNativeCallback = unsafe extern "C" fn(
 );
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn MathBridge_fast_add(
+pub unsafe extern "C-unwind" fn MathBridge_fast_add(
     _vm_context: *mut std::ffi::c_void,
     args: *const SolixCValue,
     arg_count: u32,

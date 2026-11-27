@@ -387,13 +387,10 @@ pub unsafe extern "C" fn filestream_native_open(
     let file_result = open_options.open(&path_str);
     match file_result {
         Ok(file_handle) => {
-            let mut next_handle_guard = NEXT_STREAM_HANDLE.lock().unwrap();
+            let mut next_handle_guard = crate::lock_poison_safe(&NEXT_STREAM_HANDLE);
             let assigned_handle = *next_handle_guard;
             *next_handle_guard += 1;
-            STREAM_TABLE
-                .lock()
-                .unwrap()
-                .insert(assigned_handle, file_handle);
+            crate::lock_poison_safe(&STREAM_TABLE).insert(assigned_handle, file_handle);
             SolixCValue::i64_val(assigned_handle)
         }
         Err(_) => SolixCValue::i64_val(-1),
@@ -408,7 +405,7 @@ pub unsafe extern "C" fn filestream_native_close(
 ) -> SolixCValue {
     if arg_count > 0 && !args.is_null() {
         let stream_handle = unsafe { (*args.add(0)).as_i64() };
-        let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+        let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
         if stream_table_guard.remove(&stream_handle).is_some() {
             return SolixCValue::i64_val(0);
         }
@@ -424,7 +421,7 @@ pub unsafe extern "C" fn filestream_native_read_byte(
 ) -> SolixCValue {
     if arg_count > 0 && !args.is_null() {
         let stream_handle = unsafe { (*args.add(0)).as_i64() };
-        let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+        let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
         if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
             let mut byte_buffer = [0u8; 1];
             if file_handle.read_exact(&mut byte_buffer).is_ok() {
@@ -444,7 +441,7 @@ pub unsafe extern "C" fn filestream_native_write_byte(
     if arg_count >= 2 && !args.is_null() {
         let stream_handle = unsafe { (*args.add(0)).as_i64() };
         let byte_value = unsafe { (*args.add(1)).as_i32() } as u8;
-        let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+        let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
         if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
             let _ = file_handle.write_all(&[byte_value]);
         }
@@ -474,7 +471,7 @@ pub unsafe extern "C" fn filestream_native_read(
 
     let mut temp_bytes = vec![0u8; count];
     let bytes_read_count = {
-        let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+        let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
         if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
             file_handle.read(&mut temp_bytes).unwrap_or(0)
         } else {
@@ -538,7 +535,7 @@ pub unsafe extern "C" fn filestream_native_write(
         }
     }
 
-    let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+    let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
     if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
         let _ = file_handle.write_all(&temp_bytes);
     }
@@ -566,7 +563,7 @@ pub unsafe extern "C" fn filestream_native_seek(
         _ => SeekFrom::Start(0),
     };
 
-    let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+    let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
     if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
         if let Ok(new_position) = file_handle.seek(seek_from) {
             return SolixCValue::i64_val(new_position as i64);
@@ -583,7 +580,7 @@ pub unsafe extern "C" fn filestream_native_tell(
 ) -> SolixCValue {
     if arg_count > 0 && !args.is_null() {
         let stream_handle = unsafe { (*args.add(0)).as_i64() };
-        let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+        let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
         if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
             if let Ok(current_pos) = file_handle.stream_position() {
                 return SolixCValue::i64_val(current_pos as i64);
@@ -601,7 +598,7 @@ pub unsafe extern "C" fn filestream_native_length(
 ) -> SolixCValue {
     if arg_count > 0 && !args.is_null() {
         let stream_handle = unsafe { (*args.add(0)).as_i64() };
-        let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+        let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
         if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
             if let Ok(metadata) = file_handle.metadata() {
                 return SolixCValue::i64_val(metadata.len() as i64);
@@ -619,7 +616,7 @@ pub unsafe extern "C" fn filestream_native_flush(
 ) -> SolixCValue {
     if arg_count > 0 && !args.is_null() {
         let stream_handle = unsafe { (*args.add(0)).as_i64() };
-        let mut stream_table_guard = STREAM_TABLE.lock().unwrap();
+        let mut stream_table_guard = crate::lock_poison_safe(&STREAM_TABLE);
         if let Some(file_handle) = stream_table_guard.get_mut(&stream_handle) {
             let _ = file_handle.flush();
         }

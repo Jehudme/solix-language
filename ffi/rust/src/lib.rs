@@ -9,8 +9,10 @@ pub mod registry;
 pub mod value;
 
 pub use context::{
-    SOLIX_ARRAY_TAG_CHAR, SOLIX_ARRAY_TAG_F32, SOLIX_ARRAY_TAG_F64, SOLIX_ARRAY_TAG_I8,
-    SOLIX_ARRAY_TAG_I64, SOLIX_ARRAY_TAG_REF, SOLIX_VM_CONTEXT_MAGIC, SolixVmContext,
+    SOLIX_ARRAY_TAG_BOOL, SOLIX_ARRAY_TAG_CHAR, SOLIX_ARRAY_TAG_F32, SOLIX_ARRAY_TAG_F64,
+    SOLIX_ARRAY_TAG_I8, SOLIX_ARRAY_TAG_I16, SOLIX_ARRAY_TAG_I32, SOLIX_ARRAY_TAG_I64,
+    SOLIX_ARRAY_TAG_REF, SOLIX_ARRAY_TAG_U8, SOLIX_ARRAY_TAG_U16, SOLIX_ARRAY_TAG_U32,
+    SOLIX_ARRAY_TAG_U64, SOLIX_VM_CONTEXT_MAGIC, SolixVmContext,
 };
-pub use registry::{NativeCFunctionPtr, NativeRegistry, RegisterNativeCallback};
+pub use registry::{NativeCFunctionPtr, NativeRegistry, RegisterNativeCallback, invoke_caught};
 pub use value::{SolixCValue, TAG_BOOL, TAG_F64, TAG_FNPTR, TAG_I32, TAG_I64, TAG_NULL, TAG_REF};

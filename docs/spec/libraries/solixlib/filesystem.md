@@ -38,10 +38,11 @@ Static file system utilities for reading, writing, and managing files. All read 
 - `static bool exists(String path)`: Checks whether the specified file exists and is a regular file. Transparently resolves `res://` paths.
 - `static bool exists(String path, bool is_resource)`: Checks existence in application resources if `is_resource` is `true`, or host filesystem otherwise.
 - `static bool resource_exists(String rel_path)`: Checks existence in bundled application resources.
-- `static String read_all_text(String path)`: Opens a text file, reads all contents into a `String`, and closes the file. Transparently resolves `res://` paths. Throws `FileNotFoundException` if the file does not exist, or `IOException` on read failure.
+- `static String read_all_text(String path)`: Opens a text file, reads all UTF-8 contents into a `String`, and closes the file. Transparently resolves `res://` paths. Throws `FileNotFoundException` if the file does not exist, or surfaces `IOException` details via native `out_error` on permission/UTF-8/read failures (instead of returning `""`).
 - `static String read_all_text(String path, bool is_resource)`: Reads from application resources if `is_resource` is `true`, or host filesystem otherwise.
+- `static int8[] read_all_bytes(String path)`: Opens a file and reads all raw bytes into an `int8[]` array. Transparently resolves `res://` paths. Throws `FileNotFoundException` if the file does not exist, or surfaces `IOException` details via native `out_error` on read failure.
 - `static String read_resource_text(String rel_path)`: Reads all text from bundled application resources.
-- `static void write_all_text(String path, String content)`: Creates a new file, writes the specified string to the file, and closes the file. Overwrites existing files. Throws `IOException` on failure.
+- `static void write_all_text(String path, String content)`: Creates a new file, writes the specified string to the file, and closes the file. Overwrites existing files. Native helper returns `bool` and `File` throws `IOException` on `false`.
 - `static void append_all_text(String path, String content)`: Opens a file, appends the specified string to the end of the file, and closes the file. Creates the file if it does not exist. Throws `IOException` on failure.
 - `static List<String> read_all_lines(String path)`: Reads all lines from the specified file and returns them as a `List<String>`. Transparently resolves `res://` paths.
 - `static List<String> read_all_lines(String path, bool is_resource)`: Reads lines from application resources if `is_resource` is `true`, or host filesystem otherwise.
@@ -73,6 +74,10 @@ Static directory utilities for directory creation, enumeration, and deletion.
 ---
 
 ## Error Handling & Exceptions
+
+Native `solixlib_native` file hooks follow two explicit error conventions:
+- **Content-returning read natives** (`read_all_text`, `read_all_bytes`): populate native `out_error` (`RuntimeError::NativeFunctionError` with `[E0330]`/`IOException` detail) so legitimate empty files (`""` / `new int8[0]`) are never conflated with I/O failures.
+- **Status-returning mutating natives** (`write_all_text`, `append_all_text`, `delete`, `copy`, `move`): return `bool`, and the Solix wrapper throws catchable `IOException` on `false`.
 
 The filesystem APIs integrate with `solix.exceptions`:
 - `FileNotFoundException`: Thrown when a file operation targets a path that does not exist.

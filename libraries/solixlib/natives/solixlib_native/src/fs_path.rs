@@ -211,7 +211,7 @@ pub unsafe extern "C" fn file_native_read_all_text(
     vm_context: *mut c_void,
     args: *const SolixCValue,
     arg_count: u32,
-    _out_error: *mut SolixCValue,
+    out_error: *mut SolixCValue,
 ) -> SolixCValue {
     if arg_count == 0 || args.is_null() {
         return SolixCValue::null();
@@ -220,9 +220,53 @@ pub unsafe extern "C" fn file_native_read_all_text(
     let raw_path = unsafe { read_solix_chars(vm_context, address) };
     let target = resolve_target_path(&raw_path);
 
-    let content = fs::read_to_string(&target).unwrap_or_default();
-    let allocated_address = unsafe { alloc_solix_chars(vm_context, &content) };
-    SolixCValue::ref_val(allocated_address)
+    match fs::read_to_string(&target) {
+        Ok(content) => {
+            let allocated_address = unsafe { alloc_solix_chars(vm_context, &content) };
+            SolixCValue::ref_val(allocated_address)
+        }
+        Err(read_error) => {
+            unsafe {
+                crate::set_native_error(
+                    vm_context,
+                    out_error,
+                    &format!("IOException: failed to read '{raw_path}': {read_error}"),
+                );
+            }
+            SolixCValue::null()
+        }
+    }
+}
+
+pub unsafe extern "C" fn file_native_read_all_bytes(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::null();
+    }
+    let address = unsafe { (*args.add(0)).as_ref() };
+    let raw_path = unsafe { read_solix_chars(vm_context, address) };
+    let target = resolve_target_path(&raw_path);
+
+    match fs::read(&target) {
+        Ok(bytes) => {
+            let allocated_address = unsafe { crate::alloc_solix_bytes(vm_context, &bytes) };
+            SolixCValue::ref_val(allocated_address)
+        }
+        Err(read_error) => {
+            unsafe {
+                crate::set_native_error(
+                    vm_context,
+                    out_error,
+                    &format!("IOException: failed to read bytes from '{raw_path}': {read_error}"),
+                );
+            }
+            SolixCValue::null()
+        }
+    }
 }
 
 pub unsafe extern "C" fn file_native_write_all_text(
@@ -445,9 +489,15 @@ pub unsafe extern "C" fn directory_native_list_entries(
             .filter_map(|entry_result| entry_result.ok())
             .filter(|entry| {
                 if mode == 1 {
-                    entry.file_type().map(|file_type| file_type.is_file()).unwrap_or(false)
+                    entry
+                        .file_type()
+                        .map(|file_type| file_type.is_file())
+                        .unwrap_or(false)
                 } else if mode == 2 {
-                    entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false)
+                    entry
+                        .file_type()
+                        .map(|file_type| file_type.is_dir())
+                        .unwrap_or(false)
                 } else {
                     true
                 }
@@ -540,7 +590,7 @@ pub unsafe extern "C" fn resource_native_read_all_text(
     vm_context: *mut c_void,
     args: *const SolixCValue,
     arg_count: u32,
-    _out_error: *mut SolixCValue,
+    out_error: *mut SolixCValue,
 ) -> SolixCValue {
     if arg_count == 0 || args.is_null() {
         return SolixCValue::null();
@@ -548,9 +598,22 @@ pub unsafe extern "C" fn resource_native_read_all_text(
     let address = unsafe { (*args.add(0)).as_ref() };
     let uri_string = unsafe { read_solix_chars(vm_context, address) };
     let target = resolve_target_path(&uri_string);
-    let content = fs::read_to_string(target).unwrap_or_default();
-    let allocated_address = unsafe { alloc_solix_chars(vm_context, &content) };
-    SolixCValue::ref_val(allocated_address)
+    match fs::read_to_string(&target) {
+        Ok(content) => {
+            let allocated_address = unsafe { alloc_solix_chars(vm_context, &content) };
+            SolixCValue::ref_val(allocated_address)
+        }
+        Err(read_error) => {
+            unsafe {
+                crate::set_native_error(
+                    vm_context,
+                    out_error,
+                    &format!("IOException: failed to read resource '{uri_string}': {read_error}"),
+                );
+            }
+            SolixCValue::null()
+        }
+    }
 }
 
 pub unsafe fn register_fs_path_natives(collector: *mut c_void, callback: RegisterNativeCallback) {
@@ -660,6 +723,15 @@ pub unsafe fn register_fs_path_natives(collector: *mut c_void, callback: Registe
                 "File::native_read_all_text",
             ],
             file_native_read_all_text,
+        ),
+        (
+            &[
+                "File_native_read_all_bytes",
+                "solix_io_filesystem_File_native_read_all_bytes",
+                "solix_io_File_native_read_all_bytes",
+                "File::native_read_all_bytes",
+            ],
+            file_native_read_all_bytes,
         ),
         (
             &[

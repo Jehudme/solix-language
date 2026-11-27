@@ -119,6 +119,58 @@ class TestRaylibBindgen(unittest.TestCase):
         self.assertNotIn('"init_window"', rust_source)
         self.assertNotIn("Raylib::check_collision_point_rec", rust_source)
 
+    def test_rust_bridge_hardened_marshalling_large_struct_utf8_and_c_unwind(self) -> None:
+        extended_schema = {
+            "defines": [],
+            "structs": [
+                {
+                    "name": "BigTextureMeta",
+                    "description": "10-field struct testing >= 8 fields, unsigned ints, and char[N]",
+                    "fields": [
+                        {"name": "f0", "type": "int"},
+                        {"name": "f1", "type": "int"},
+                        {"name": "f2", "type": "int"},
+                        {"name": "f3", "type": "int"},
+                        {"name": "f4", "type": "int"},
+                        {"name": "f5", "type": "int"},
+                        {"name": "f6", "type": "int"},
+                        {"name": "f7", "type": "int"},
+                        {"name": "flags", "type": "unsigned int"},
+                        {"name": "label", "type": "char[32]"},
+                    ],
+                }
+            ],
+            "aliases": [],
+            "enums": [],
+            "callbacks": [],
+            "functions": [
+                {
+                    "name": "GetMetaName",
+                    "description": "Returns C string",
+                    "returnType": "const char *",
+                    "params": [{"name": "meta", "type": "BigTextureMeta"}],
+                }
+            ],
+        }
+        api_ir = generate_bindings.parse_api_to_ir(extended_schema, "RLAPI")
+        rust_source = generate_bindings.emit_rust_bridge(api_ir, "raylib", "Raylib")
+
+        # C-unwind ABI, null/arity guards, explicit by_index field accessors, unsigned 64-bit writeback
+        self.assertIn('pub unsafe extern "C-unwind" fn Raylib_GetMetaName(', rust_source)
+        self.assertIn("args.is_null() || (arg_count as usize) < 1", rust_source)
+        self.assertIn("ctx.set_field_i32_by_index(addr, 0,", rust_source)
+        self.assertIn("ctx.write_field_u64_by_index(addr, 8, val.flags as u64);", rust_source)
+        self.assertIn("ctx.read_field_u64_by_index(addr, 8) as c_uint;", rust_source)
+        self.assertIn("String::from_utf8_lossy(raw_slice_9)", rust_source)
+        self.assertIn("if str_addr_9 != 0 {", rust_source)
+        self.assertIn("c_str.to_string_lossy()", rust_source)
+        self.assertIn("if addr == 0 { return SolixCValue::null(); }", rust_source)
+        # Ensure ambiguous legacy helpers are not emitted for struct marshalling
+        self.assertNotIn("ctx.set_field_i32(", rust_source)
+        self.assertNotIn("ctx.get_field_i32(", rust_source)
+        self.assertNotIn("ctx.read_field_u64(", rust_source)
+        self.assertNotIn("ctx.write_field_u64(", rust_source)
+
 
 if __name__ == "__main__":
     unittest.main()
