@@ -218,6 +218,7 @@ pub fn execute_new_package(args: NewPackageArgs) -> Result<()> {
         &safe_snake_name,
         args.lib,
         include_native,
+        parsed_deps.contains_key("solix"),
     )?;
 
     if let Some(lang) = native_lang {
@@ -504,6 +505,7 @@ fn write_project_solix_sources(
     safe_snake_name: &str,
     is_library: bool,
     include_native: bool,
+    has_solix_std: bool,
 ) -> Result<()> {
     let main_class_name = to_pascal_case(project_name);
 
@@ -551,7 +553,7 @@ public class {main_class_name}Api {{
 }}
 "#
         )
-    } else {
+    } else if has_solix_std {
         format!(
             r#"package {safe_snake_name};
 
@@ -561,6 +563,18 @@ public class Main {{
     public static int32 main() {{
         // Entry point for the '{project_name}' Solix application.
         Console::println("Hello from {project_name}!");
+        return 0;
+    }}
+}}
+"#
+        )
+    } else {
+        format!(
+            r#"package {safe_snake_name};
+
+public class Main {{
+    public static int32 main() {{
+        // Freestanding entry point for '{project_name}' (--no-std).
         return 0;
     }}
 }}
