@@ -2050,21 +2050,43 @@ fn strip_solix_dep_if_unbundled(manifest_path: &std::path::Path) {
         return;
     };
     let mut filtered_lines = Vec::new();
-    let mut skipping_deps = false;
+    let mut skipping_deps_indent: Option<usize> = None;
     for line in raw_manifest.lines() {
-        if line.trim() == "dependencies:" {
-            skipping_deps = true;
-            continue;
-        }
-        if skipping_deps {
-            if line.starts_with("      ") || line.trim().is_empty() {
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+        if let Some(base_indent) = skipping_deps_indent {
+            if trimmed.is_empty() || indent > base_indent {
                 continue;
             }
-            skipping_deps = false;
+            skipping_deps_indent = None;
+        }
+        if trimmed == "dependencies: *dependencies" {
+            continue;
+        }
+        if trimmed == "dependencies:" || trimmed.starts_with("dependencies: &") {
+            skipping_deps_indent = Some(indent);
+            continue;
         }
         filtered_lines.push(line);
     }
     let _ = std::fs::write(manifest_path, format!("{}\n", filtered_lines.join("\n")));
+
+    if let Some(pkg_root) = manifest_path.parent() {
+        let main_slx = pkg_root.join("src").join("main.slx");
+        if let Ok(main_src) = std::fs::read_to_string(&main_slx)
+            && main_src.contains("solix.io.Console")
+        {
+            let cleaned_lines: Vec<&str> = main_src
+                .lines()
+                .filter(|line| {
+                    let trimmed = line.trim();
+                    trimmed != "import solix.io.Console;"
+                        && !trimmed.starts_with("Console::println(")
+                })
+                .collect();
+            let _ = std::fs::write(&main_slx, format!("{}\n", cleaned_lines.join("\n")));
+        }
+    }
 }
 
 #[test]
