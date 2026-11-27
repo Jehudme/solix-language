@@ -1171,7 +1171,12 @@ impl<'ctx> Emitter<'ctx> {
                 }
 
                 let arity = arguments.len();
-                let ctor_sym_arity = format!("{resolved_class_name}::constructor/{arity}");
+                let ctor_sym_arity = if arguments.is_empty() {
+                    format!("{resolved_class_name}::constructor/0")
+                } else {
+                    let (_, _, compact_sigs) = self.build_signature_variants(arguments);
+                    format!("{resolved_class_name}::constructor({compact_sigs})")
+                };
                 let mut candidate_bases = vec![resolved_class_name.as_str(), simple.as_str()];
                 if !qualified_simple.is_empty() {
                     candidate_bases.push(qualified_simple.as_str());
@@ -1312,7 +1317,12 @@ impl<'ctx> Emitter<'ctx> {
                                 Some(*span),
                             );
                         } else {
-                            let mangled_sym = format!("{super_method_sym}/{total_args}");
+                            let mangled_sym = if arguments.is_empty() {
+                                format!("{super_method_sym}/{total_args}")
+                            } else {
+                                let (_, _, compact_sigs) = self.build_signature_variants(arguments);
+                                format!("{super_method_sym}({compact_sigs})")
+                            };
                             let sym_idx = self.pool.add_string(&mangled_sym)?;
                             self.emit_instruction(
                                 Instruction::format_call(
@@ -1408,7 +1418,12 @@ impl<'ctx> Emitter<'ctx> {
                             );
                         } else {
                             let arity = arguments.len();
-                            let mangled_sym = format!("{symbol_full}/{arity}");
+                            let mangled_sym = if arguments.is_empty() {
+                                format!("{symbol_full}/{arity}")
+                            } else {
+                                let (_, _, compact_sigs) = self.build_signature_variants(arguments);
+                                format!("{symbol_full}({compact_sigs})")
+                            };
                             let sym_idx = self.pool.add_string(&mangled_sym)?;
                             self.emit_instruction(
                                 Instruction::format_call(
@@ -1660,7 +1675,12 @@ impl<'ctx> Emitter<'ctx> {
                             );
                         } else {
                             let arity = arguments.len();
-                            let mangled_name = format!("{func_name}/{arity}");
+                            let mangled_name = if arguments.is_empty() {
+                                format!("{func_name}/{arity}")
+                            } else {
+                                let (_, _, compact_sigs) = self.build_signature_variants(arguments);
+                                format!("{func_name}({compact_sigs})")
+                            };
                             let sym_idx = self.pool.add_string(&mangled_name)?;
                             self.emit_instruction(
                                 Instruction::format_call(

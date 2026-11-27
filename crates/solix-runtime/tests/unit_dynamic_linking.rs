@@ -194,3 +194,54 @@ fn test_alloc_object_extern_quickens_to_alloc_object() {
     assert_eq!(alloc_inst.src1(), 0); // vtable_id = 0
     assert_eq!(alloc_inst.src2(), 16); // size = 16
 }
+
+#[test]
+fn test_resolve_function_symbol_distinguishes_external_overloads_by_arity_and_params() {
+    let mut lib_bin = BinaryProgram::new();
+    lib_bin.package_name = "gfx".to_string();
+
+    // Index 0: 0-arg constructor stored without parens (as emitted by pipeline.rs)
+    let ctor_zero = CompiledFunction::new("Vec3::constructor", 0, 1, 2);
+    // Index 1: 3-arg float64 constructor
+    let ctor_f64 = CompiledFunction::new("Vec3::constructor(float64,float64,float64)", 0, 4, 5);
+    // Index 2: 3-arg int32 constructor (registered last!)
+    let ctor_i32 = CompiledFunction::new("Vec3::constructor(int32,int32,int32)", 0, 4, 5);
+    // Index 3: 0-arg Camera constructor stored without parens
+    let cam_zero = CompiledFunction::new("Cam::constructor", 0, 1, 2);
+    // Index 4: 5-arg Camera constructor (registered last!)
+    let cam_five = CompiledFunction::new("Cam::constructor(Vec3,Vec3,Vec3,float32,int32)", 0, 6, 7);
+
+    lib_bin.functions.push(ctor_zero);
+    lib_bin.functions.push(ctor_f64);
+    lib_bin.functions.push(ctor_i32);
+    lib_bin.functions.push(cam_zero);
+    lib_bin.functions.push(cam_five);
+
+    let options = RuntimeOptions::new().with_binary(lib_bin);
+    let context = RuntimeContext::new(options).expect("Context construction failed");
+
+    assert_eq!(
+        context.resolve_function_symbol("gfx::Vec3::constructor/0"),
+        Some(0)
+    );
+    assert_eq!(
+        context.resolve_function_symbol("gfx::Vec3::constructor()"),
+        Some(0)
+    );
+    assert_eq!(
+        context.resolve_function_symbol("gfx::Vec3::constructor(float64,float64,float64)"),
+        Some(1)
+    );
+    assert_eq!(
+        context.resolve_function_symbol("gfx::Vec3::constructor(int32,int32,int32)"),
+        Some(2)
+    );
+    assert_eq!(
+        context.resolve_function_symbol("gfx::Cam::constructor/0"),
+        Some(3)
+    );
+    assert_eq!(
+        context.resolve_function_symbol("gfx::Cam::constructor(Vec3,Vec3,Vec3,float32,int32)"),
+        Some(4)
+    );
+}
