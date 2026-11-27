@@ -346,6 +346,7 @@ fn execute_declarative_build(
     active_profile_config.is_static = Some(resolved_profile.is_static);
     active_profile_config.link = Some(resolved_profile.link.clone());
     active_profile_config.verify_checksum = Some(resolved_profile.verify_checksum);
+    active_profile_config.embed_hashes = Some(resolved_profile.embed_hashes);
     active_profile_config.memory_limit_mb = resolved_profile.memory_limit_mb;
     active_profile_config.platforms = Some(resolved_profile.platforms.clone());
     active_profile_config.dynamic_libraries = resolved_profile.dynamic_libraries.clone();
