@@ -15,13 +15,13 @@ public class StrProc {
     public static void main(String[] arguments) {
         String[] words = new String[] { "alpha", "beta", "gamma" };
         int total = 0;
-        for (int iteration = 0; iteration < 100000; iteration++) {
+        for (int iteration = 0; iteration < 300000; iteration++) {
             String word = words[iteration % 3];
             total = (total + processString(word, iteration % 20)) & 0x7FFFFFFF;
         }
 
-        if (total == 3166647) {
-            System.out.println("RESULT: 3166647");
+        if (total == 9500000) {
+            System.out.println("RESULT: 9500000");
         } else {
             System.out.println("FAIL");
         }

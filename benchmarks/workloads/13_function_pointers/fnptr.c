@@ -6,14 +6,14 @@ static int fn3(int x) { return x * 5 + 4; }
 
 int main(void) {
     int total = 0;
-    for (int i = 0; i < 100000; i++) {
+    for (int i = 0; i < 400000; i++) {
         int idx = i % 3;
         int (*f)(int) = (idx == 0) ? fn1 : ((idx == 1) ? fn2 : fn3);
         total = (total + f(i % 50)) & 0x7FFFFFFF;
     }
 
-    if (total == 8266617) {
-        printf("RESULT: 8266617\n");
+    if (total == 33066617) {
+        printf("RESULT: 33066617\n");
     } else {
         printf("FAIL\n");
     }

@@ -21,13 +21,13 @@ class StrProcApp {
         words[2] = "gamma";
 
         int32 total = 0;
-        for (int32 i = 0; i < 100000; i = i + 1) {
+        for (int32 i = 0; i < 300000; i = i + 1) {
             string w = words[i % 3];
             total = (total + StrProcApp::process(w, i % 20)) & 0x7FFFFFFF;
         }
 
-        if (total == 3166647) {
-            println("RESULT: 3166647");
+        if (total == 9500000) {
+            println("RESULT: 9500000");
         } else {
             println("FAIL");
         }

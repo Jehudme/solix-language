@@ -12,16 +12,18 @@ public class MatMul {
         }
 
         int trace = 0;
-        for (int row_index = 0; row_index < matrix_dim; row_index++) {
-            int cell_value = 0;
-            for (int inner_k = 0; inner_k < matrix_dim; inner_k++) {
-                cell_value = (cell_value + matrix_a[row_index * matrix_dim + inner_k] * matrix_b[inner_k * matrix_dim + row_index]) & 0x7FFFFFFF;
+        for (int rep = 0; rep < 50; rep++) {
+            for (int row_index = 0; row_index < matrix_dim; row_index++) {
+                int cell_value = 0;
+                for (int inner_k = 0; inner_k < matrix_dim; inner_k++) {
+                    cell_value = (cell_value + matrix_a[row_index * matrix_dim + inner_k] * matrix_b[inner_k * matrix_dim + row_index]) & 0x7FFFFFFF;
+                }
+                trace = (trace + cell_value) & 0x7FFFFFFF;
             }
-            trace = (trace + cell_value) & 0x7FFFFFFF;
         }
 
-        if (trace == 9118300) {
-            System.out.println("RESULT: 9118300");
+        if (trace == 455915000) {
+            System.out.println("RESULT: 455915000");
         } else {
             System.out.println("FAIL");
         }

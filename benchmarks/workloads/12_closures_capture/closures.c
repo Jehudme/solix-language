@@ -11,12 +11,12 @@ static inline int adder(const Closure *c, int n) {
 int main(void) {
     Closure c = { 7 };
     int total = 0;
-    for (int i = 0; i < 50000; i++) {
+    for (int i = 0; i < 400000; i++) {
         total = (total + adder(&c, i % 100)) & 0x7FFFFFFF;
     }
 
-    if (total == 2825000) {
-        printf("RESULT: 2825000\n");
+    if (total == 22600000) {
+        printf("RESULT: 22600000\n");
     } else {
         printf("FAIL\n");
     }

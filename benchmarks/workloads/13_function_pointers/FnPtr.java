@@ -23,14 +23,14 @@ public class FnPtr {
         };
 
         int total = 0;
-        for (int iteration = 0; iteration < 100000; iteration++) {
+        for (int iteration = 0; iteration < 400000; iteration++) {
             int index = iteration % 3;
             IntFunction selected_fn = function_array[index];
             total = (total + selected_fn.apply(iteration % 50)) & 0x7FFFFFFF;
         }
 
-        if (total == 8266617) {
-            System.out.println("RESULT: 8266617");
+        if (total == 33066617) {
+            System.out.println("RESULT: 33066617");
         } else {
             System.out.println("FAIL");
         }

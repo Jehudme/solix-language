@@ -4,7 +4,7 @@ if __name__ == "__main__":
     vx = 0.01
     vy = 0.02
 
-    for _ in range(50000):
+    for _ in range(250000):
         dist_sq = x * x + y * y + 0.1
         force = 1.0 / dist_sq
         vx += force * 0.001
@@ -13,7 +13,7 @@ if __name__ == "__main__":
         y += vy
 
     energy = int(x * 100.0) + int(y * 100.0)
-    if energy == 358036:
-        print("RESULT: 358036")
+    if energy == 1792020:
+        print("RESULT: 1792020")
     else:
         print("FAIL")

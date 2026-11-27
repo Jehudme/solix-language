@@ -5,7 +5,7 @@ public class NBody {
         double velocity_x = 0.01;
         double velocity_y = 0.02;
 
-        for (int step = 0; step < 50000; step++) {
+        for (int step = 0; step < 250000; step++) {
             double distance_squared = position_x * position_x + position_y * position_y + 0.1;
             double force = 1.0 / distance_squared;
             velocity_x += force * 0.001;
@@ -15,8 +15,8 @@ public class NBody {
         }
 
         int energy = (int) (position_x * 100.0) + (int) (position_y * 100.0);
-        if (energy == 358036) {
-            System.out.println("RESULT: 358036");
+        if (energy == 1792020) {
+            System.out.println("RESULT: 1792020");
         } else {
             System.out.println("FAIL");
         }

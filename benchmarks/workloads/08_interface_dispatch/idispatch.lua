@@ -8,13 +8,13 @@ local WorkerB = {
 local wa = WorkerA
 local wb = WorkerB
 local total = 0
-for i = 0, 99999 do
+for i = 0, 399999 do
     local w = (i % 2 == 0) and wa or wb
     total = (total + w:work(i % 10)) % 2147483648
 end
 
-if total == 1200000 then
-    print("RESULT: 1200000")
+if total == 4800000 then
+    print("RESULT: 4800000")
 else
     print("FAIL")
 end

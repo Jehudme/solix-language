@@ -11,7 +11,7 @@ public class Exc {
         int caught_count = 0;
         int normal_sum = 0;
 
-        for (int iteration = 0; iteration < 50000; iteration++) {
+        for (int iteration = 0; iteration < 250000; iteration++) {
             try {
                 normal_sum = (normal_sum + (iteration % 10)) & 0x7FFFFFFF;
             } catch (Exception exception) {
@@ -19,7 +19,7 @@ public class Exc {
             }
         }
 
-        for (int iteration = 0; iteration < 500; iteration++) {
+        for (int iteration = 0; iteration < 2500; iteration++) {
             try {
                 throw new CustomException(iteration);
             } catch (CustomException exception) {
@@ -28,8 +28,8 @@ public class Exc {
         }
 
         int checksum = (normal_sum + caught_count) & 0x7FFFFFFF;
-        if (checksum == 349750) {
-            System.out.println("RESULT: 349750");
+        if (checksum == 4248750) {
+            System.out.println("RESULT: 4248750");
         } else {
             System.out.println("FAIL");
         }

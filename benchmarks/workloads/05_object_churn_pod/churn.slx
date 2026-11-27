@@ -13,13 +13,13 @@ class Point {
 class ChurnApp {
     public static void main() {
         int32 total = 0;
-        for (int32 i = 0; i < 50000; i = i + 1) {
+        for (int32 i = 0; i < 300000; i = i + 1) {
             Point p = new Point(i, i * 2);
             total = (total + p.x + p.y) & 0x7FFFFFFF;
         }
 
-        if (total == 1602441352) {
-            println("RESULT: 1602441352");
+        if (total == 1855563824) {
+            println("RESULT: 1855563824");
         } else {
             println("FAIL");
         }

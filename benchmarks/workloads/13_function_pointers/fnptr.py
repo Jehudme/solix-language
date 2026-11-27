@@ -9,12 +9,12 @@ def fn3(x: int) -> int:
 
 if __name__ == "__main__":
     total = 0
-    for i in range(100000):
+    for i in range(400000):
         idx = i % 3
         f = fn1 if idx == 0 else (fn2 if idx == 1 else fn3)
         total = (total + f(i % 50)) & 0x7FFFFFFF
 
-    if total == 8266617:
-        print("RESULT: 8266617")
+    if total == 33066617:
+        print("RESULT: 33066617")
     else:
         print("FAIL")
