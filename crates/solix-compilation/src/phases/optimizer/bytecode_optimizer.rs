@@ -91,24 +91,26 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         }
         if has_call_direct && has_inlinable_leaf {
             for _inline_round in 0..3 {
-                let leaf_candidates =
-                    build_leaf_inline_candidates(functions, allow_arith_inline);
+                let leaf_candidates = build_leaf_inline_candidates(functions, allow_arith_inline);
                 let round_changed = AtomicBool::new(false);
                 functions
                     .par_iter_mut()
                     .enumerate()
-                    .try_for_each(|(func_idx, compiled_function)| -> Result<(), EmissionError> {
-                        if inline_leaf_functions(compiled_function, func_idx, &leaf_candidates)? {
-                            round_changed.store(true, Ordering::Relaxed);
-                            optimize_function(
-                                compiled_function,
-                                classes,
-                                &escape_summaries,
-                                pool_ref,
-                            )?;
-                        }
-                        Ok(())
-                    })
+                    .try_for_each(
+                        |(func_idx, compiled_function)| -> Result<(), EmissionError> {
+                            if inline_leaf_functions(compiled_function, func_idx, &leaf_candidates)?
+                            {
+                                round_changed.store(true, Ordering::Relaxed);
+                                optimize_function(
+                                    compiled_function,
+                                    classes,
+                                    &escape_summaries,
+                                    pool_ref,
+                                )?;
+                            }
+                            Ok(())
+                        },
+                    )
                     .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
                 if !round_changed.load(Ordering::Relaxed) {
                     break;
@@ -119,18 +121,20 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         functions
             .par_iter_mut()
             .enumerate()
-            .try_for_each(|(func_idx, compiled_function)| -> Result<(), EmissionError> {
-                rotate_bottom_tested_loops(compiled_function)?;
-                optimize_peephole_passes(compiled_function, true, pool_ref)?;
-                hoist_loop_invariant_constants(compiled_function)?;
-                eliminate_common_subexpressions(compiled_function);
-                elide_borrowed_local_arc_ops(compiled_function);
-                optimize_peephole_passes(compiled_function, true, pool_ref)?;
-                fuse_post_licm_add_load_band(compiled_function);
-                propagate_entry_constants(compiled_function, true);
-                transform_binary_additive_self_recursion(compiled_function, func_idx);
-                Ok(())
-            })
+            .try_for_each(
+                |(func_idx, compiled_function)| -> Result<(), EmissionError> {
+                    rotate_bottom_tested_loops(compiled_function)?;
+                    optimize_peephole_passes(compiled_function, true, pool_ref)?;
+                    hoist_loop_invariant_constants(compiled_function)?;
+                    eliminate_common_subexpressions(compiled_function);
+                    elide_borrowed_local_arc_ops(compiled_function);
+                    optimize_peephole_passes(compiled_function, true, pool_ref)?;
+                    fuse_post_licm_add_load_band(compiled_function);
+                    propagate_entry_constants(compiled_function, true);
+                    transform_binary_additive_self_recursion(compiled_function, func_idx);
+                    Ok(())
+                },
+            )
             .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
 
         let func_has_refs: Vec<bool> = functions
@@ -2149,10 +2153,7 @@ fn inline_leaf_functions(
             return false;
         }
         let target_idx = inst.call_target() as usize;
-        target_idx != caller_index
-            && leaf_candidates
-                .get(target_idx)
-                .is_some_and(Option::is_some)
+        target_idx != caller_index && leaf_candidates.get(target_idx).is_some_and(Option::is_some)
     });
     if !has_candidate {
         return Ok(false);
@@ -2188,7 +2189,9 @@ fn inline_leaf_functions(
             let arg_count = inst.arg_count() as u16;
             let call_dst = inst.call_dst();
             let leaf_candidate = if target_idx != caller_index {
-                leaf_candidates.get(target_idx).and_then(|entry| entry.as_ref())
+                leaf_candidates
+                    .get(target_idx)
+                    .and_then(|entry| entry.as_ref())
             } else {
                 None
             };
