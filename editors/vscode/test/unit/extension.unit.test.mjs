@@ -520,3 +520,78 @@ profiles:
     assert.ok(snippets['Import Declaration'].prefix === 'import');
     assert.ok(snippets['Switch Statement'].prefix === 'switch');
 });
+
+test('Shell-aware terminal command formatting supports PowerShell, cmd.exe, and POSIX shells', async () => {
+    const { vscodeMock, languageClientMock } = createVscodeMock(rootDir);
+    const origLoad = Module._load;
+    Module._load = function patchedLoad(request, parent, isMain) {
+        if (request === 'vscode') {
+            return vscodeMock;
+        }
+        if (request === 'vscode-languageclient/node') {
+            return languageClientMock;
+        }
+        return origLoad.call(this, request, parent, isMain);
+    };
+
+    try {
+        const commandsModule = await import(`file://${path.join(unitBuildDir, 'commands.js')}?t=${Date.now()}`);
+
+        assert.strictEqual(
+            commandsModule.detectTerminalShellKind('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'win32'),
+            'powershell'
+        );
+        assert.strictEqual(
+            commandsModule.detectTerminalShellKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'),
+            'powershell'
+        );
+        assert.strictEqual(
+            commandsModule.detectTerminalShellKind('C:\\Windows\\System32\\cmd.exe', 'win32'),
+            'cmd'
+        );
+        assert.strictEqual(
+            commandsModule.detectTerminalShellKind('/bin/bash', 'linux'),
+            'posix'
+        );
+        assert.strictEqual(
+            commandsModule.detectTerminalShellKind('', 'win32'),
+            'powershell'
+        );
+
+        const psCmd = commandsModule.formatShellChainedCommands(
+            [
+                { executable: 'C:\\solix\\solix.exe', args: 'build --profile debug' },
+                { executable: 'C:\\solix\\solix.exe', args: 'run --profile debug "C:\\proj\\app.slxp"' },
+            ],
+            'powershell',
+            'C:\\proj'
+        );
+        assert.strictEqual(
+            psCmd,
+            'Set-Location -LiteralPath "C:\\proj"; if ($?) { & "C:\\solix\\solix.exe" build --profile debug }; if ($?) { & "C:\\solix\\solix.exe" run --profile debug "C:\\proj\\app.slxp" }'
+        );
+        assert.ok(!psCmd.includes('&&'), 'PowerShell 5.1 command must not contain &&');
+
+        const cmdLine = commandsModule.formatShellChainedCommands(
+            [{ executable: 'C:\\solix\\solix.exe', args: 'build --profile release' }],
+            'cmd',
+            'D:\\proj'
+        );
+        assert.strictEqual(
+            cmdLine,
+            'cd /d "D:\\proj" && "C:\\solix\\solix.exe" build --profile release'
+        );
+
+        const posixCmd = commandsModule.formatShellChainedCommands(
+            [{ executable: '/usr/local/bin/solix', args: 'build --profile debug' }],
+            'posix',
+            '/home/user/proj'
+        );
+        assert.strictEqual(
+            posixCmd,
+            'cd "/home/user/proj" && "/usr/local/bin/solix" build --profile debug'
+        );
+    } finally {
+        Module._load = origLoad;
+    }
+});

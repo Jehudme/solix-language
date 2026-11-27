@@ -20,6 +20,61 @@ const execFileAsync = util.promisify(childProcess.execFile);
 let activeBuildProfile = 'debug';
 let profileStatusBarItem: vscode.StatusBarItem | undefined;
 
+export type TerminalShellKind = 'powershell' | 'cmd' | 'posix';
+
+export function detectTerminalShellKind(
+    shellPath: string | undefined = vscode.env?.shell,
+    platform: NodeJS.Platform = process.platform
+): TerminalShellKind {
+    const normalized = (shellPath ?? '').trim().toLowerCase();
+    if (normalized) {
+        if (normalized.includes('powershell') || normalized.includes('pwsh')) {
+            return 'powershell';
+        }
+        if (
+            normalized.endsWith('cmd.exe') ||
+            normalized.endsWith('\\cmd') ||
+            normalized.endsWith('/cmd') ||
+            normalized === 'cmd'
+        ) {
+            return 'cmd';
+        }
+        return 'posix';
+    }
+    return platform === 'win32' ? 'powershell' : 'posix';
+}
+
+export function formatShellChainedCommands(
+    commands: Array<{ executable: string; args: string }>,
+    shellKind: TerminalShellKind,
+    projectRoot?: string
+): string {
+    if (shellKind === 'powershell') {
+        const segments: string[] = [];
+        if (projectRoot) {
+            segments.push(`Set-Location -LiteralPath "${projectRoot}"`);
+        }
+        for (const cmd of commands) {
+            const invocation = `& "${cmd.executable}" ${cmd.args}`.trim();
+            if (segments.length === 0) {
+                segments.push(invocation);
+            } else {
+                segments.push(`if ($?) { ${invocation} }`);
+            }
+        }
+        return segments.join('; ');
+    }
+
+    const segments: string[] = [];
+    if (projectRoot) {
+        segments.push(shellKind === 'cmd' ? `cd /d "${projectRoot}"` : `cd "${projectRoot}"`);
+    }
+    for (const cmd of commands) {
+        segments.push(`"${cmd.executable}" ${cmd.args}`.trim());
+    }
+    return segments.join(' && ');
+}
+
 export function getActiveBuildProfile(): string {
     return activeBuildProfile;
 }
@@ -331,6 +386,7 @@ export function registerSolixCommands(
             const terminal = getOrCreateTerminal('Solix Run');
             terminal.show();
 
+            const shellKind = detectTerminalShellKind();
             if (targetUri && targetUri.fsPath) {
                 const targetFilePath = targetUri.fsPath;
                 const projectRoot = findProjectRoot(targetFilePath);
@@ -339,14 +395,27 @@ export function registerSolixCommands(
                     const artifactPath = resolveArtifactPath(projectRoot, activeBuildProfile, packageName);
                     const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
                     const runArgs = buildProfileCommandArgs('run', activeBuildProfile, `"${artifactPath}"`).join(' ');
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs} && "${solixBinaryPath}" ${runArgs}`);
+                    terminal.sendText(
+                        formatShellChainedCommands(
+                            [
+                                { executable: solixBinaryPath, args: buildArgs },
+                                { executable: solixBinaryPath, args: runArgs },
+                            ],
+                            shellKind,
+                            projectRoot
+                        )
+                    );
                 } else {
                     const runArgs = buildProfileCommandArgs('run', activeBuildProfile, `"${targetFilePath}"`).join(' ');
-                    terminal.sendText(`"${solixBinaryPath}" ${runArgs}`);
+                    terminal.sendText(
+                        formatShellChainedCommands([{ executable: solixBinaryPath, args: runArgs }], shellKind)
+                    );
                 }
             } else {
                 const runArgs = buildProfileCommandArgs('run', activeBuildProfile).join(' ');
-                terminal.sendText(`"${solixBinaryPath}" ${runArgs}`);
+                terminal.sendText(
+                    formatShellChainedCommands([{ executable: solixBinaryPath, args: runArgs }], shellKind)
+                );
             }
         })
     );
@@ -377,6 +446,7 @@ export function registerSolixCommands(
             const terminal = getOrCreateTerminal('Solix Test');
             terminal.show();
 
+            const shellKind = detectTerminalShellKind();
             if (targetUri && targetUri.fsPath) {
                 const targetFilePath = targetUri.fsPath;
                 const projectRoot = findProjectRoot(targetFilePath);
@@ -385,14 +455,27 @@ export function registerSolixCommands(
                     const artifactPath = resolveArtifactPath(projectRoot, activeBuildProfile, packageName);
                     const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
                     const testArgs = buildProfileCommandArgs('test', activeBuildProfile, `"${artifactPath}"`).join(' ');
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs} && "${solixBinaryPath}" ${testArgs}`);
+                    terminal.sendText(
+                        formatShellChainedCommands(
+                            [
+                                { executable: solixBinaryPath, args: buildArgs },
+                                { executable: solixBinaryPath, args: testArgs },
+                            ],
+                            shellKind,
+                            projectRoot
+                        )
+                    );
                 } else {
                     const testArgs = buildProfileCommandArgs('test', activeBuildProfile, `"${targetFilePath}"`).join(' ');
-                    terminal.sendText(`"${solixBinaryPath}" ${testArgs}`);
+                    terminal.sendText(
+                        formatShellChainedCommands([{ executable: solixBinaryPath, args: testArgs }], shellKind)
+                    );
                 }
             } else {
                 const testArgs = buildProfileCommandArgs('test', activeBuildProfile).join(' ');
-                terminal.sendText(`"${solixBinaryPath}" ${testArgs}`);
+                terminal.sendText(
+                    formatShellChainedCommands([{ executable: solixBinaryPath, args: testArgs }], shellKind)
+                );
             }
         })
     );
@@ -422,16 +505,25 @@ export function registerSolixCommands(
             const terminal = getOrCreateTerminal('Solix Build');
             terminal.show();
 
+            const shellKind = detectTerminalShellKind();
             const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
             const activeUri = vscode.window.activeTextEditor?.document.uri;
             if (activeUri && activeUri.fsPath) {
                 const projectRoot = findProjectRoot(activeUri.fsPath);
                 if (projectRoot) {
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs}`);
+                    terminal.sendText(
+                        formatShellChainedCommands(
+                            [{ executable: solixBinaryPath, args: buildArgs }],
+                            shellKind,
+                            projectRoot
+                        )
+                    );
                     return;
                 }
             }
-            terminal.sendText(`"${solixBinaryPath}" ${buildArgs}`);
+            terminal.sendText(
+                formatShellChainedCommands([{ executable: solixBinaryPath, args: buildArgs }], shellKind)
+            );
         })
     );
 
@@ -442,16 +534,25 @@ export function registerSolixCommands(
             const terminal = getOrCreateTerminal('Solix Sync');
             terminal.show();
 
+            const shellKind = detectTerminalShellKind();
             const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
             const activeUri = vscode.window.activeTextEditor?.document.uri;
             if (activeUri && activeUri.fsPath) {
                 const projectRoot = findProjectRoot(activeUri.fsPath);
                 if (projectRoot) {
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs}`);
+                    terminal.sendText(
+                        formatShellChainedCommands(
+                            [{ executable: solixBinaryPath, args: buildArgs }],
+                            shellKind,
+                            projectRoot
+                        )
+                    );
                     return;
                 }
             }
-            terminal.sendText(`"${solixBinaryPath}" ${buildArgs}`);
+            terminal.sendText(
+                formatShellChainedCommands([{ executable: solixBinaryPath, args: buildArgs }], shellKind)
+            );
         })
     );
 
