@@ -36,18 +36,30 @@ pub fn execute_check(args: CheckArgs) -> Result<i32> {
     Ok(0)
 }
 
+fn resolve_project_directory(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    match solix_common::canonicalize_host_path(path) {
+        Ok(resolved) => Ok(resolved),
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound && std::env::current_dir().is_err() {
+                bail!(
+                    "Failed to resolve project directory '{}': the current working directory no longer exists or is inaccessible (it may have been deleted or recreated). Run 'cd' into an existing directory or pass an explicit project path.",
+                    path.display()
+                );
+            }
+            Err(err).with_context(|| {
+                format!("Failed to resolve project directory '{}'", path.display())
+            })
+        }
+    }
+}
+
 /// Executes `solix test [PATH] [--filter <pattern>]` by building the `test` profile
 /// (including any native libraries) and running all discovered zero-argument `test_*` functions/methods.
 ///
 /// # Errors
 /// Returns an error if compilation fails or any executed test fails.
 pub fn execute_test(args: TestArgs) -> Result<i32> {
-    let project_root = args.path.canonicalize().with_context(|| {
-        format!(
-            "Failed to resolve project directory '{}'",
-            args.path.display()
-        )
-    })?;
+    let project_root = resolve_project_directory(&args.path)?;
     let manifest_path = find_manifest_path(&project_root).ok_or_else(|| {
         anyhow::anyhow!(
             "No manifest.yaml (or manifest.toml) found in '{}'",
@@ -238,12 +250,7 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
 /// # Errors
 /// Returns an error if `manifest.yaml` cannot be found/parsed or written.
 pub fn execute_add(args: AddArgs) -> Result<()> {
-    let project_root = args.path.canonicalize().with_context(|| {
-        format!(
-            "Failed to resolve project directory '{}'",
-            args.path.display()
-        )
-    })?;
+    let project_root = resolve_project_directory(&args.path)?;
     let manifest_path = find_manifest_path(&project_root).ok_or_else(|| {
         anyhow::anyhow!(
             "No manifest.yaml (or manifest.toml) found in '{}'",
@@ -251,15 +258,20 @@ pub fn execute_add(args: AddArgs) -> Result<()> {
         )
     })?;
 
-    let (package_name, requested_ver, _requested_profile) = parse_package_spec(&args.package);
+    let (package_name, requested_profile, requested_ver) = parse_package_spec(&args.package);
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
     let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
     let solver = ClientModuleSolver::with_store_dir(store_directory);
 
     let resolved_version = if let Some(explicit_ver) = requested_ver {
+        solix_common::solver::PackageVersion::parse_constraint(&explicit_ver).map_err(|err| {
+            anyhow::anyhow!(
+                "Invalid version constraint '{explicit_ver}' for '{package_name}': {err}"
+            )
+        })?;
         explicit_ver
     } else if let Ok(solved) = solver.resolve_latest(&package_name) {
-        format!(">={}", solved.version)
+        solved.version.to_string()
     } else {
         "*".to_string()
     };
@@ -269,7 +281,7 @@ pub fn execute_add(args: AddArgs) -> Result<()> {
 
     let dep_entry = DependencySpec {
         version: resolved_version.clone(),
-        profile: args.dep_profile.clone(),
+        profile: requested_profile.unwrap_or_else(|| args.dep_profile.clone()),
     };
 
     if manifest.profiles.is_empty() {
