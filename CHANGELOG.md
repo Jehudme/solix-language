@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [3.1.1] - 2026-11-27
+
+### Bug Fixes
+
+- *(runtime,compiler)* Enforce parameter-signature & arity matching for CALL_EXTERN overload resolution (#320) (#321)
+
 ## [3.1.0] - 2026-11-27
 
 ### Bug Fixes

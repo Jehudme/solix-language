@@ -2,6 +2,12 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [3.1.1] - 2026-11-27
+
+### Bug Fixes
+
+- *(runtime,compiler)* Enforce parameter-signature & arity matching for CALL_EXTERN overload resolution (#320) (#321)
+
 ## [3.1.0] - 2026-11-27
 
 ### Bug Fixes
