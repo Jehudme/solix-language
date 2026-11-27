@@ -22,6 +22,8 @@ struct RawAliasInfo {
     is_primitive: bool,
     parameter_names: Vec<String>,
     span: Span,
+    symbol_id: Option<SymbolId>,
+    target_type_ast: TypeAnnotation,
 }
 
 fn get_type_annotation_base_name<'ast>(
@@ -262,7 +264,7 @@ pub fn execute_pass1_symbol_discovery(
                 parameter_names: Vec::new(),
             };
 
-            if symbol_table
+            let inserted_symbol_id = if symbol_table
                 .global_names
                 .contains_key(&fully_qualified_name)
             {
@@ -273,9 +275,10 @@ pub fn execute_pass1_symbol_discovery(
                         span: alias_statement.span.to_source_span(),
                     },
                 ));
+                None
             } else {
-                symbol_table.insert_symbol(alias_symbol);
-            }
+                Some(symbol_table.insert_symbol(alias_symbol))
+            };
 
             let (target_type_name, is_primitive) =
                 get_type_annotation_base_name(&alias_statement.target_type, source_text);
@@ -302,6 +305,8 @@ pub fn execute_pass1_symbol_discovery(
                 is_primitive,
                 parameter_names,
                 span: alias_statement.span,
+                symbol_id: inserted_symbol_id,
+                target_type_ast: alias_statement.target_type.clone(),
             });
         }
 
@@ -903,6 +908,24 @@ pub fn execute_pass1_symbol_discovery(
     };
 
     for alias in &raw_aliases {
+        if let Some(sym_id) = alias.symbol_id {
+            let alias_source_text = source_texts
+                .get(alias.source_id as usize)
+                .map_or("", String::as_str);
+            let resolved_target = resolve_type_annotation(
+                alias.source_id,
+                alias_source_text,
+                &alias.target_type_ast,
+                symbol_table,
+            );
+            if let Some(entry) = symbol_table.get_symbol_mut(sym_id) {
+                entry.symbol_type = Type::Alias {
+                    alias_name: alias.alias_name.clone(),
+                    target_type: Box::new(resolved_target),
+                };
+            }
+        }
+
         let target = &alias.target_type_name;
         if !alias.is_primitive && !target.is_empty() && !is_primitive(target) {
             let target_dot = target.replace("::", ".");
