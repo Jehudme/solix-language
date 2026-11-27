@@ -83,6 +83,52 @@ impl PackageVersion {
         })
     }
 
+    /// Parses a dependency version constraint string into its base [`PackageVersion`].
+    ///
+    /// Accepts exact semver (`"6.0.1"`, `"v6.0.1"`), supported constraint prefixes
+    /// (`">=6.0.1"`, `"^6.0.1"`, `"~6.0.1"`, `"=6.0.1"`), or wildcard (`"*"`).
+    /// Explicitly rejects invalid or unsupported operators (such as `"=<"`, `"<>"`, `"<="`, `">"`, `"<"`).
+    ///
+    /// # Errors
+    /// Returns a [`SolverError::InvalidVersionString`] if the constraint uses an unsupported
+    /// operator or fails semantic version parsing.
+    pub fn parse_constraint(constraint: &str) -> Result<Self, SolverError> {
+        let trimmed = constraint.trim();
+        if trimmed.is_empty() {
+            return Err(SolverError::InvalidVersionString {
+                raw: constraint.to_string(),
+                reason: "Version constraint cannot be empty".to_string(),
+            });
+        }
+        if trimmed == "*" {
+            return Ok(Self::new(0, 0, 0));
+        }
+
+        for invalid_op in ["=<", "<>", "<=", "!=", "==", ">", "<"] {
+            if let Some(rest) = trimmed.strip_prefix(invalid_op)
+                && !(invalid_op == ">" && trimmed.starts_with(">="))
+            {
+                return Err(SolverError::InvalidVersionString {
+                    raw: constraint.to_string(),
+                    reason: format!(
+                        "Unsupported version constraint operator '{invalid_op}' in '{trimmed}' (did you mean '>={}'?). Use exact semver (e.g. '6.0.1') or supported prefixes ('>=', '^', '~', '=').",
+                        rest.trim()
+                    ),
+                });
+            }
+        }
+
+        let version_body = trimmed
+            .strip_prefix(">=")
+            .or_else(|| trimmed.strip_prefix('^'))
+            .or_else(|| trimmed.strip_prefix('~'))
+            .or_else(|| trimmed.strip_prefix('='))
+            .unwrap_or(trimmed)
+            .trim();
+
+        Self::parse(version_body)
+    }
+
     /// Evaluates whether this candidate version is backward-compatible with a required minimum version.
     ///
     /// # SemVer Compatibility Rules:
@@ -237,7 +283,7 @@ impl DependencyRequirement {
             };
 
         let effective_profile = name_profile.or(colon_version_profile).or(hash_profile);
-        let parsed_version = PackageVersion::parse(version_clean)?;
+        let parsed_version = PackageVersion::parse_constraint(version_clean)?;
 
         Ok(Self {
             name: package_name.to_string(),
