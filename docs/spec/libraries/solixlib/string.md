@@ -42,6 +42,8 @@ Any class implementing `IStringable` can be passed seamlessly to standard input/
 - `is_empty() -> bool`: Returns `true` if `length() == 0`.
 - `char_at(int32 index) -> char`: Returns character at zero-based index. Throws `IndexOutOfBoundsException` if out of bounds.
 - `to_char_array() -> char[]`: Returns a copy of the underlying characters.
+- `to_chars() -> char[]`: Returns underlying UTF-32 characters as a `char[]` array.
+- `to_utf8_bytes() -> int8[]`: Encodes string content directly into signed UTF-8 byte array (`int8[]`).
 - `to_string() -> String`: Returns `this`.
 
 ### Comparison & Search
@@ -64,6 +66,8 @@ Any class implementing `IStringable` can be passed seamlessly to standard input/
 
 ### Static Helpers & Conversions
 - `static join(String delimiter, String[] elements) -> String`: Joins array of strings with delimiter.
+- `static from_utf8_bytes(int8[] raw_bytes) -> String`: Decodes a signed UTF-8 byte array (`int8[]`) into a `String`.
+- `static from_utf8_bytes(int8[] raw_bytes, int32 offset, int32 count) -> String`: Decodes a bounded `[offset, offset + count)` slice of a signed UTF-8 byte array, throwing `IndexOutOfBoundsException` on out-of-range slices.
 - `static value_of(int32 val) -> String`: Converts integer to decimal string.
 - `static value_of(int64 val) -> String`: Converts 64-bit integer to decimal string.
 - `static value_of(float64 val) -> String`: Converts floating-point value to string.

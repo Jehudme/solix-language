@@ -43,7 +43,7 @@ Capacity expansion doubles internal bucket allocation while below `1073741824`. 
 - `is_empty() -> bool`: Returns `true` if `size() == 0`.
 - `clear() -> void`: Removes all entries from map.
 - `contains_key(K key) -> bool`: Returns `true` if key exists in map.
-- `contains_value(V value) -> bool`: Returns `true` if one or more keys map to specified value.
+- `contains_value(V value) -> bool`: Returns `true` if one or more keys map to specified value (using `Collections::are_equal<V>` so `IEquatable<V>` value types compare by value rather than pointer identity).
 - `get(K key) -> V`: Returns value associated with key. Throws `KeyNotFoundException` if key is not found.
 - `get_or_default(K key, V default_val) -> V`: Returns value associated with key, or `default_val` if absent.
 - `put(K key, V value) -> void`: Associates specified value with specified key. If key exists, updates value.
@@ -51,28 +51,29 @@ Capacity expansion doubles internal bucket allocation while below `1073741824`. 
 - `keys() -> List<K>`: Returns a list containing all keys in the map.
 - `values() -> List<V>`: Returns a list containing all values in the map.
 - `entries() -> List<KeyValuePair<K, V>>`: Returns a list of `KeyValuePair<K, V>` entries.
-- `for_each(void(*)(K, V) action) -> void`: Executes callback action for every key-value pair.
+- `for_each(void(*)(K, V) action) -> void`: Executes callback action for every key-value pair (`null` action is a safe no-op).
 - `to_string() -> String`: Returns `"[HashMap]"`.
 
 ---
 
 ## 3. Class: `solix.collections.TreeMap<K, V>`
 
-Ordered binary search tree implementation. Implements `IMap<K, V>` and `IStringable`.
+Ordered AVL binary search tree implementation. Implements `IMap<K, V>` and `IStringable`. Internal tree `parent_node` links use `weak` ARC references so removed subtrees and destructed maps deallocate cleanly without cyclic leaks. Default key comparison honors custom `IComparable<K>` implementations alongside built-in primitive ordering.
 
 ### Constructors
-- `TreeMap()`: Initializes an empty tree map with default comparator.
-- `TreeMap(int32(*)(K, K) comparator)`: Initializes tree map with explicit key comparison function pointer.
+- `TreeMap()`: Initializes an empty tree map with default `IComparable<K>` / primitive comparator.
+- `TreeMap(int32(*)(K, K) comparator)`: Initializes tree map with explicit key comparison function pointer. Throws `ArgumentNullException` if `comparator` is `null`.
 
 ### Methods
 - `first_key() -> K`: Returns minimum key in the map according to ordering. Throws `NoSuchElementException` if empty.
 - `last_key() -> K`: Returns maximum key in the map according to ordering. Throws `NoSuchElementException` if empty.
+- `contains_value(V value) -> bool`: Searches tree values via `Collections::are_equal<V>`.
 - `get(K key) -> V`: Returns value associated with key. Throws `KeyNotFoundException` if key is absent.
 - `get_or_default(K key, V default_val) -> V`: Returns value associated with key, or default if absent.
 - `put(K key, V value) -> void`: Inserts or updates key-value pair in tree.
-- `remove(K key) -> V`: Removes key from tree and returns old value.
+- `remove(K key) -> V`: Removes key from tree, updates `weak parent_node` links on re-parented children and unlinks removed nodes, and returns old value.
 - `keys() -> List<K>`: In-order traversal returning keys in ascending order.
 - `values() -> List<V>`: In-order traversal returning values ordered by key.
 - `entries() -> List<KeyValuePair<K, V>>`: In-order traversal returning key-value pairs.
-- `for_each(void(*)(K, V) action) -> void`: In-order iteration executing action on each pair.
+- `for_each(void(*)(K, V) action) -> void`: In-order iteration executing action on each pair (`null` action is a safe no-op).
 - `to_string() -> String`: Returns `"[TreeMap]"`.

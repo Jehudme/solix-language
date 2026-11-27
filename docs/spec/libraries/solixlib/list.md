@@ -37,19 +37,22 @@ Compile-time generic resizable array container. Implements `IList<T>`, `ICollect
 - `remove(T item) -> bool`: Searches for first matching item; removes it and returns `true`, or returns `false` if not found.
 - `clear() -> void`: Resets size to 0 and clears element references.
 
-### Queries, Slicing & Functional Iteration
-- `index_of(T item) -> int32`: Returns index of first occurrence, or `-1` if absent.
-- `contains(T item) -> bool`: Returns `true` if item is present.
+### Queries, Slicing, Equality & Functional Iteration
+- `index_of(T item) -> int32`: Returns index of first occurrence using `Collections::are_equal<T>` (honoring `IEquatable<T>` value equality as well as reference/primitive equality), or `-1` if absent.
+- `contains(T item) -> bool`: Returns `true` if item is present (`index_of(item) >= 0`).
 - `sub_list(int32 start, int32 count) -> List<T>`: Returns new list containing shallow copy of sub-range. Throws `IndexOutOfBoundsException`.
 - `reverse() -> void`: Reverses list elements in place.
 - `to_array() -> T[]`: Returns snapshot copy of elements as a typed array.
-- `for_each(void(*)(T) action) -> void`: Iterates sequentially across all elements, invoking `action(item)` on each.
-- `filter(bool(*)(T) predicate) -> List<T>`: Returns a new `List<T>` containing all elements satisfying `predicate(item) == true`.
-- `map<U>(U(*)(T) transform) -> List<U>`: Returns a new `List<U>` containing mapped elements after applying `transform(item)` to each element.
-- `reduce(T initial_value, T(*)(T, T) accumulator) -> T`: Reduces elements into a single accumulated result starting with `initial_value`.
-- `reduce(T(*)(T, T) accumulator) -> T`: Reduces elements using the first element as initial accumulator value. Throws `NoSuchElementException` if list is empty.
+- `for_each(void(*)(T) action) -> void`: Iterates sequentially across all elements, invoking `action(item)` on each. Passing `null` is a safe no-op.
+- `filter(bool(*)(T) predicate) -> List<T>`: Returns a new `List<T>` containing all elements satisfying `predicate(item) == true`. Throws `ArgumentNullException` if `predicate` is `null`.
+- `map<U>(U(*)(T) transform) -> List<U>`: Returns a new `List<U>` containing mapped elements after applying `transform(item)` to each element. Throws `ArgumentNullException` if `transform` is `null`.
+- `reduce(T initial_value, T(*)(T, T) accumulator) -> T`: Reduces elements into a single accumulated result starting with `initial_value`. Throws `ArgumentNullException` if `accumulator` is `null`.
+- `reduce(T(*)(T, T) accumulator) -> T`: Reduces elements using the first element as initial accumulator value. Throws `NoSuchElementException` if list is empty or `ArgumentNullException` if `accumulator` is `null`.
 - `iterator() -> IIterator<T>`: Returns forward iterator implementing `IIterator<T>`.
 - `to_string() -> String`: Standard bracketed representation `"[List]"`.
+
+> [!NOTE]
+> `List<T>.ensure_capacity` enforces safe 32-bit allocation growth bounds capped at `1073741824` elements (`OutOfMemoryException` on overflow). In `LinkedList<T>`, internal node backlinks (`previous_node`) use `weak` references and removal/destruction clears links deterministically, eliminating ARC retain cycles even without cycle collection. `LinkedList<T>.reverse()` swaps head/tail pointers safely via strong local holders, and `LinkedList<T>.filter`/`sort` enforce non-null callback guards (`ArgumentNullException`).
 
 ---
 
