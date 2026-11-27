@@ -632,17 +632,22 @@ fn test_export_package_and_binaries_subcommands() {
         && let Ok(raw_manifest) = fs::read_to_string(project_dir.join("manifest.yaml"))
     {
         let mut filtered_lines = Vec::new();
-        let mut skipping_deps = false;
+        let mut skipping_deps_indent: Option<usize> = None;
         for line in raw_manifest.lines() {
-            if line.trim() == "dependencies:" {
-                skipping_deps = true;
-                continue;
-            }
-            if skipping_deps {
-                if line.starts_with("      ") || line.trim().is_empty() {
+            let trimmed = line.trim();
+            let indent = line.len() - line.trim_start().len();
+            if let Some(base_indent) = skipping_deps_indent {
+                if trimmed.is_empty() || indent > base_indent {
                     continue;
                 }
-                skipping_deps = false;
+                skipping_deps_indent = None;
+            }
+            if trimmed == "dependencies: *dependencies" {
+                continue;
+            }
+            if trimmed == "dependencies:" || trimmed.starts_with("dependencies: &") {
+                skipping_deps_indent = Some(indent);
+                continue;
             }
             filtered_lines.push(line);
         }
@@ -650,6 +655,20 @@ fn test_export_package_and_binaries_subcommands() {
             project_dir.join("manifest.yaml"),
             format!("{}\n", filtered_lines.join("\n")),
         );
+        let main_slx = project_dir.join("src").join("main.slx");
+        if let Ok(main_src) = fs::read_to_string(&main_slx)
+            && main_src.contains("solix.io.Console")
+        {
+            let cleaned_lines: Vec<&str> = main_src
+                .lines()
+                .filter(|line| {
+                    let trimmed = line.trim();
+                    trimmed != "import solix.io.Console;"
+                        && !trimmed.starts_with("Console::println(")
+                })
+                .collect();
+            let _ = fs::write(&main_slx, format!("{}\n", cleaned_lines.join("\n")));
+        }
     }
 
     let exported_package_path = workspace.root_path().join("exported_bundle.slxp");
