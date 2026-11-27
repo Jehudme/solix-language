@@ -43,3 +43,6 @@ mod test_arrays_tuples;
 
 #[path = "runtime/test_multi_binary_dynamic_linking.rs"]
 mod test_multi_binary_dynamic_linking;
+
+#[path = "runtime/test_stdlib_collections_weak_arc.rs"]
+mod test_stdlib_collections_weak_arc;

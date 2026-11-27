@@ -9,6 +9,10 @@ public class TcpListener {
         this.socket_id = handle;
     }
 
+    ~TcpListener() {
+        this.close();
+    }
+
     public static TcpListener bind(string host_port) {
         String wrapped = (host_port != null) ? new String(host_port) : new String("");
         return TcpListener::bind(wrapped);

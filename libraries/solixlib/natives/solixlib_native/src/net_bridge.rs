@@ -596,6 +596,15 @@ pub unsafe fn register_net_natives(collector: *mut c_void, callback: RegisterNat
         ),
         (
             &[
+                "TcpStream_native_close",
+                "solix_net_TcpStream_native_close",
+                "TcpStream::native_close",
+                "TcpListener_native_close",
+                "solix_net_TcpListener_native_close",
+                "TcpListener::native_close",
+                "UdpSocket_native_close",
+                "solix_net_UdpSocket_native_close",
+                "UdpSocket::native_close",
                 "Socket_native_close",
                 "solix_net_Socket_native_close",
                 "Socket::native_close",

@@ -108,19 +108,7 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
     }
 
     private bool check_values_equal(V first_value, V second_value) {
-        if (first_value == second_value) {
-            return true;
-        }
-        if (first_value == null || second_value == null) {
-            return false;
-        }
-        if (first_value instanceof String && second_value instanceof String) {
-            return ((String)first_value).equals((String)second_value);
-        }
-        if (first_value instanceof IEquatable) {
-            return ((IEquatable<V>)first_value).equals(second_value);
-        }
-        return false;
+        return Collections::are_equal<V>(first_value, second_value);
     }
 
     private int32 calculate_hash(K lookup_key) {

@@ -1,7 +1,10 @@
 package solix.json;
 
 import solix.core.String;
+import solix.core.StringBuilder;
 import solix.core.Exception;
+import solix.collections.HashMap;
+import solix.collections.List;
 
 public class JsonException extends Exception {
     public JsonException() : super("JSON error") {}
@@ -48,6 +51,14 @@ public class JsonValue {
         return new String(result_chars);
     }
 
+    private static string escape_pointer_segment(string key) {
+        if (key == null) {
+            return "";
+        }
+        String escaped = new String(key).replace("~", "~0").replace("/", "~1");
+        return escaped.data;
+    }
+
     public JsonValue query(string pointer_path) {
         String wrapped_pointer = (pointer_path != null) ? new String(pointer_path) : new String("");
         return this.query(wrapped_pointer);
@@ -58,28 +69,111 @@ public class JsonValue {
             return null;
         }
         char[] result_chars = JsonValue::native_pointer_query(this.raw_json.data, pointer_path.data);
-        if (result_chars == null || result_chars.length == 0) {
+        if (result_chars == null) {
             return null;
         }
         return new JsonValue(new String(result_chars));
     }
 
     public JsonValue get(string key) {
-        return this.query("/" + key);
+        if (key == null || this.raw_json == null) {
+            return null;
+        }
+        return this.query("/" + JsonValue::escape_pointer_segment(key));
+    }
+
+    public JsonValue get(String key) {
+        if (key == null || key.data == null) {
+            return null;
+        }
+        return this.get(key.data);
     }
 
     public JsonValue get(int32 index) {
         return this.query("/" + index);
     }
 
+    public bool has(string key) {
+        return this.get(key) != null;
+    }
+
+    public bool has(String key) {
+        return this.get(key) != null;
+    }
+
+    public bool is_null() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return true;
+        }
+        return JsonValue::native_type_kind(this.raw_json.data) == 0;
+    }
+
+    public bool is_bool() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return false;
+        }
+        return JsonValue::native_type_kind(this.raw_json.data) == 1;
+    }
+
+    public bool is_boolean() {
+        return this.is_bool();
+    }
+
+    public bool is_number() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return false;
+        }
+        return JsonValue::native_type_kind(this.raw_json.data) == 2;
+    }
+
+    public bool is_string() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return false;
+        }
+        return JsonValue::native_type_kind(this.raw_json.data) == 3;
+    }
+
+    public bool is_array() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return false;
+        }
+        return JsonValue::native_type_kind(this.raw_json.data) == 4;
+    }
+
+    public bool is_object() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return false;
+        }
+        return JsonValue::native_type_kind(this.raw_json.data) == 5;
+    }
+
+    public int32 size() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return 0;
+        }
+        return JsonValue::native_size(this.raw_json.data);
+    }
+
+    public String[] keys() {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return new String[0];
+        }
+        string[] raw_keys = JsonValue::native_keys(this.raw_json.data);
+        if (raw_keys == null) {
+            return new String[0];
+        }
+        String[] key_objects = new String[raw_keys.length];
+        for (int32 key_index = 0; key_index < raw_keys.length; key_index = key_index + 1) {
+            key_objects[key_index] = new String(raw_keys[key_index]);
+        }
+        return key_objects;
+    }
+
     public String as_string() {
-        if (this.raw_json == null) {
+        if (this.raw_json == null || this.raw_json.data == null) {
             return new String("");
         }
-        if (this.raw_json.starts_with("\"") && this.raw_json.ends_with("\"") && this.raw_json.length() >= 2) {
-            return this.raw_json.substring(1, this.raw_json.length() - 2);
-        }
-        return this.raw_json;
+        return new String(JsonValue::native_decode_string(this.raw_json.data));
     }
 
     public int64 as_int64() {
@@ -97,11 +191,281 @@ public class JsonValue {
         return str_val.to_bool();
     }
 
-    public bool is_null() {
-        return this.raw_json == null || this.raw_json.equals(new String("null"));
+    public bool as_boolean() {
+        return this.as_bool();
+    }
+
+    public String get_string_or(string key, string fallback) {
+        JsonValue found = this.get(key);
+        if (found == null || !found.is_string()) {
+            return new String((fallback != null) ? fallback : "");
+        }
+        return found.as_string();
+    }
+
+    public String get_string_or(String key, String fallback) {
+        String wrapped_fallback = (fallback != null) ? fallback : new String("");
+        return this.get_string_or((key != null) ? key.data : null, wrapped_fallback.data);
+    }
+
+    public int64 get_int64_or(string key, int64 fallback) {
+        JsonValue found = this.get(key);
+        if (found == null || !found.is_number()) {
+            return fallback;
+        }
+        return found.as_int64();
+    }
+
+    public float64 get_float64_or(string key, float64 fallback) {
+        JsonValue found = this.get(key);
+        if (found == null || !found.is_number()) {
+            return fallback;
+        }
+        return found.as_float64();
+    }
+
+    public bool get_bool_or(string key, bool fallback) {
+        JsonValue found = this.get(key);
+        if (found == null || !found.is_bool()) {
+            return fallback;
+        }
+        return found.as_bool();
+    }
+
+    public static String encode_json_string(string raw_text) {
+        string input_text = (raw_text != null) ? raw_text : "";
+        return new String(JsonValue::native_encode_string(input_text));
     }
 
     private static native bool native_parse_and_validate(string json_text);
     private static native char[] native_pointer_query(string json_text, string pointer_path);
     private static native char[] native_stringify(string json_text, bool pretty);
+    private static native int32 native_type_kind(string json_text);
+    private static native int32 native_size(string json_text);
+    private static native string[] native_keys(string json_text);
+    private static native char[] native_decode_string(string json_text);
+    private static native char[] native_encode_string(string raw_text);
+}
+
+public class JsonObject {
+    private HashMap<String, JsonValue> entries_map;
+    private List<String> ordered_keys;
+
+    public JsonObject() {
+        this.entries_map = new HashMap<String, JsonValue>();
+        this.ordered_keys = new List<String>();
+    }
+
+    public int32 size() {
+        return this.ordered_keys.size();
+    }
+
+    public bool is_empty() {
+        return this.ordered_keys.is_empty();
+    }
+
+    public bool has(string key) {
+        if (key == null) {
+            return false;
+        }
+        return this.entries_map.contains_key(new String(key));
+    }
+
+    public JsonValue get(string key) {
+        if (key == null) {
+            return null;
+        }
+        return this.entries_map.get_or_default(new String(key), null);
+    }
+
+    public bool remove(string key) {
+        if (key == null) {
+            return false;
+        }
+        String wrapped_key = new String(key);
+        if (!this.entries_map.contains_key(wrapped_key)) {
+            return false;
+        }
+        this.entries_map.remove(wrapped_key);
+        this.ordered_keys.remove(wrapped_key);
+        return true;
+    }
+
+    public JsonObject set(string key, JsonValue value) {
+        if (key == null) {
+            return this;
+        }
+        String wrapped_key = new String(key);
+        if (!this.entries_map.contains_key(wrapped_key)) {
+            this.ordered_keys.add(wrapped_key);
+        }
+        this.entries_map.put(wrapped_key, (value != null) ? value : new JsonValue("null"));
+        return this;
+    }
+
+    public JsonObject set(string key, string value) {
+        if (value == null) {
+            return this.set_null(key);
+        }
+        return this.set(key, new JsonValue(JsonValue::encode_json_string(value)));
+    }
+
+    public JsonObject set(string key, String value) {
+        if (value == null || value.data == null) {
+            return this.set_null(key);
+        }
+        return this.set(key, value.data);
+    }
+
+    public JsonObject set(string key, int32 value) {
+        return this.set(key, new JsonValue(new String(value)));
+    }
+
+    public JsonObject set(string key, int64 value) {
+        return this.set(key, new JsonValue(new String(value)));
+    }
+
+    public JsonObject set(string key, float64 value) {
+        return this.set(key, new JsonValue(new String(value)));
+    }
+
+    public JsonObject set(string key, bool value) {
+        return this.set(key, new JsonValue(new String(value)));
+    }
+
+    public JsonObject set(string key, JsonObject nested_object) {
+        if (nested_object == null) {
+            return this.set_null(key);
+        }
+        return this.set(key, nested_object.to_json_value());
+    }
+
+    public JsonObject set(string key, JsonArray nested_array) {
+        if (nested_array == null) {
+            return this.set_null(key);
+        }
+        return this.set(key, nested_array.to_json_value());
+    }
+
+    public JsonObject set_null(string key) {
+        return this.set(key, new JsonValue("null"));
+    }
+
+    public String stringify() {
+        return this.stringify(false);
+    }
+
+    public String stringify(bool pretty) {
+        return this.to_json_value().stringify(pretty);
+    }
+
+    public JsonValue to_json_value() {
+        StringBuilder builder = new StringBuilder("{");
+        for (int32 key_index = 0; key_index < this.ordered_keys.size(); key_index = key_index + 1) {
+            if (key_index > 0) {
+                builder.append(",");
+            }
+            String entry_key = this.ordered_keys.get(key_index);
+            JsonValue entry_val = this.entries_map.get_or_default(entry_key, new JsonValue("null"));
+            builder.append(JsonValue::encode_json_string(entry_key.data));
+            builder.append(":");
+            builder.append((entry_val != null && entry_val.raw_json != null) ? entry_val.raw_json : new String("null"));
+        }
+        builder.append("}");
+        return JsonValue::parse(builder.to_string());
+    }
+}
+
+public class JsonArray {
+    private List<JsonValue> item_list;
+
+    public JsonArray() {
+        this.item_list = new List<JsonValue>();
+    }
+
+    public int32 size() {
+        return this.item_list.size();
+    }
+
+    public bool is_empty() {
+        return this.item_list.is_empty();
+    }
+
+    public JsonValue get(int32 index) {
+        return this.item_list.get(index);
+    }
+
+    public JsonArray add(JsonValue value) {
+        this.item_list.add((value != null) ? value : new JsonValue("null"));
+        return this;
+    }
+
+    public JsonArray add(string value) {
+        if (value == null) {
+            return this.add_null();
+        }
+        return this.add(new JsonValue(JsonValue::encode_json_string(value)));
+    }
+
+    public JsonArray add(String value) {
+        if (value == null || value.data == null) {
+            return this.add_null();
+        }
+        return this.add(value.data);
+    }
+
+    public JsonArray add(int32 value) {
+        return this.add(new JsonValue(new String(value)));
+    }
+
+    public JsonArray add(int64 value) {
+        return this.add(new JsonValue(new String(value)));
+    }
+
+    public JsonArray add(float64 value) {
+        return this.add(new JsonValue(new String(value)));
+    }
+
+    public JsonArray add(bool value) {
+        return this.add(new JsonValue(new String(value)));
+    }
+
+    public JsonArray add(JsonObject nested_object) {
+        if (nested_object == null) {
+            return this.add_null();
+        }
+        return this.add(nested_object.to_json_value());
+    }
+
+    public JsonArray add(JsonArray nested_array) {
+        if (nested_array == null) {
+            return this.add_null();
+        }
+        return this.add(nested_array.to_json_value());
+    }
+
+    public JsonArray add_null() {
+        return this.add(new JsonValue("null"));
+    }
+
+    public String stringify() {
+        return this.stringify(false);
+    }
+
+    public String stringify(bool pretty) {
+        return this.to_json_value().stringify(pretty);
+    }
+
+    public JsonValue to_json_value() {
+        StringBuilder builder = new StringBuilder("[");
+        for (int32 item_index = 0; item_index < this.item_list.size(); item_index = item_index + 1) {
+            if (item_index > 0) {
+                builder.append(",");
+            }
+            JsonValue item_val = this.item_list.get(item_index);
+            builder.append((item_val != null && item_val.raw_json != null) ? item_val.raw_json : new String("null"));
+        }
+        builder.append("]");
+        return JsonValue::parse(builder.to_string());
+    }
 }

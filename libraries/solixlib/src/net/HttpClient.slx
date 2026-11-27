@@ -1,34 +1,404 @@
 package solix.net;
 
 import solix.core.String;
+import solix.core.StringBuilder;
+import solix.collections.HashMap;
+import solix.collections.List;
+
+public class HttpResponse {
+    public int32 status_code;
+    public String reason_phrase;
+    public HashMap<String, String> headers;
+    public String body;
+
+    public HttpResponse(
+        int32 initial_status,
+        String initial_reason,
+        HashMap<String, String> initial_headers,
+        String initial_body
+    ) {
+        this.status_code = initial_status;
+        this.reason_phrase = (initial_reason != null) ? initial_reason : new String("");
+        this.headers = (initial_headers != null) ? initial_headers : new HashMap<String, String>();
+        this.body = (initial_body != null) ? initial_body : new String("");
+    }
+
+    public bool is_ok() {
+        return this.status_code >= 200 && this.status_code < 300;
+    }
+
+    public String get_header(string header_name) {
+        if (header_name == null) {
+            return null;
+        }
+        return this.get_header(new String(header_name));
+    }
+
+    public String get_header(String header_name) {
+        if (header_name == null || this.headers == null) {
+            return null;
+        }
+        return this.headers.get_or_default(header_name.to_lower(), null);
+    }
+}
 
 public class HttpClient {
     public static String get(string url) {
-        String wrapped = (url != null) ? new String(url) : new String("");
-        return HttpClient::get(wrapped);
+        HttpResponse response = HttpClient::get_response(url);
+        return response.body;
     }
 
     public static String get(String url) {
-        if (url == null || url.data == null) {
-            throw new NetworkException("[E0333] Network operation failed on socket: null url");
-        }
-        String clean_url = url;
-        if (clean_url.starts_with("http://")) {
-            clean_url = clean_url.substring(7, clean_url.length() - 7);
-        }
-        int32 slash_pos = clean_url.index_of('/');
-        String host_port = (slash_pos > 0) ? clean_url.substring(0, slash_pos) : clean_url;
-        String path = (slash_pos > 0) ? clean_url.substring(slash_pos, clean_url.length() - slash_pos) : new String("/");
+        HttpResponse response = HttpClient::get_response(url);
+        return response.body;
+    }
 
+    public static HttpResponse get_response(string url) {
+        String wrapped = (url != null) ? new String(url) : null;
+        return HttpClient::request(new String("GET"), wrapped, null, null);
+    }
+
+    public static HttpResponse get_response(String url) {
+        return HttpClient::request(new String("GET"), url, null, null);
+    }
+
+    public static HttpResponse post(string url, string body) {
+        return HttpClient::request(
+            new String("POST"),
+            (url != null) ? new String(url) : null,
+            (body != null) ? new String(body) : new String(""),
+            null
+        );
+    }
+
+    public static HttpResponse post(String url, String body) {
+        return HttpClient::request(new String("POST"), url, body, null);
+    }
+
+    public static HttpResponse put(string url, string body) {
+        return HttpClient::request(
+            new String("PUT"),
+            (url != null) ? new String(url) : null,
+            (body != null) ? new String(body) : new String(""),
+            null
+        );
+    }
+
+    public static HttpResponse put(String url, String body) {
+        return HttpClient::request(new String("PUT"), url, body, null);
+    }
+
+    public static HttpResponse delete(string url) {
+        String wrapped = (url != null) ? new String(url) : null;
+        return HttpClient::request(new String("DELETE"), wrapped, null, null);
+    }
+
+    public static HttpResponse delete(String url) {
+        return HttpClient::request(new String("DELETE"), url, null, null);
+    }
+
+    public static HttpResponse request(string method, string url) {
+        return HttpClient::request(
+            (method != null) ? new String(method) : new String("GET"),
+            (url != null) ? new String(url) : null,
+            null,
+            null
+        );
+    }
+
+    public static HttpResponse request(string method, string url, string body) {
+        return HttpClient::request(
+            (method != null) ? new String(method) : new String("GET"),
+            (url != null) ? new String(url) : null,
+            (body != null) ? new String(body) : null,
+            null
+        );
+    }
+
+    public static HttpResponse request(
+        String method,
+        String url,
+        String body,
+        HashMap<String, String> custom_headers
+    ) {
+        if (url == null || url.data == null || url.is_empty()) {
+            throw new NetworkException("[E0333] Network operation failed on socket: null or empty url");
+        }
+        String effective_method = (method != null && !method.is_empty()) ? method.to_upper() : new String("GET");
+        String trimmed_url = url.trim();
+        String lower_url = trimmed_url.to_lower();
+
+        if (lower_url.starts_with("https://")) {
+            throw new NetworkException("[E0333] Unsupported URL scheme 'https://' in HttpClient: TLS transport is not yet available (" + trimmed_url.data + ")");
+        }
+        String target_url = trimmed_url;
+        if (lower_url.starts_with("http://")) {
+            target_url = trimmed_url.substring(7, trimmed_url.length() - 7);
+        } else if (trimmed_url.contains(new String("://"))) {
+            throw new NetworkException("[E0333] Unsupported URL scheme in HttpClient (expected http://): " + trimmed_url.data);
+        }
+
+        int32 slash_pos = target_url.index_of('/');
+        String host_port = (slash_pos > 0) ? target_url.substring(0, slash_pos) : target_url;
+        String path = (slash_pos > 0) ? target_url.substring(slash_pos, target_url.length() - slash_pos) : new String("/");
+
+        if (host_port.is_empty()) {
+            throw new NetworkException("[E0333] Network operation failed on socket: missing host in url " + url.data);
+        }
         if (!host_port.contains(":")) {
             host_port = new String(host_port.data + ":80");
         }
 
+        int8[] body_bytes = (body != null && !body.is_empty()) ? body.to_utf8_bytes() : new int8[0];
+
+        StringBuilder request_builder = new StringBuilder();
+        request_builder.append(effective_method);
+        request_builder.append(" ");
+        request_builder.append(path);
+        request_builder.append(" HTTP/1.1\r\nHost: ");
+        request_builder.append(host_port);
+        request_builder.append("\r\nConnection: close\r\n");
+
+        bool has_content_length = false;
+        if (custom_headers != null) {
+            List<String> header_keys = custom_headers.keys();
+            for (int32 header_index = 0; header_index < header_keys.size(); header_index = header_index + 1) {
+                String header_key = header_keys.get(header_index);
+                String header_val = custom_headers.get(header_key);
+                if (header_key != null && header_val != null) {
+                    if (header_key.to_lower().equals(new String("content-length"))) {
+                        has_content_length = true;
+                    }
+                    request_builder.append(header_key);
+                    request_builder.append(": ");
+                    request_builder.append(header_val);
+                    request_builder.append("\r\n");
+                }
+            }
+        }
+        if (!has_content_length && body_bytes.length > 0) {
+            request_builder.append("Content-Length: ");
+            request_builder.append(new String((int64)body_bytes.length));
+            request_builder.append("\r\n");
+        }
+        request_builder.append("\r\n");
+
+        int8[] wire_bytes = new int8[0];
         TcpStream stream = TcpStream::connect(host_port);
-        String request = new String("GET " + path.data + " HTTP/1.1\r\nHost: " + host_port.data + "\r\nConnection: close\r\n\r\n");
-        stream.write_string(request);
-        String response = stream.read_string(65536);
-        stream.close();
-        return response;
+        try {
+            stream.write_string(request_builder.to_string());
+            if (body_bytes.length > 0) {
+                stream.write(body_bytes);
+            }
+            wire_bytes = HttpClient::read_complete_response(stream);
+        } finally {
+            stream.close();
+        }
+
+        return HttpClient::parse_http_response(wire_bytes);
+    }
+
+    private static int8[] read_complete_response(TcpStream stream) {
+        List<int8[]> chunk_list = new List<int8[]>();
+        int32 total_len = 0;
+        int32 header_end = -1;
+        int32 expected_content_length = -1;
+
+        while (true) {
+            int8[] chunk = stream.read(16384);
+            if (chunk == null || chunk.length == 0) {
+                break;
+            }
+            chunk_list.add(chunk);
+            total_len = total_len + chunk.length;
+
+            if (header_end < 0) {
+                int8[] joined_prefix = HttpClient::concat_chunks(chunk_list, total_len);
+                header_end = HttpClient::find_header_end(joined_prefix);
+                if (header_end >= 0) {
+                    String raw_head = String::from_utf8_bytes(joined_prefix, 0, header_end);
+                    expected_content_length = HttpClient::extract_content_length(raw_head);
+                }
+            }
+            if (header_end >= 0 && expected_content_length >= 0) {
+                if (total_len >= header_end + 4 + expected_content_length) {
+                    break;
+                }
+            }
+        }
+
+        return HttpClient::concat_chunks(chunk_list, total_len);
+    }
+
+    private static int8[] concat_chunks(List<int8[]> chunk_list, int32 total_len) {
+        int8[] combined = new int8[total_len];
+        int32 write_offset = 0;
+        for (int32 chunk_index = 0; chunk_index < chunk_list.size(); chunk_index = chunk_index + 1) {
+            int8[] part = chunk_list.get(chunk_index);
+            for (int32 byte_index = 0; byte_index < part.length; byte_index = byte_index + 1) {
+                combined[write_offset + byte_index] = part[byte_index];
+            }
+            write_offset = write_offset + part.length;
+        }
+        return combined;
+    }
+
+    private static int32 find_header_end(int8[] buffer) {
+        if (buffer == null || buffer.length < 4) {
+            return -1;
+        }
+        for (int32 scan_index = 0; scan_index <= buffer.length - 4; scan_index = scan_index + 1) {
+            if (buffer[scan_index] == (int8)13
+                && buffer[scan_index + 1] == (int8)10
+                && buffer[scan_index + 2] == (int8)13
+                && buffer[scan_index + 3] == (int8)10) {
+                return scan_index;
+            }
+        }
+        return -1;
+    }
+
+    private static int32 extract_content_length(String raw_headers) {
+        String[] header_lines = raw_headers.split('\n');
+        for (int32 line_index = 1; line_index < header_lines.length; line_index = line_index + 1) {
+            String clean_line = header_lines[line_index].trim();
+            int32 colon_pos = clean_line.index_of(':');
+            if (colon_pos > 0) {
+                String header_name = clean_line.substring(0, colon_pos).trim().to_lower();
+                if (header_name.equals(new String("content-length"))) {
+                    String val_text = clean_line.substring(colon_pos + 1).trim();
+                    int32 parsed_len = (int32)val_text.to_int64();
+                    if (parsed_len >= 0) {
+                        return parsed_len;
+                    }
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static HttpResponse parse_http_response(int8[] wire_bytes) {
+        if (wire_bytes == null || wire_bytes.length == 0) {
+            throw new NetworkException("[E0333] Network operation failed on socket: empty HTTP response");
+        }
+        int32 header_end = HttpClient::find_header_end(wire_bytes);
+        if (header_end < 0) {
+            String full_text = String::from_utf8_bytes(wire_bytes);
+            return new HttpResponse(0, new String(""), new HashMap<String, String>(), full_text);
+        }
+
+        String header_block = String::from_utf8_bytes(wire_bytes, 0, header_end);
+        int32 body_offset = header_end + 4;
+        int32 body_byte_len = wire_bytes.length - body_offset;
+
+        String[] lines = header_block.split('\n');
+        int32 parsed_status = 0;
+        String parsed_reason = new String("");
+        if (lines.length > 0) {
+            String status_line = lines[0].trim();
+            int32 first_space = status_line.index_of(' ');
+            if (first_space > 0) {
+                String after_proto = status_line.substring(first_space + 1).trim();
+                int32 second_space = after_proto.index_of(' ');
+                if (second_space > 0) {
+                    parsed_status = (int32)after_proto.substring(0, second_space).to_int64();
+                    parsed_reason = after_proto.substring(second_space + 1).trim();
+                } else {
+                    parsed_status = (int32)after_proto.to_int64();
+                }
+            }
+        }
+
+        HashMap<String, String> parsed_headers = new HashMap<String, String>();
+        bool is_chunked = false;
+        for (int32 line_index = 1; line_index < lines.length; line_index = line_index + 1) {
+            String header_line = lines[line_index].trim();
+            int32 colon_pos = header_line.index_of(':');
+            if (colon_pos > 0) {
+                String header_key = header_line.substring(0, colon_pos).trim().to_lower();
+                String header_val = header_line.substring(colon_pos + 1).trim();
+                parsed_headers.put(header_key, header_val);
+                if (header_key.equals(new String("transfer-encoding"))
+                    && header_val.to_lower().contains("chunked")) {
+                    is_chunked = true;
+                }
+            }
+        }
+
+        String body_text = null;
+        if (is_chunked) {
+            body_text = HttpClient::decode_chunked_body(wire_bytes, body_offset, body_byte_len);
+        } else {
+            body_text = String::from_utf8_bytes(wire_bytes, body_offset, body_byte_len);
+        }
+
+        return new HttpResponse(parsed_status, parsed_reason, parsed_headers, body_text);
+    }
+
+    private static String decode_chunked_body(int8[] wire_bytes, int32 start_offset, int32 byte_len) {
+        List<int8[]> decoded_chunks = new List<int8[]>();
+        int32 total_decoded = 0;
+        int32 cursor = start_offset;
+        int32 limit = start_offset + byte_len;
+
+        while (cursor < limit) {
+            int32 line_end = cursor;
+            while (line_end + 1 < limit) {
+                if (wire_bytes[line_end] == (int8)13 && wire_bytes[line_end + 1] == (int8)10) {
+                    break;
+                }
+                line_end = line_end + 1;
+            }
+            if (line_end + 1 >= limit) {
+                break;
+            }
+            String size_line = String::from_utf8_bytes(wire_bytes, cursor, line_end - cursor).trim();
+            int32 semi_pos = size_line.index_of(';');
+            if (semi_pos >= 0) {
+                size_line = size_line.substring(0, semi_pos).trim();
+            }
+            int32 chunk_size = HttpClient::parse_hex_length(size_line);
+            cursor = line_end + 2;
+            if (chunk_size <= 0) {
+                break;
+            }
+            int32 available = limit - cursor;
+            int32 take = (chunk_size < available) ? chunk_size : available;
+            int8[] chunk_slice = new int8[take];
+            for (int32 copy_index = 0; copy_index < take; copy_index = copy_index + 1) {
+                chunk_slice[copy_index] = wire_bytes[cursor + copy_index];
+            }
+            decoded_chunks.add(chunk_slice);
+            total_decoded = total_decoded + take;
+            cursor = cursor + take;
+            if (cursor + 1 < limit && wire_bytes[cursor] == (int8)13 && wire_bytes[cursor + 1] == (int8)10) {
+                cursor = cursor + 2;
+            }
+        }
+
+        int8[] assembled = HttpClient::concat_chunks(decoded_chunks, total_decoded);
+        return String::from_utf8_bytes(assembled);
+    }
+
+    private static int32 parse_hex_length(String hex_text) {
+        if (hex_text == null || hex_text.is_empty()) {
+            return 0;
+        }
+        int32 result_value = 0;
+        for (int32 pos = 0; pos < hex_text.length(); pos = pos + 1) {
+            int32 code = (int32)hex_text.char_at(pos);
+            int32 digit = -1;
+            if (code >= 48 && code <= 57) {
+                digit = code - 48;
+            } else if (code >= 65 && code <= 70) {
+                digit = code - 55;
+            } else if (code >= 97 && code <= 102) {
+                digit = code - 87;
+            } else {
+                return result_value;
+            }
+            result_value = (result_value * 16) + digit;
+        }
+        return result_value;
     }
 }

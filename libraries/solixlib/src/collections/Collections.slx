@@ -1,10 +1,27 @@
 package solix.collections;
 
+import solix.core.IEquatable;
 import solix.core.IStringable;
 import solix.core.String;
 import solix.core.StringBuilder;
 
 public class Collections {
+    public static bool are_equal<T>(T first_item, T second_item) {
+        if (first_item == second_item) {
+            return true;
+        }
+        if (first_item == null || second_item == null) {
+            return false;
+        }
+        if (first_item instanceof String && second_item instanceof String) {
+            return ((String)first_item).equals((String)second_item);
+        }
+        if (first_item instanceof IEquatable) {
+            return ((IEquatable<T>)first_item).equals(second_item);
+        }
+        return false;
+    }
+
     public static String to_string<T>(IIterable<T> collection) {
         if (collection == null) {
             return new String("null");

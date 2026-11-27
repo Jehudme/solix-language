@@ -1,0 +1,104 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.net.HttpClient;
+import solix.net.NetworkException;
+import solix.net.TcpListener;
+import solix.net.TcpStream;
+
+public class TestNet {
+    public static int32 run_all_tests() {
+        if (!TestNet::test_utf8_byte_conversion()) {
+            return 1;
+        }
+        if (!TestNet::test_http_scheme_validation()) {
+            return 2;
+        }
+        if (!TestNet::test_tcp_stream_utf8_and_raii_cleanup()) {
+            return 3;
+        }
+        return 0;
+    }
+
+    public static bool test_utf8_byte_conversion() {
+        String sample = new String("café 🚀 日本語");
+        int8[] encoded = sample.to_utf8_bytes();
+        // UTF-8 bytes of "café 🚀 日本語" = 3 + 2 + 1 + 4 + 1 + 9 = 20 bytes
+        if (encoded.length != 20) {
+            return false;
+        }
+        String roundtrip = String::from_utf8_bytes(encoded);
+        if (!roundtrip.equals(sample)) {
+            return false;
+        }
+        String sliced = String::from_utf8_bytes(encoded, 3, 2);
+        if (!sliced.equals(new String("é"))) {
+            return false;
+        }
+        return true;
+    }
+
+    public static bool test_http_scheme_validation() {
+        bool caught_https = false;
+        try {
+            HttpClient::get("https://example.com/status");
+        } catch (NetworkException err) {
+            String msg = new String(err.get_message());
+            if (msg.contains("https://") || msg.contains("TLS")) {
+                caught_https = true;
+            }
+        }
+        if (!caught_https) {
+            return false;
+        }
+
+        bool caught_ftp = false;
+        try {
+            HttpClient::get("ftp://example.com/file");
+        } catch (NetworkException err) {
+            caught_ftp = true;
+        }
+        return caught_ftp;
+    }
+
+    private static void send_utf8_in_scoped_stream(string endpoint, string payload) {
+        TcpStream client = TcpStream::connect_timeout(endpoint, 2000);
+        client.write_string(payload);
+        // Intentionally do NOT call client.close(); ~TcpStream() closes the OS handle on scope exit.
+    }
+
+    public static bool test_tcp_stream_utf8_and_raii_cleanup() {
+        TcpListener listener = null;
+        int32 bound_port = 0;
+        for (int32 candidate_port = 28400; candidate_port < 28460; candidate_port = candidate_port + 1) {
+            try {
+                listener = TcpListener::bind("127.0.0.1:" + candidate_port);
+                bound_port = candidate_port;
+                break;
+            } catch (NetworkException err) {
+                listener = null;
+            }
+        }
+        if (listener == null || bound_port == 0) {
+            return false;
+        }
+
+        string expected_text = "café 🚀 日本語";
+        string endpoint = "127.0.0.1:" + bound_port;
+        TestNet::send_utf8_in_scoped_stream(endpoint, expected_text);
+
+        TcpStream accepted = listener.accept();
+        accepted.set_read_timeout(1500);
+        String received = accepted.read_string(256);
+        int8[] eof_probe = accepted.read(64);
+        accepted.close();
+        listener.close();
+
+        if (!received.equals(new String(expected_text))) {
+            return false;
+        }
+        // Because ~TcpStream() closed `client` on exit from `send_utf8_in_scoped_stream`,
+        // reading again must observe EOF immediately rather than timing out.
+        return eof_probe.length == 0;
+    }
+}

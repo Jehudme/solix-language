@@ -1,5 +1,6 @@
 package solix.collections;
 
+import solix.core.ArgumentNullException;
 import solix.core.IStringable;
 import solix.core.String;
 import solix.core.IndexOutOfBoundsException;
@@ -7,7 +8,7 @@ import solix.core.NoSuchElementException;
 
 public class LinkedListNode<T> {
     public T value;
-    public LinkedListNode<T> previous_node;
+    public weak LinkedListNode<T> previous_node;
     public LinkedListNode<T> next_node;
 
     public LinkedListNode(T initial_value) {
@@ -125,8 +126,11 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
         if (this.head_node == null) {
             throw new NoSuchElementException("LinkedList is empty");
         }
-        T removed_value = this.head_node.value;
-        this.head_node = this.head_node.next_node;
+        LinkedListNode<T> removed_node = this.head_node;
+        T removed_value = removed_node.value;
+        this.head_node = removed_node.next_node;
+        removed_node.next_node = null;
+        removed_node.previous_node = null;
         if (this.head_node != null) {
             this.head_node.previous_node = null;
         } else {
@@ -140,8 +144,11 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
         if (this.tail_node == null) {
             throw new NoSuchElementException("LinkedList is empty");
         }
-        T removed_value = this.tail_node.value;
-        this.tail_node = this.tail_node.previous_node;
+        LinkedListNode<T> removed_node = this.tail_node;
+        T removed_value = removed_node.value;
+        this.tail_node = removed_node.previous_node;
+        removed_node.next_node = null;
+        removed_node.previous_node = null;
         if (this.tail_node != null) {
             this.tail_node.next_node = null;
         } else {
@@ -244,6 +251,8 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
         LinkedListNode<T> target_node = this.node_at(index);
         LinkedListNode<T> predecessor = target_node.previous_node;
         LinkedListNode<T> successor = target_node.next_node;
+        target_node.previous_node = null;
+        target_node.next_node = null;
         predecessor.next_node = successor;
         successor.previous_node = predecessor;
         this.element_count = this.element_count - 1;
@@ -263,7 +272,7 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
         LinkedListNode<T> current = this.head_node;
         int32 current_index = 0;
         while (current != null) {
-            if (current.value == item) {
+            if (Collections::are_equal<T>(current.value, item)) {
                 return current_index;
             }
             current = current.next_node;
@@ -289,21 +298,24 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
     }
 
     public void reverse() {
+        LinkedListNode<T> old_head = this.head_node;
         LinkedListNode<T> current = this.head_node;
-        LinkedListNode<T> temporary = null;
+        LinkedListNode<T> previous_reversed = null;
         while (current != null) {
-            temporary = current.previous_node;
-            current.previous_node = current.next_node;
-            current.next_node = temporary;
-            current = current.previous_node;
+            LinkedListNode<T> next_original = current.next_node;
+            current.previous_node = next_original;
+            current.next_node = previous_reversed;
+            previous_reversed = current;
+            current = next_original;
         }
-        if (temporary != null) {
-            this.tail_node = this.head_node;
-            this.head_node = temporary.previous_node;
-        }
+        this.tail_node = old_head;
+        this.head_node = previous_reversed;
     }
 
     public LinkedList<T> filter(bool(*)(T) predicate) {
+        if (predicate == null) {
+            throw new ArgumentNullException("predicate", "Filter predicate cannot be null");
+        }
         LinkedList<T> filtered_list = new LinkedList<T>();
         LinkedListNode<T> current = this.head_node;
         while (current != null) {
@@ -316,6 +328,9 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
     }
 
     public LinkedList<U> map<U>(U(*)(T) transform) {
+        if (transform == null) {
+            throw new ArgumentNullException("transform", "Map transform cannot be null");
+        }
         LinkedList<U> mapped_list = new LinkedList<U>();
         LinkedListNode<T> current = this.head_node;
         while (current != null) {
@@ -326,6 +341,9 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
     }
 
     public void for_each(void(*)(T) action) {
+        if (action == null) {
+            return;
+        }
         LinkedListNode<T> current = this.head_node;
         while (current != null) {
             action(current.value);
