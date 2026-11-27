@@ -29,9 +29,9 @@ public class Environment {
 
 ### Methods
 
-- `String get_env(String key)`: Retrieves the value of the environment variable specified by `key`. Returns `null` if the variable does not exist.
-- `void set_env(String key, String value)`: Creates or updates the environment variable specified by `key` to `value`.
-- `HashMap<String, String> get_all_env()`: Returns all environment variables defined in the current process space as key-value pairs.
+- `String get_env(String key)`: Retrieves the value of the environment variable specified by `key` (checking the thread-safe process-local virtual overlay before falling back to host environment state). Returns `null` if the variable does not exist.
+- `void set_env(String key, String value)`: Creates or updates the environment variable specified by `key` to `value` inside a thread-safe process-local overlay (never calling unsafe host `setenv` across active worker/rendering threads), and propagates updated variables to child `Process` invocations.
+- `HashMap<String, String> get_all_env()`: Returns all host and virtualized environment variables defined in the current execution context as key-value pairs.
 - `List<String> get_args()`: Retrieves command-line arguments passed to the running Solix application.
 - `String os_name()`: Returns the operating system friendly name (e.g., `"Linux"`, `"Windows"`, `"macOS"`).
 - `String os_version()`: Returns the host operating system kernel / release version string.

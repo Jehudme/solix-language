@@ -55,17 +55,25 @@ Re-exported at crate root (`use solix_ffi::*;`):
 | `TAG_REF` | `u32` | `5` | VirtualHeap reference (`string`, object, array) |
 | `TAG_FNPTR` | `u32` | `6` | Function pointer index |
 | `SOLIX_ARRAY_TAG_I8` | `u8` | `1` | Element tag for `int8[]` |
+| `SOLIX_ARRAY_TAG_I16` | `u8` | `2` | Element tag for `int16[]` |
+| `SOLIX_ARRAY_TAG_I32` | `u8` | `3` | Element tag for `int32[]` |
 | `SOLIX_ARRAY_TAG_I64` | `u8` | `4` | Element tag for `int64[]` |
+| `SOLIX_ARRAY_TAG_U8` | `u8` | `5` | Element tag for `uint8[]` |
+| `SOLIX_ARRAY_TAG_U16` | `u8` | `6` | Element tag for `uint16[]` |
+| `SOLIX_ARRAY_TAG_U32` | `u8` | `7` | Element tag for `uint32[]` |
+| `SOLIX_ARRAY_TAG_U64` | `u8` | `8` | Element tag for `uint64[]` |
 | `SOLIX_ARRAY_TAG_F32` | `u8` | `9` | Element tag for `float32[]` |
 | `SOLIX_ARRAY_TAG_F64` | `u8` | `10` | Element tag for `float64[]` |
+| `SOLIX_ARRAY_TAG_BOOL` | `u8` | `11` | Element tag for `bool[]` |
 | `SOLIX_ARRAY_TAG_CHAR` | `u8` | `12` | Element tag for `char[]` |
 | `SOLIX_ARRAY_TAG_REF` | `u8` | `13` | Element tag for `string[]` / reference arrays |
 
 ### Callback & Registry Types
 
-* `NativeCFunctionPtr`: `unsafe extern "C" fn(vm_context: *mut c_void, args: *const SolixCValue, arg_count: u32, out_error: *mut SolixCValue) -> SolixCValue`
-* `RegisterNativeCallback`: `unsafe extern "C" fn(name: *const c_char, func: NativeCFunctionPtr)`
-* `NativeRegistry`: safe wrapper around `RegisterNativeCallback` offering `register(&self, name: &str, func: NativeCFunctionPtr)`
+* `NativeCFunctionPtr`: `unsafe extern "C-unwind" fn(vm_context: *mut c_void, args: *const SolixCValue, arg_count: u32, out_error: *mut SolixCValue) -> SolixCValue`
+* `RegisterNativeCallback`: `unsafe extern "C" fn(collector_context: *mut c_void, name: *const c_char, func: NativeCFunctionPtr)`
+* `NativeRegistry`: safe wrapper around `RegisterNativeCallback` offering `register(&mut self, name: &str, func: NativeCFunctionPtr)` and null-checked `from_raw`
+* `solix_export!`: emits `solix_register_natives` with null host-pointer guards and wraps every exported plugin function in a `std::panic::catch_unwind` `extern "C-unwind"` trampoline (`invoke_caught`) that converts any Rust panic into `*out_error` without unwinding past the ABI boundary
 
 ---
 
@@ -101,9 +109,9 @@ Always validate `raw_context` first with `unsafe { SolixVmContext::validate(vm_c
 | :--- | :--- | :--- |
 | `validate` | `unsafe fn validate<'ctx>(raw_context: *mut c_void) -> Option<&'ctx Self>` | Checks non-null pointer, `SOLIX_VM_CONTEXT_MAGIC`, and non-null `vm_ptr` |
 | `read_string` | `unsafe fn read_string(&self, heap_address: u32) -> Option<String>` | Reads full UTF-8 string bytes from `heap_address` (handles strings > 4 KiB automatically) |
-| `read_bytes` | `unsafe fn read_bytes(&self, heap_address: u32, destination_buffer: &mut [u8]) -> usize` | Reads raw bytes into caller slice and returns full payload byte count |
+| `read_bytes` | `unsafe fn read_bytes(&self, heap_address: u32, destination_buffer: &mut [u8]) -> usize` | Copies payload into caller slice (transcoding Unicode `char[]` elements to UTF-8) and returns full byte count |
 | `alloc_string` | `unsafe fn alloc_string(&self, text: &str) -> u32` | Allocates a new guest `string` on the ARC heap |
-| `alloc_chars` | `unsafe fn alloc_chars(&self, text: &str) -> u32` | Allocates a mutable guest `char[]` array |
+| `alloc_chars` | `unsafe fn alloc_chars(&self, text: &str) -> u32` | Allocates a mutable guest `char[]` array storing decoded Unicode scalar code points |
 | `alloc_byte_array` | `unsafe fn alloc_byte_array(&self, raw_bytes: &[u8]) -> u32` | Allocates a guest `int8[]` array |
 | `alloc_array` | `unsafe fn alloc_array(&self, element_count: u32, type_tag: u8) -> u32` | Allocates a typed guest array using `SOLIX_ARRAY_TAG_*` |
 | `array_len` | `unsafe fn array_len(&self, array_address: u32) -> u32` | Returns array element length (or string byte length) |
@@ -111,10 +119,19 @@ Always validate `raw_context` first with `unsafe { SolixVmContext::validate(vm_c
 | `array_set_u64` | `unsafe fn array_set_u64(&self, array_address: u32, element_index: u32, raw_value: u64)` | Writes raw 64-bit bits into element slot `element_index` |
 | `get_class_vtable_id` | `unsafe fn get_class_vtable_id(&self, class_name: &str) -> u32` | Resolves class VTable index (`0` if unknown) |
 | `alloc_object` | `unsafe fn alloc_object(&self, class_vtable_id: u32, field_count: u32) -> u32` | Allocates an ARC-managed class instance |
-| `get_field_i32` | `unsafe fn get_field_i32(&self, object_address: u32, field_index: u32) -> i32` | Reads a 32-bit signed integer field |
-| `set_field_i32` | `unsafe fn set_field_i32(&self, object_address: u32, field_index: u32, field_value: i32)` | Writes a 32-bit signed integer field |
-| `read_field_u64` | `unsafe fn read_field_u64(&self, object_address: u32, field_offset: u32) -> u64` | Reads arbitrary field slot |
-| `write_field_u64` | `unsafe fn write_field_u64(&self, object_address: u32, field_offset: u32, raw_value: u64)` | Writes arbitrary field slot |
+| `get_field_i32` | `unsafe fn get_field_i32(&self, object_address: u32, field_index: u32) -> i32` | Legacy heuristic 32-bit signed integer field read |
+| `set_field_i32` | `unsafe fn set_field_i32(&self, object_address: u32, field_index: u32, field_value: i32)` | Legacy heuristic 32-bit signed integer field write |
+| `read_field_u64` | `unsafe fn read_field_u64(&self, object_address: u32, field_offset: u32) -> u64` | Legacy heuristic field slot read |
+| `write_field_u64` | `unsafe fn write_field_u64(&self, object_address: u32, field_offset: u32, raw_value: u64)` | Legacy heuristic field slot write |
+| `get_field_i32_by_index` | `unsafe fn get_field_i32_by_index(&self, object_address: u32, field_index: u32) -> i32` | Reads 32-bit signed integer field by explicit 0-based `field_index` |
+| `set_field_i32_by_index` | `unsafe fn set_field_i32_by_index(&self, object_address: u32, field_index: u32, field_value: i32)` | Writes 32-bit signed integer field by explicit 0-based `field_index` |
+| `get_field_i32_by_offset` | `unsafe fn get_field_i32_by_offset(&self, object_address: u32, byte_offset: u32) -> i32` | Reads 32-bit signed integer field by explicit `byte_offset` |
+| `set_field_i32_by_offset` | `unsafe fn set_field_i32_by_offset(&self, object_address: u32, byte_offset: u32, field_value: i32)` | Writes 32-bit signed integer field by explicit `byte_offset` |
+| `read_field_u64_by_index` | `unsafe fn read_field_u64_by_index(&self, object_address: u32, field_index: u32) -> u64` | Reads arbitrary field slot by explicit 0-based `field_index` |
+| `write_field_u64_by_index` | `unsafe fn write_field_u64_by_index(&self, object_address: u32, field_index: u32, raw_value: u64)` | Writes arbitrary field slot by explicit 0-based `field_index` |
+| `read_field_u64_by_offset` | `unsafe fn read_field_u64_by_offset(&self, object_address: u32, byte_offset: u32) -> u64` | Reads arbitrary field slot by explicit `byte_offset` |
+| `write_field_u64_by_offset` | `unsafe fn write_field_u64_by_offset(&self, object_address: u32, byte_offset: u32, raw_value: u64)` | Writes arbitrary field slot by explicit `byte_offset` |
+| `set_error` | `unsafe fn set_error(&self, out_error: *mut SolixCValue, message: &str)` | Allocates an error string in the VM heap and writes it into `*out_error` |
 | `get_vm_metric` | `unsafe fn get_vm_metric(&self, metric_id: u32) -> u64` | Reads VM metric (`0..=55`) |
 | `collect_cycles` | `unsafe fn collect_cycles(&self) -> u64` | Triggers Bacon & Rajan cycle collection |
 | `set_cycle_threshold` | `unsafe fn set_cycle_threshold(&self, threshold: u32)` | Configures cycle collector candidate threshold |
@@ -135,7 +152,7 @@ mod solix_bridge {
     use solix_ffi::{solix_export, NativeCFunctionPtr, SolixCValue, SolixVmContext};
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn MathBridge_add_checked(
+    pub unsafe extern "C-unwind" fn MathBridge_add_checked(
         vm_context: *mut std::ffi::c_void,
         arguments: *const SolixCValue,
         argument_count: u32,

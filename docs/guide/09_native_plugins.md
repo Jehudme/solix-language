@@ -106,7 +106,7 @@ mod bridge {
     use solix_ffi::{solix_export, NativeCFunctionPtr, SolixCValue};
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn MathBridge_fast_add(
+    pub unsafe extern "C-unwind" fn MathBridge_fast_add(
         _vm_context: *mut std::ffi::c_void,
         arguments: *const SolixCValue,
         argument_count: u32,
