@@ -22,14 +22,24 @@ pub fn signature_help(snapshot: &AnalysisSnapshot, position: Position) -> Option
     let semantic = snapshot.last_good_semantic.as_ref()?;
 
     // 1. Search for enclosing MethodCall in AST if AST is present
-    let mut best_call: Option<(Span, String, usize)> = None;
+    let mut best_call: Option<(Span, String, Option<String>, usize)> = None;
     if let Some(ast) = snapshot.ast.as_ref() {
         find_enclosing_call_in_ast(ast, target_offset, &snapshot.source_text, &mut best_call);
     }
 
     // 2. Fall back to resilient lexical scan if AST does not contain an enclosing call (e.g. while actively typing)
     let (callee_name, qualifier_name, active_parameter_index) = match best_call {
-        Some((_, call_callee, param_index)) => (call_callee, None, param_index),
+        Some((_, call_callee, ast_qualifier, param_index)) => {
+            if ast_qualifier.is_some() {
+                (call_callee, ast_qualifier, param_index)
+            } else if let Some((_, lex_qualifier, _)) =
+                find_enclosing_call_lexical(&snapshot.source_text, offset)
+            {
+                (call_callee, lex_qualifier, param_index)
+            } else {
+                (call_callee, None, param_index)
+            }
+        }
         None => find_enclosing_call_lexical(&snapshot.source_text, offset)?,
     };
 
@@ -67,6 +77,9 @@ pub fn signature_help(snapshot: &AnalysisSnapshot, position: Position) -> Option
     // Search general symbol table if no qualified symbols were found
     if signatures.is_empty() {
         for symbol in &semantic.symbol_table.symbols {
+            if symbol.source_id != snapshot.source_id && !symbol.is_public() {
+                continue;
+            }
             if symbol.name == callee_name
                 && let Type::FunctionPointer {
                     return_type,
@@ -281,7 +294,7 @@ fn find_enclosing_call_in_ast(
     ast: &ProgramAst,
     target_offset: u32,
     source_text: &str,
-    best_call: &mut Option<(Span, String, usize)>,
+    best_call: &mut Option<(Span, String, Option<String>, usize)>,
 ) {
     for decl in &ast.declarations {
         match decl {
@@ -318,7 +331,7 @@ fn find_enclosing_call_in_statements(
     statements: &[Statement],
     target_offset: u32,
     source_text: &str,
-    best_call: &mut Option<(Span, String, usize)>,
+    best_call: &mut Option<(Span, String, Option<String>, usize)>,
 ) {
     for stmt in statements {
         match stmt {
@@ -347,7 +360,7 @@ fn find_enclosing_call_in_expression(
     expression: &Expression,
     target_offset: u32,
     source_text: &str,
-    best_call: &mut Option<(Span, String, usize)>,
+    best_call: &mut Option<(Span, String, Option<String>, usize)>,
 ) {
     if let Expression::MethodCall {
         span,
@@ -358,12 +371,24 @@ fn find_enclosing_call_in_expression(
         && span.start <= target_offset
         && target_offset <= span.end
     {
-        let callee_name = match &**callee {
-            Expression::Identifier { span: id_span } => get_span_text(source_text, *id_span),
-            Expression::MemberAccess { member_span, .. } => {
-                get_span_text(source_text, *member_span)
+        let (callee_name, qualifier_name) = match &**callee {
+            Expression::Identifier { span: id_span } => {
+                (get_span_text(source_text, *id_span), None)
             }
-            _ => "",
+            Expression::MemberAccess {
+                object,
+                member_span,
+                ..
+            } => {
+                let qual = match &**object {
+                    Expression::Identifier { span: obj_span } => {
+                        Some(get_span_text(source_text, *obj_span).to_string())
+                    }
+                    _ => None,
+                };
+                (get_span_text(source_text, *member_span), qual)
+            }
+            _ => ("", None),
         };
 
         // Calculate active parameter based on comma counts before target_offset
@@ -374,7 +399,7 @@ fn find_enclosing_call_in_expression(
             }
         }
 
-        *best_call = Some((*span, callee_name.to_string(), active_param));
+        *best_call = Some((*span, callee_name.to_string(), qualifier_name, active_param));
     }
 }
 

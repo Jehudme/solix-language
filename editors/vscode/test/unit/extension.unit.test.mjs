@@ -323,7 +323,7 @@ test('Layer 1: activate registers all commands, providers, and tasks with mocked
         fs.writeFileSync(standaloneFile, 'int32 main() { return 0; }\n');
         try {
             const debugConfigProvider = new debugModule.SolixDebugConfigurationProvider('/tmp/solix');
-            const resolvedConfig = debugConfigProvider.resolveDebugConfiguration(
+            const resolvedConfig = await debugConfigProvider.resolveDebugConfiguration(
                 undefined,
                 { type: 'solix', name: 'Debug Standalone', request: 'launch', program: standaloneFile }
             );
@@ -449,4 +449,74 @@ test('Issue #249: findSolixBinaries and findToolchainBinary never probe workspac
         Module._load = origLoad;
         fs.rmSync(tempWs, { recursive: true, force: true });
     }
+});
+
+test('Manifest profile discovery with vars anchors, .slxp resolution, recursive src walk, and v3 snippets', async () => {
+    const manifestModule = await import(`file://${path.join(unitBuildDir, 'manifest.js')}?t=${Date.now()}`);
+
+    const yamlWithAnchors = `
+package:
+  name: my_game
+  version: 0.1.0
+vars:
+  base_debug: &base_debug
+    build_type: debug
+    optimization: none
+profiles:
+  debug:
+    <<: *base_debug
+    description: Dev debug
+  bench:
+    build_type: release
+    optimization: full
+    description: Benchmark profile
+  wasm_preview:
+    build_type: release
+`;
+    const profiles = manifestModule.parseManifestProfiles(yamlWithAnchors, true);
+    assert.deepStrictEqual(
+        profiles.map((entry) => entry.label),
+        ['debug', 'bench', 'wasm_preview'],
+        'Must dynamically parse all custom YAML profiles without leaking vars/merge keys'
+    );
+
+    assert.deepStrictEqual(
+        manifestModule.buildProfileCommandArgs('build', 'bench'),
+        ['build', '--profile', 'bench']
+    );
+    assert.deepStrictEqual(
+        manifestModule.buildProfileCommandArgs('run', 'bench', '/tmp/my_game.slxp'),
+        ['run', '--profile', 'bench', '/tmp/my_game.slxp']
+    );
+    assert.deepStrictEqual(
+        manifestModule.buildProfileCommandArgs('test', 'wasm_preview', '/tmp/my_game.slxp'),
+        ['run', '--profile', 'wasm_preview', '--test', '/tmp/my_game.slxp']
+    );
+
+    const tempProject = fs.mkdtempSync(path.join(os.tmpdir(), 'solix_vscode_manifest_test_'));
+    try {
+        const slxpFile = path.join(tempProject, 'build', 'bench', 'my_game.slxp');
+        fs.mkdirSync(path.dirname(slxpFile), { recursive: true });
+        fs.writeFileSync(slxpFile, 'stub');
+        assert.strictEqual(
+            manifestModule.resolveArtifactPath(tempProject, 'bench', 'my_game'),
+            slxpFile
+        );
+
+        const nestedSrc = path.join(tempProject, 'src', 'gameplay', 'player.slx');
+        fs.mkdirSync(path.dirname(nestedSrc), { recursive: true });
+        fs.writeFileSync(nestedSrc, 'class Player {}');
+        const sources = manifestModule.collectSolixSourcesRecursive(path.join(tempProject, 'src'));
+        assert.deepStrictEqual(sources, [nestedSrc]);
+    } finally {
+        fs.rmSync(tempProject, { recursive: true, force: true });
+    }
+
+    // Validate v3 snippets JSON structure and updated prefixes
+    const snippetsPath = path.join(rootDir, 'snippets', 'solix.code-snippets');
+    const snippets = JSON.parse(fs.readFileSync(snippetsPath, 'utf8'));
+    assert.ok(snippets['Solix Main Entry Point'].body.join('\n').includes('public static int32 main()'));
+    assert.ok(snippets['Console Println'].body.join('\n').includes('Console::println('));
+    assert.ok(snippets['Import Declaration'].prefix === 'import');
+    assert.ok(snippets['Switch Statement'].prefix === 'switch');
 });

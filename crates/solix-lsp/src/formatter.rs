@@ -45,12 +45,8 @@ pub fn compute_indent_level_at_line(source_text: &str, target_line_index: u32) -
         }
         if in_block_comment {
             if trimmed_line.contains("*/") {
-                in_block_comment = false;
+                let (_, _) = count_code_braces(trimmed_line, &mut in_block_comment);
             }
-            continue;
-        }
-        if trimmed_line.starts_with("/*") && !trimmed_line.contains("*/") {
-            in_block_comment = true;
             continue;
         }
 
@@ -60,14 +56,8 @@ pub fn compute_indent_level_at_line(source_text: &str, target_line_index: u32) -
             indent_level = indent_level.saturating_sub(1);
         }
 
-        let open_brace_count = trimmed_line
-            .chars()
-            .filter(|&character| character == '{')
-            .count();
-        let close_brace_count = trimmed_line
-            .chars()
-            .filter(|&character| character == '}')
-            .count();
+        let (open_brace_count, close_brace_count) =
+            count_code_braces(trimmed_line, &mut in_block_comment);
 
         if starts_with_closing_brace {
             let remaining_close_count = close_brace_count.saturating_sub(1);
@@ -197,15 +187,8 @@ pub fn format_source_with_base_indent(source: &str, initial_indent_level: usize)
             INDENT_SPACES.repeat(indent_level)
         ));
 
-        // Adjust indent level for trailing opening braces
-        let open_count = trimmed
-            .chars()
-            .filter(|&character| character == '{')
-            .count();
-        let close_count = trimmed
-            .chars()
-            .filter(|&character| character == '}')
-            .count();
+        // Adjust indent level for trailing opening braces (lexical-aware, ignoring comments & strings)
+        let (open_count, close_count) = count_code_braces(trimmed, &mut in_block_comment);
 
         if starts_with_closing_brace {
             let remaining_close = close_count.saturating_sub(1);
@@ -228,6 +211,69 @@ pub fn format_source_with_base_indent(source: &str, initial_indent_level: usize)
     result
 }
 
+fn count_code_braces(line: &str, in_block_comment: &mut bool) -> (usize, usize) {
+    let mut open_braces = 0usize;
+    let mut close_braces = 0usize;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut escape_active = false;
+
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        let current = chars[index];
+
+        if *in_block_comment {
+            if current == '*' && index + 1 < chars.len() && chars[index + 1] == '/' {
+                *in_block_comment = false;
+                index += 2;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+
+        if in_string || in_char {
+            if escape_active {
+                escape_active = false;
+            } else if current == '\\' {
+                escape_active = true;
+            } else if in_string && current == '"' {
+                in_string = false;
+            } else if in_char && current == '\'' {
+                in_char = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if current == '/' && index + 1 < chars.len() {
+            if chars[index + 1] == '/' {
+                break;
+            }
+            if chars[index + 1] == '*' {
+                *in_block_comment = true;
+                index += 2;
+                continue;
+            }
+        }
+
+        if current == '"' {
+            in_string = true;
+        } else if current == '\'' {
+            in_char = true;
+        } else if current == '{' {
+            open_braces += 1;
+        } else if current == '}' {
+            close_braces += 1;
+        }
+        index += 1;
+    }
+
+    (open_braces, close_braces)
+}
+
 fn format_line_content(line: &str) -> String {
     // If it's a comment line, return as is
     if line.starts_with("//") || line.starts_with("/*") || line.starts_with('*') {
@@ -237,6 +283,7 @@ fn format_line_content(line: &str) -> String {
     let mut result = String::with_capacity(line.len());
     let mut in_string = false;
     let mut in_char = false;
+    let mut escape_active = false;
     let mut previous_char = ' ';
 
     let chars: Vec<char> = line.chars().collect();
@@ -245,23 +292,32 @@ fn format_line_content(line: &str) -> String {
     while index < chars.len() {
         let current = chars[index];
 
-        if current == '"' && previous_char != '\\' {
-            in_string = !in_string;
-            result.push(current);
-            previous_char = current;
-            index += 1;
-            continue;
-        }
-
-        if current == '\'' && previous_char != '\\' {
-            in_char = !in_char;
-            result.push(current);
-            previous_char = current;
-            index += 1;
-            continue;
-        }
-
         if in_string || in_char {
+            result.push(current);
+            if escape_active {
+                escape_active = false;
+            } else if current == '\\' {
+                escape_active = true;
+            } else if in_string && current == '"' {
+                in_string = false;
+            } else if in_char && current == '\'' {
+                in_char = false;
+            }
+            previous_char = current;
+            index += 1;
+            continue;
+        }
+
+        if current == '"' {
+            in_string = true;
+            result.push(current);
+            previous_char = current;
+            index += 1;
+            continue;
+        }
+
+        if current == '\'' {
+            in_char = true;
             result.push(current);
             previous_char = current;
             index += 1;

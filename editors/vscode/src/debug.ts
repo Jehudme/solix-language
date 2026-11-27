@@ -3,43 +3,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as childProcess from 'child_process';
 import * as net from 'net';
+import * as util from 'util';
+import { findProjectRoot, resolveArtifactPath, resolveManifestFile } from './manifest';
+import { getActiveBuildProfile } from './commands';
 
-const MANIFEST_FILENAMES = ['manifest.yaml', 'manifest.yml', 'manifest.toml'];
-
-function resolveManifestFile(directory: string): string | undefined {
-    for (const filename of MANIFEST_FILENAMES) {
-        const candidate = path.join(directory, filename);
-        if (fs.existsSync(candidate)) {
-            return candidate;
-        }
-    }
-    return undefined;
-}
-
-/**
- * Searches parent directories for manifest.yaml (or manifest.toml) to identify project roots.
- */
-function findProjectRoot(initialFilePath: string): string | undefined {
-    try {
-        let currentDirectory = fs.statSync(initialFilePath).isDirectory()
-            ? initialFilePath
-            : path.dirname(initialFilePath);
-
-        for (let depthIndex = 0; depthIndex < 10; depthIndex += 1) {
-            if (resolveManifestFile(currentDirectory)) {
-                return currentDirectory;
-            }
-            const parentDirectory = path.dirname(currentDirectory);
-            if (parentDirectory === currentDirectory) {
-                break;
-            }
-            currentDirectory = parentDirectory;
-        }
-    } catch {
-        return undefined;
-    }
-    return undefined;
-}
+const execFileAsync = util.promisify(childProcess.execFile);
 
 /**
  * Reads package name from manifest.yaml or manifest.toml.
@@ -132,17 +100,17 @@ export class SolixDebugAdapterDescriptorFactory implements vscode.DebugAdapterDe
         }
 
         const port = await getAvailablePort();
-        let terminal = vscode.window.terminals.find((term) => term.name === 'Solix Debug');
         const cwd = session.configuration.cwd || undefined;
-        if (!terminal) {
-            terminal = vscode.window.createTerminal({
-                name: 'Solix Debug',
-                cwd
-            });
-        }
+        const terminal = vscode.window.createTerminal({
+            name: 'Solix Debug',
+            cwd,
+        });
         terminal.show(true);
-        terminal.sendText(`"${this.solixBinaryPath}" dap --port ${port}`);
-        await waitForTcpPort(port, 3000);
+        const launchCommand = process.platform === 'win32'
+            ? `& "${this.solixBinaryPath}" dap --port ${port}`
+            : `"${this.solixBinaryPath}" dap --port ${port}`;
+        terminal.sendText(launchCommand);
+        await waitForTcpPort(port, 8000);
         return new vscode.DebugAdapterServer(port, '127.0.0.1');
     }
 }
@@ -168,11 +136,11 @@ export class SolixDebugConfigurationProvider implements vscode.DebugConfiguratio
         ];
     }
 
-    public resolveDebugConfiguration(
+    public async resolveDebugConfiguration(
         folder: vscode.WorkspaceFolder | undefined,
         debugConfiguration: vscode.DebugConfiguration,
         _token?: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.DebugConfiguration> {
+    ): Promise<vscode.DebugConfiguration | undefined> {
         // If launch.json is missing or empty, configure defaults
         if (!debugConfiguration.type && !debugConfiguration.request && !debugConfiguration.name) {
             const activeEditor = vscode.window.activeTextEditor;
@@ -209,22 +177,27 @@ export class SolixDebugConfigurationProvider implements vscode.DebugConfiguratio
             if (projectRoot) {
                 debugConfiguration.cwd = projectRoot;
                 const packageName = readPackageName(projectRoot);
-                const buildModeFlag = debugConfiguration.testMode ? '--test' : '--debug';
-                const outputFolder = debugConfiguration.testMode ? 'test' : 'debug';
+                const selectedProfile =
+                    typeof debugConfiguration.profile === 'string' && debugConfiguration.profile.trim().length > 0
+                        ? debugConfiguration.profile.trim()
+                        : (debugConfiguration.testMode ? 'test' : getActiveBuildProfile());
 
-                // Automatically build with debug symbols before launching session
+                // Automatically build before launching session (async to avoid freezing UI)
                 try {
-                    vscode.window.showInformationMessage(`Building Solix project in ${outputFolder} mode before debugging...`);
-                    childProcess.execSync(`"${this.solixBinaryPath}" build ${buildModeFlag}`, {
-                        cwd: projectRoot,
-                        encoding: 'utf8'
-                    });
+                    vscode.window.showInformationMessage(
+                        `Building Solix project with profile '${selectedProfile}' before debugging...`
+                    );
+                    await execFileAsync(
+                        this.solixBinaryPath,
+                        ['build', '--profile', selectedProfile],
+                        { cwd: projectRoot, encoding: 'utf8', timeout: 60000 }
+                    );
                 } catch (buildError) {
                     vscode.window.showErrorMessage(`Solix debug build failed: ${String(buildError)}`);
                     return undefined;
                 }
 
-                const expectedArchivePath = path.join(projectRoot, 'build', outputFolder, `${packageName}.slxarc`);
+                const expectedArchivePath = resolveArtifactPath(projectRoot, selectedProfile, packageName);
                 if (fs.existsSync(expectedArchivePath)) {
                     debugConfiguration.program = expectedArchivePath;
                 }
@@ -251,14 +224,20 @@ export class SolixInlineValuesProvider implements vscode.InlineValuesProvider {
         const stoppedLine = context.stoppedLocation.end.line;
 
         for (let currentLine = viewPort.start.line; currentLine <= stoppedLine; currentLine += 1) {
-            const lineText = document.lineAt(currentLine).text;
-            // Match variable declaration patterns: `<type> <name> = ...`
-            const variableMatches = lineText.matchAll(/(?:int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|char|string|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=/g);
+            const rawLineText = document.lineAt(currentLine).text;
+            const sanitizedLine = rawLineText
+                .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, (match) => ' '.repeat(match.length))
+                .replace(/\/\/.*$/, '');
+
+            // Match typed declarations (`int32 x = ...`) and `var` bindings (`var x = ...`)
+            const variableMatches = sanitizedLine.matchAll(
+                /(?:var|int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|char|string|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=|;|,|\))/g
+            );
 
             for (const match of variableMatches) {
                 if (match.index !== undefined) {
                     const variableName = match[1];
-                    const nameIndex = lineText.indexOf(variableName, match.index);
+                    const nameIndex = sanitizedLine.indexOf(variableName, match.index);
                     if (nameIndex >= 0) {
                         const wordRange = new vscode.Range(
                             currentLine,

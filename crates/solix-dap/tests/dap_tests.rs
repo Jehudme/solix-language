@@ -200,7 +200,7 @@ fn test_evaluator_logical_operators_and_compound_conditions() {
             .contains("requires boolean operands")
     );
 
-    let invalid_or_result = evaluate_expression_in_frame("true || 5", &virtual_machine, 0);
+    let invalid_or_result = evaluate_expression_in_frame("false || 5", &virtual_machine, 0);
     assert!(invalid_or_result.is_err());
     assert!(
         invalid_or_result
@@ -546,4 +546,110 @@ void main() {
         .find(|(var_name, _, _)| var_name == "static_result")
         .expect("Locals must contain static_result after stepping line 47");
     assert_eq!(static_result_entry.2, Value::I32(100));
+}
+
+#[test]
+fn test_dap_evaluator_precedence_short_circuit_unary_and_chained_member() {
+    use solix_dap::evaluator::evaluate_expression_in_frame;
+
+    let sample_source = concat!(
+        "class Inner { public int32 coord_x; public Inner(int32 val) { this.coord_x = val; } }\n",
+        "class Outer { public Inner inner; public Outer(int32 val) { this.inner = new Inner(val); } }\n",
+        "public class Main {\n",
+        "    public static int32 main() {\n",
+        "        Outer player = new Outer(42);\n",
+        "        Outer empty_player = null;\n",
+        "        bool is_ready = false;\n",
+        "        int32 offset = 7;\n",
+        "        return player.inner.coord_x + offset;\n",
+        "    }\n",
+        "}\n"
+    );
+
+    let compilation_options = CompilationOptions::new()
+        .with_profile(solix_compilation::BuildProfile::Debug)
+        .with_package_metadata("eval_test", "0.1.0", "")
+        .with_source("main.slx".to_string(), sample_source.to_string());
+
+    let mut pipeline = CompilationPipeline::standard();
+    let mut compilation_context = CompilationContext::new(compilation_options);
+    pipeline
+        .execute(&mut compilation_context)
+        .expect("Compile eval test");
+
+    let program = compilation_context
+        .emission_artifacts
+        .take()
+        .expect("Emission artifacts")
+        .program;
+
+    let main_function_id = program
+        .functions
+        .iter()
+        .position(|func| func.symbol == "main" || func.symbol.ends_with("::main"))
+        .expect("Find main function") as u32;
+    let target_pc = program.functions[main_function_id as usize]
+        .source_map
+        .iter()
+        .find(|entry| entry.line == 9)
+        .expect("Find line 9")
+        .instruction_pc;
+
+    let runtime_options = RuntimeOptions::new()
+        .with_heap_size(16 * 1024 * 1024)
+        .with_binary(program);
+    let runtime_context = RuntimeContext::new(runtime_options).expect("RuntimeContext");
+    let mut virtual_machine = VirtualMachine::new(runtime_context);
+    let _ = virtual_machine.push_frame(main_function_id, 0, &[]);
+
+    let mut controller = DapController::new(Arc::new(AtomicBool::new(false)));
+    controller.line_breakpoints.push(BreakpointEntry {
+        source_path: "main.slx".to_string(),
+        requested_line: 9,
+        verified_line: 9,
+        instruction_pc: target_pc,
+        function_id: Some(main_function_id),
+        condition_expression: None,
+        hit_condition_expression: None,
+        log_message_template: None,
+        current_hit_count: 0,
+    });
+
+    let signal = virtual_machine
+        .run_debug(&mut controller)
+        .expect("Pause on breakpoint");
+    assert_eq!(signal, DebugSignal::Pause);
+
+    // 1. Chained `.` field access
+    let chained = evaluate_expression_in_frame("player.inner.coord_x", &virtual_machine, 0)
+        .expect("evaluate player.inner.coord_x");
+    assert_eq!(chained, Value::I32(42));
+
+    // 2. Short-circuit && with null guard
+    let short_and = evaluate_expression_in_frame(
+        "empty_player != null && empty_player.inner.coord_x > 0",
+        &virtual_machine,
+        0,
+    )
+    .expect("short-circuit && with null guard must not dereference null");
+    assert_eq!(short_and, Value::Bool(false));
+
+    // 3. Short-circuit || with null guard
+    let short_or = evaluate_expression_in_frame(
+        "empty_player == null || empty_player.inner.coord_x > 0",
+        &virtual_machine,
+        0,
+    )
+    .expect("short-circuit || must return true without evaluating right");
+    assert_eq!(short_or, Value::Bool(true));
+
+    // 4. Precedence: `!is_ready == true` => `(!false) == true` => `true`
+    let neg_eq = evaluate_expression_in_frame("!is_ready == true", &virtual_machine, 0)
+        .expect("evaluate !is_ready == true");
+    assert_eq!(neg_eq, Value::Bool(true));
+
+    // 5. Unary `-`
+    let neg_offset =
+        evaluate_expression_in_frame("-offset", &virtual_machine, 0).expect("evaluate -offset");
+    assert_eq!(neg_offset, Value::I32(-7));
 }

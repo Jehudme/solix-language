@@ -105,3 +105,6 @@ The runtime tracks memory operations via `HeapTelemetry`:
 - `active_live_objects`: Count of active dynamic allocations (internal VM telemetry helper `active_guest_objects()` excludes immortal `interned_string_addrs` constant-pool strings so `--metrics` and CLI leak detection accurately report `0` active guest leaks for clean programs).
 
 Upon virtual machine termination, if guest allocations remain live (`active_guest_objects() > 0`), the runtime diagnostic layer can dump all active allocations and their backtraces to pinpoint leaks.
+
+During DAP debugger inspection (`VirtualMachine::inspect_object_fields`), class reference fields are identified directly via `CompiledClass::reference_field_offsets` before scalar type-tag matching so nested object references (`player.inner.coord_x`) always resolve as `Value::Ref` / `Value::Null`.
+

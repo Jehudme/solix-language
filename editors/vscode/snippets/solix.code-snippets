@@ -2,16 +2,17 @@
     "Solix Main Entry Point": {
         "prefix": "main",
         "body": [
-            "void main() {",
+            "public static int32 main() {",
             "    $0",
+            "    return 0;",
             "}"
         ],
-        "description": "Solix v2.0 application entry point function"
+        "description": "Solix v3 application entry point method"
     },
     "Solix Unit Test Function": {
         "prefix": "test",
         "body": [
-            "void test_${1:feature_name}() {",
+            "public static void test_${1:feature_name}() {",
             "    $0",
             "}"
         ],
@@ -20,7 +21,7 @@
     "Class Declaration": {
         "prefix": "class",
         "body": [
-            "class ${1:ClassName} {",
+            "public class ${1:ClassName} {",
             "    public ${1:ClassName}() {",
             "        $2",
             "    }",
@@ -33,7 +34,7 @@
     "Destructor Declaration": {
         "prefix": "dtor",
         "body": [
-            "~${1:ClassName}() {",
+            "public ~${1:ClassName}() {",
             "    $0",
             "}"
         ],
@@ -42,7 +43,7 @@
     "Interface Declaration": {
         "prefix": "interface",
         "body": [
-            "interface ${1:InterfaceName} {",
+            "public interface ${1:InterfaceName} {",
             "    $0",
             "}"
         ],
@@ -51,17 +52,26 @@
     "Enum Declaration": {
         "prefix": "enum",
         "body": [
-            "enum ${1:EnumName} {",
-            "    ${2:VariantFirst},",
-            "    ${3:VariantSecond}",
+            "public enum ${1:EnumName} {",
+            "    ${2:VARIANT_FIRST},",
+            "    ${3:VARIANT_SECOND}",
             "}"
         ],
         "description": "Solix enumeration declaration"
     },
+    "Operator Overload": {
+        "prefix": "operator",
+        "body": [
+            "public ${1:ReturnType} operator${2:+}(${3:const OtherType other_value}) {",
+            "    $0",
+            "}"
+        ],
+        "description": "Solix class operator overload"
+    },
     "Method Declaration": {
         "prefix": "method",
         "body": [
-            "public ${1:void} ${2:methodName}(${3:parameters}) {",
+            "public ${1:void} ${2:method_name}(${3:parameters}) {",
             "    $0",
             "}"
         ],
@@ -70,7 +80,7 @@
     "Static Method Declaration": {
         "prefix": "static",
         "body": [
-            "public static ${1:void} ${2:functionName}(${3:parameters}) {",
+            "public static ${1:void} ${2:function_name}(${3:parameters}) {",
             "    $0",
             "}"
         ],
@@ -93,6 +103,22 @@
             "}"
         ],
         "description": "While loop block"
+    },
+    "Switch Statement": {
+        "prefix": "switch",
+        "body": [
+            "switch (${1:target_value}) {",
+            "    case ${2:CASE_VALUE}: {",
+            "        $3",
+            "        break;",
+            "    }",
+            "    default: {",
+            "        $0",
+            "        break;",
+            "    }",
+            "}"
+        ],
+        "description": "Switch statement with case and default arms"
     },
     "If-Else Statement": {
         "prefix": "if",
@@ -125,18 +151,32 @@
         ],
         "description": "Module package namespace declaration"
     },
-    "Extern Import": {
-        "prefix": "extern",
+    "Import Declaration": {
+        "prefix": "import",
         "body": [
-            "extern import ${1:package_name};"
+            "import ${1:package_path}.${2:SymbolName};"
         ],
-        "description": "External package dependency import statement"
+        "description": "Module symbol or wildcard import declaration"
     },
-    "Println Expression": {
+    "Type Alias": {
+        "prefix": "alias",
+        "body": [
+            "public alias ${1:AliasName} = ${2:TargetType};"
+        ],
+        "description": "Type alias declaration"
+    },
+    "Weak Reference": {
+        "prefix": "weak",
+        "body": [
+            "weak ${1:TargetClass} ${2:weak_ref} = ${3:source_ref};"
+        ],
+        "description": "Non-owning weak reference binding"
+    },
+    "Console Println": {
         "prefix": "println",
         "body": [
-            "println(${1:output_message});"
+            "Console::println(${1:output_message});"
         ],
-        "description": "Standard console print line call"
+        "description": "Standard Console::println output statement"
     }
 }
