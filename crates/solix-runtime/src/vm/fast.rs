@@ -2814,7 +2814,12 @@ impl VirtualMachine {
         let caller_func_id = caller_frame.function_id;
         let caller_arg_start = caller_frame.register_base as usize + arg_base as usize;
 
-        if let Some(&native_fn) = self.native_registry.get(&sym_str) {
+        let clean_extern_sym = sym_str.split(['(', '/']).next().unwrap_or(&sym_str);
+        if let Some(&native_fn) = self
+            .native_registry
+            .get(&sym_str)
+            .or_else(|| self.native_registry.get(clean_extern_sym))
+        {
             let call_result =
                 self.invoke_native_callback_fast(native_fn, caller_arg_start, arg_count)?;
             let target_base = self.current_frame()?.register_base as usize;

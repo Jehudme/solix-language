@@ -441,3 +441,135 @@ public int32 main() {
     });
     assert_eq!(execution_result, Value::I32(60));
 }
+
+#[test]
+fn test_dynamic_and_static_linking_resolve_overloaded_external_constructors_and_methods() {
+    let dep_source = r#"
+package gfx;
+
+public class Vec3 {
+    public float32 x_val;
+    public float32 y_val;
+    public float32 z_val;
+
+    public Vec3() {
+        this.x_val = (float32)1.0;
+        this.y_val = (float32)2.0;
+        this.z_val = (float32)3.0;
+    }
+
+    public Vec3(float64 init_x, float64 init_y, float64 init_z) {
+        this.x_val = (float32)init_x;
+        this.y_val = (float32)init_y;
+        this.z_val = (float32)init_z;
+    }
+
+    public Vec3(int32 init_x, int32 init_y, int32 init_z) {
+        this.x_val = (float32)init_x;
+        this.y_val = (float32)init_y;
+        this.z_val = (float32)init_z;
+    }
+}
+
+public class Cam {
+    public Vec3 up;
+    public float32 fovy;
+    public int32 proj;
+
+    public Cam() {
+        this.up = new Vec3();
+        this.fovy = (float32)0.0;
+        this.proj = 7;
+    }
+
+    public Cam(Vec3 init_up, float32 init_fovy, int32 init_proj) {
+        this.up = init_up;
+        this.fovy = init_fovy;
+        this.proj = init_proj;
+    }
+
+    public static int32 pick(int32 value) {
+        return value + 10;
+    }
+
+    public static int32 pick(float64 value) {
+        return (int32)value + 100;
+    }
+}
+"#;
+
+    let mut dep_options = CompilationOptions::new()
+        .with_profile(BuildProfile::Release)
+        .with_source("gfx.slx", dep_source);
+    dep_options.package_name = "gfx".to_string();
+    let mut dep_context = CompilationContext::new(dep_options);
+    CompilationPipeline::standard()
+        .execute(&mut dep_context)
+        .expect("Dep compilation must succeed");
+    let dep_artifacts = dep_context
+        .emit_context()
+        .expect("Dep emission must succeed");
+    let dep_binary = dep_artifacts.program.clone();
+
+    let consumer_source = r#"
+import gfx.*;
+
+public class Main {
+    public static int32 main() {
+        Cam cam_default = new Cam();
+        cam_default.up = new Vec3(1, 2, 3);
+        cam_default.fovy = 45;
+        Vec3 vec_f64 = new Vec3(4.0, 5.0, 6.0);
+        int32 from_i32 = Cam::pick(5);
+        int32 from_f64 = Cam::pick(5.0);
+        return cam_default.proj + (int32)cam_default.up.y_val + (int32)vec_f64.z_val + from_i32 + from_f64;
+    }
+}
+"#;
+
+    // 1. Dynamic linking mode (CallExtern resolved at runtime)
+    let mut dyn_options = CompilationOptions::new()
+        .with_profile(BuildProfile::Debug)
+        .with_link_mode(LinkMode::Dynamic)
+        .with_source("main.slx", consumer_source);
+    dyn_options.dependency_binaries.push(dep_binary.clone());
+    let mut dyn_context = CompilationContext::new(dyn_options);
+    CompilationPipeline::standard()
+        .execute(&mut dyn_context)
+        .expect("Dynamic consumer compilation must succeed");
+    let dyn_artifacts = dyn_context
+        .emit_context()
+        .expect("Dynamic consumer emission must succeed");
+
+    let dyn_runtime = RuntimeContext::new(
+        RuntimeOptions::new()
+            .with_binary(dep_binary.clone())
+            .with_binary(dyn_artifacts.program.clone()),
+    )
+    .expect("Dynamic runtime init must succeed");
+    let mut dyn_vm = VirtualMachine::new(dyn_runtime);
+    let dyn_result = dyn_vm.run().expect("Dynamic execution must succeed");
+    // 7 + 2 + 6 + 15 + 105 = 135
+    assert_eq!(dyn_result, Value::I32(135));
+
+    // 2. Static linking mode (CallExtern resolved by static linker)
+    let mut static_options = CompilationOptions::new()
+        .with_profile(BuildProfile::Release)
+        .with_link_mode(LinkMode::Static)
+        .with_source("main.slx", consumer_source);
+    static_options.dependency_binaries.push(dep_binary);
+    let mut static_context = CompilationContext::new(static_options);
+    CompilationPipeline::standard()
+        .execute(&mut static_context)
+        .expect("Static consumer compilation must succeed");
+    let static_artifacts = static_context
+        .emit_context()
+        .expect("Static consumer emission must succeed");
+
+    let static_runtime =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(static_artifacts.program.clone()))
+            .expect("Static runtime init must succeed");
+    let mut static_vm = VirtualMachine::new(static_runtime);
+    let static_result = static_vm.run().expect("Static execution must succeed");
+    assert_eq!(static_result, Value::I32(135));
+}

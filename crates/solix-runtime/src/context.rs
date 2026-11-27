@@ -359,26 +359,32 @@ impl RuntimeContext {
                     .split('(')
                     .next()
                     .unwrap_or(&compiled_function.symbol);
-                if clean_symbol != compiled_function.symbol {
-                    symbol_to_function_id.insert(clean_symbol.to_string(), global_function_id);
+                let has_param_sig = clean_symbol != compiled_function.symbol;
+                if has_param_sig {
+                    symbol_to_function_id
+                        .entry(clean_symbol.to_string())
+                        .or_insert(global_function_id);
                 }
 
                 let is_constructor = clean_symbol.ends_with("::constructor")
                     || clean_symbol.ends_with(".constructor");
                 let is_destructor = clean_symbol.ends_with("::~destructor")
                     || clean_symbol.ends_with(".~destructor");
+                let arity_for_call = if is_constructor {
+                    compiled_function.param_count.saturating_sub(1)
+                } else {
+                    compiled_function.param_count
+                };
 
-                if is_constructor {
-                    let constructor_arity = compiled_function.param_count.saturating_sub(1);
+                if !is_destructor {
                     symbol_to_function_id.insert(
-                        format!("{clean_symbol}/{constructor_arity}"),
+                        format!("{clean_symbol}/{arity_for_call}"),
                         global_function_id,
                     );
-                } else if !is_destructor {
-                    symbol_to_function_id.insert(
-                        format!("{clean_symbol}/{}", compiled_function.param_count),
-                        global_function_id,
-                    );
+                    if arity_for_call == 0 && !has_param_sig {
+                        symbol_to_function_id
+                            .insert(format!("{clean_symbol}()"), global_function_id);
+                    }
                 }
 
                 if !binary.package_name.is_empty() {
@@ -386,36 +392,43 @@ impl RuntimeContext {
                         format!("{}::{}", binary.package_name, compiled_function.symbol);
                     let package_dot =
                         format!("{}.{}", binary.package_name, compiled_function.symbol);
-                    symbol_to_function_id.insert(package_colon, global_function_id);
-                    symbol_to_function_id.insert(package_dot, global_function_id);
-
-                    if clean_symbol != compiled_function.symbol {
-                        let package_clean_colon =
-                            format!("{}::{}", binary.package_name, clean_symbol);
-                        let package_clean_dot = format!("{}.{}", binary.package_name, clean_symbol);
+                    if has_param_sig {
+                        symbol_to_function_id.insert(package_colon, global_function_id);
+                        symbol_to_function_id.insert(package_dot, global_function_id);
+                    } else {
                         symbol_to_function_id
-                            .insert(package_clean_colon.clone(), global_function_id);
-                        symbol_to_function_id.insert(package_clean_dot.clone(), global_function_id);
+                            .entry(package_colon)
+                            .or_insert(global_function_id);
+                        symbol_to_function_id
+                            .entry(package_dot)
+                            .or_insert(global_function_id);
+                    }
 
-                        if is_constructor {
-                            let constructor_arity = compiled_function.param_count.saturating_sub(1);
-                            symbol_to_function_id.insert(
-                                format!("{package_clean_colon}/{constructor_arity}"),
-                                global_function_id,
-                            );
-                            symbol_to_function_id.insert(
-                                format!("{package_clean_dot}/{constructor_arity}"),
-                                global_function_id,
-                            );
-                        } else if !is_destructor {
-                            symbol_to_function_id.insert(
-                                format!("{package_clean_colon}/{}", compiled_function.param_count),
-                                global_function_id,
-                            );
-                            symbol_to_function_id.insert(
-                                format!("{package_clean_dot}/{}", compiled_function.param_count),
-                                global_function_id,
-                            );
+                    let package_clean_colon = format!("{}::{}", binary.package_name, clean_symbol);
+                    let package_clean_dot = format!("{}.{}", binary.package_name, clean_symbol);
+                    if has_param_sig {
+                        symbol_to_function_id
+                            .entry(package_clean_colon.clone())
+                            .or_insert(global_function_id);
+                        symbol_to_function_id
+                            .entry(package_clean_dot.clone())
+                            .or_insert(global_function_id);
+                    }
+
+                    if !is_destructor {
+                        symbol_to_function_id.insert(
+                            format!("{package_clean_colon}/{arity_for_call}"),
+                            global_function_id,
+                        );
+                        symbol_to_function_id.insert(
+                            format!("{package_clean_dot}/{arity_for_call}"),
+                            global_function_id,
+                        );
+                        if arity_for_call == 0 && !has_param_sig {
+                            symbol_to_function_id
+                                .insert(format!("{package_clean_colon}()"), global_function_id);
+                            symbol_to_function_id
+                                .insert(format!("{package_clean_dot}()"), global_function_id);
                         }
                     }
                 }
@@ -1043,7 +1056,126 @@ impl RuntimeContext {
         if let Some(&found_id) = self.symbol_to_function_id.get(symbol) {
             return Some(found_id);
         }
-        if let Some((base_symbol, _arity)) = symbol.rsplit_once('/') {
+
+        // 1. Parameter-signature-aware resolution when `(params)` is present.
+        if let Some((base_symbol, sig_part)) = symbol.split_once('(') {
+            let full_sig = format!("({sig_part}");
+            let normalized_base = base_symbol.replace('.', "::");
+            let params_inner = sig_part.strip_suffix(')').unwrap_or(sig_part).trim();
+            let param_list: Vec<&str> = if params_inner.is_empty() {
+                Vec::new()
+            } else {
+                params_inner.split(',').map(str::trim).collect()
+            };
+            let call_arity = param_list.len();
+
+            if call_arity == 0
+                && let Some(&found_id) = self
+                    .symbol_to_function_id
+                    .get(&format!("{base_symbol}/0"))
+                    .or_else(|| {
+                        self.symbol_to_function_id
+                            .get(&format!("{normalized_base}/0"))
+                    })
+            {
+                return Some(found_id);
+            }
+
+            // Exact normalized signature match across registered functions (deterministic order).
+            for (func_idx, func) in self.all_functions.iter().enumerate() {
+                let func_sym = func.symbol.replace('.', "::");
+                let Some((cand_base, cand_sig_rest)) = func_sym.split_once('(') else {
+                    if call_arity == 0 && normalized_base.ends_with(&func_sym) {
+                        let is_ctor = func_sym.ends_with("::constructor");
+                        let fn_arity = if is_ctor {
+                            func.param_count.saturating_sub(1) as usize
+                        } else {
+                            func.param_count as usize
+                        };
+                        if fn_arity == 0 {
+                            return Some(func_idx as u32);
+                        }
+                    }
+                    continue;
+                };
+                let cand_sig = format!("({cand_sig_rest}");
+                if cand_sig == full_sig
+                    && (cand_base == normalized_base
+                        || normalized_base.ends_with(&format!("::{cand_base}"))
+                        || cand_base.ends_with(&format!("::{normalized_base}")))
+                {
+                    return Some(func_idx as u32);
+                }
+            }
+
+            // Numeric-widening / compatible signature match for matching arity.
+            for (func_idx, func) in self.all_functions.iter().enumerate() {
+                let func_sym = func.symbol.replace('.', "::");
+                let Some((cand_base, cand_sig_rest)) = func_sym.split_once('(') else {
+                    continue;
+                };
+                if !(cand_base == normalized_base
+                    || normalized_base.ends_with(&format!("::{cand_base}"))
+                    || cand_base.ends_with(&format!("::{normalized_base}")))
+                {
+                    continue;
+                }
+                let cand_inner = cand_sig_rest
+                    .strip_suffix(')')
+                    .unwrap_or(cand_sig_rest)
+                    .trim();
+                let cand_params: Vec<&str> = if cand_inner.is_empty() {
+                    Vec::new()
+                } else {
+                    cand_inner.split(',').map(str::trim).collect()
+                };
+                if cand_params.len() == param_list.len()
+                    && param_list
+                        .iter()
+                        .zip(cand_params.iter())
+                        .all(|(arg_ty, param_ty)| {
+                            Self::is_signature_type_compatible(arg_ty, param_ty)
+                        })
+                {
+                    return Some(func_idx as u32);
+                }
+            }
+
+            // Fallback to arity match.
+            if let Some(&found_id) = self
+                .symbol_to_function_id
+                .get(&format!("{base_symbol}/{call_arity}"))
+                .or_else(|| {
+                    self.symbol_to_function_id
+                        .get(&format!("{normalized_base}/{call_arity}"))
+                })
+            {
+                return Some(found_id);
+            }
+        }
+
+        // 2. Arity-aware resolution when `/arity` is present.
+        if let Some((base_symbol, arity_str)) = symbol.rsplit_once('/')
+            && let Ok(call_arity) = arity_str.parse::<usize>()
+        {
+            let normalized_base = base_symbol.replace('.', "::");
+            for (func_idx, func) in self.all_functions.iter().enumerate() {
+                let func_sym = func.symbol.replace('.', "::");
+                let cand_base = func_sym.split('(').next().unwrap_or(&func_sym);
+                let is_ctor = cand_base.ends_with("::constructor");
+                let fn_arity = if is_ctor {
+                    func.param_count.saturating_sub(1) as usize
+                } else {
+                    func.param_count as usize
+                };
+                if fn_arity == call_arity
+                    && (cand_base == normalized_base
+                        || normalized_base.ends_with(&format!("::{cand_base}"))
+                        || cand_base.ends_with(&format!("::{normalized_base}")))
+                {
+                    return Some(func_idx as u32);
+                }
+            }
             if let Some(&found_id) = self.symbol_to_function_id.get(base_symbol) {
                 return Some(found_id);
             }
@@ -1055,6 +1187,7 @@ impl RuntimeContext {
                 return Some(found_id);
             }
         }
+
         let clean_symbol = symbol.split(['(', '/']).next().unwrap_or(symbol);
         if let Some(&found_id) = self.symbol_to_function_id.get(clean_symbol) {
             return Some(found_id);
@@ -1098,6 +1231,29 @@ impl RuntimeContext {
             }
         }
         None
+    }
+
+    fn is_signature_type_compatible(arg_ty: &str, param_ty: &str) -> bool {
+        let arg_simple = arg_ty.rsplit(['.', ':']).next().unwrap_or(arg_ty).trim();
+        let param_simple = param_ty
+            .rsplit(['.', ':'])
+            .next()
+            .unwrap_or(param_ty)
+            .trim();
+        if arg_simple == param_simple {
+            return true;
+        }
+        matches!(
+            (arg_simple, param_simple),
+            (
+                "int32" | "i32",
+                "int64" | "i64" | "float32" | "f32" | "float64" | "f64"
+            ) | ("int64" | "i64", "float64" | "f64")
+                | ("float32" | "f32", "float64" | "f64")
+                | ("float64" | "f64", "float32" | "f32")
+                | ("string", "String")
+                | ("String", "string")
+        )
     }
 
     /// Resolves class virtual table ID and instance size in bytes by class symbol name.

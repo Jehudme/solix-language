@@ -619,7 +619,11 @@ impl<'program> StaticLinker<'program> {
         // Pass 1: Exact normalized full symbol (including signature if present)
         for (dep_opt, functions) in candidate_programs.clone() {
             for (func_idx, function) in functions.iter().enumerate() {
-                if normalize_symbol(&function.symbol) == normalized_full {
+                let candidate_full = normalize_symbol(&function.symbol);
+                if candidate_full == normalized_full
+                    || (candidate_full.contains('(')
+                        && normalized_full.ends_with(&format!("::{candidate_full}")))
+                {
                     return Some(match dep_opt {
                         None => ResolvedFunctionTarget::Local(func_idx),
                         Some(dep_idx) => ResolvedFunctionTarget::Dependency(dep_idx, func_idx),
