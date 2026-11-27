@@ -189,6 +189,26 @@ pub struct SolixVmContext {
 
     /// Sets the cycle collector candidate threshold.
     pub set_cycle_threshold: unsafe extern "C" fn(vm_ptr: *mut c_void, threshold: u32),
+    /// Reads a 32-bit signed integer field from an object handle by explicit 0-based field index.
+    pub get_field_i32_by_index: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
+    /// Writes a 32-bit signed integer field to an object handle by explicit 0-based field index.
+    pub set_field_i32_by_index: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+    /// Reads a 32-bit signed integer field from an object handle by explicit byte offset.
+    pub get_field_i32_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
+    /// Writes a 32-bit signed integer field to an object handle by explicit byte offset.
+    pub set_field_i32_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+    /// Reads a 64-bit field from an object by explicit 0-based field index.
+    pub read_field_u64_by_index:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, field_index: u32) -> u64,
+    /// Writes a 64-bit field to an object by explicit 0-based field index.
+    pub write_field_u64_by_index:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, field_index: u32, raw_val: u64),
+    /// Reads a 64-bit field from an object by explicit byte offset.
+    pub read_field_u64_by_offset:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, byte_offset: u32) -> u64,
+    /// Writes a 64-bit field to an object by explicit byte offset.
+    pub write_field_u64_by_offset:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, byte_offset: u32, raw_val: u64),
 }
 
 /// Stable C-ABI native function pointer signature.
@@ -274,6 +294,14 @@ pub fn invoke_c_native(
         get_vm_metric: solix_vm_get_metric,
         collect_cycles: solix_vm_collect_cycles,
         set_cycle_threshold: solix_vm_set_cycle_threshold,
+        get_field_i32_by_index: solix_vm_get_field_i32_by_index,
+        set_field_i32_by_index: solix_vm_set_field_i32_by_index,
+        get_field_i32_by_offset: solix_vm_get_field_i32_by_offset,
+        set_field_i32_by_offset: solix_vm_set_field_i32_by_offset,
+        read_field_u64_by_index: solix_vm_read_field_u64_by_index,
+        write_field_u64_by_index: solix_vm_write_field_u64_by_index,
+        read_field_u64_by_offset: solix_vm_read_field_u64_by_offset,
+        write_field_u64_by_offset: solix_vm_write_field_u64_by_offset,
     };
     let context_wrapper_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -519,48 +547,135 @@ impl SharedLibraryLoader {
 /// # Safety
 /// The caller must ensure `vm_context` is either null or points to a valid `VirtualMachine`
 /// or `SolixVmContext` instance, and that `object_address` references valid heap memory.
+fn lookup_class_descriptor(
+    vm_instance: &VirtualMachine,
+    object_address: u32,
+) -> Option<&solix_common::CompiledClass> {
+    vm_instance
+        .heap
+        .read_u32(object_address)
+        .ok()
+        .and_then(|vtable_identifier| {
+            vm_instance
+                .context
+                .get_class_by_vtable_id(vtable_identifier)
+        })
+}
+
+fn resolve_field_by_index(
+    vm_instance: &VirtualMachine,
+    object_address: u32,
+    field_index: u32,
+    default_stride: u32,
+) -> Option<(u32, u8)> {
+    if let Some(class_descriptor) = lookup_class_descriptor(vm_instance, object_address)
+        && !class_descriptor.field_types.is_empty()
+    {
+        let mut sorted_field_list = class_descriptor.field_types.clone();
+        sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
+        return sorted_field_list
+            .get(field_index as usize)
+            .map(|&(field_offset, resolved_tag)| (field_offset as u32, resolved_tag));
+    }
+    field_index
+        .checked_mul(default_stride)
+        .and_then(|slot_offset| 8u32.checked_add(slot_offset))
+        .map(|computed_offset| (computed_offset, 0))
+}
+
+fn resolve_field_by_offset(
+    vm_instance: &VirtualMachine,
+    object_address: u32,
+    byte_offset: u32,
+) -> (u32, u8) {
+    let field_tag = lookup_class_descriptor(vm_instance, object_address)
+        .and_then(|class_descriptor| class_descriptor.get_field_type(byte_offset as usize))
+        .unwrap_or(0);
+    (byte_offset, field_tag)
+}
+
+fn read_field_i32_resolved(
+    vm_instance: &VirtualMachine,
+    object_address: u32,
+    actual_offset: u32,
+    field_tag: u8,
+) -> i32 {
+    let Some(field_addr) = object_address.checked_add(actual_offset) else {
+        return 0;
+    };
+    match field_tag {
+        1 => vm_instance.heap.read_u8(field_addr).unwrap_or(0) as i8 as i32,
+        2 | 11 => vm_instance.heap.read_u8(field_addr).unwrap_or(0) as i32,
+        3 => vm_instance.heap.read_u16(field_addr).unwrap_or(0) as i16 as i32,
+        4 => vm_instance.heap.read_u16(field_addr).unwrap_or(0) as i32,
+        _ => vm_instance
+            .heap
+            .read_u32(field_addr)
+            .map(|value| value as i32)
+            .unwrap_or(0),
+    }
+}
+
+fn write_field_i32_resolved(
+    vm_instance: &mut VirtualMachine,
+    object_address: u32,
+    actual_offset: u32,
+    field_tag: u8,
+    value: i32,
+) {
+    let Some(field_addr) = object_address.checked_add(actual_offset) else {
+        return;
+    };
+    match field_tag {
+        1 | 2 => {
+            let _ = vm_instance.heap.write_u8(field_addr, value as u8);
+        }
+        3 | 4 => {
+            let _ = vm_instance.heap.write_u16(field_addr, value as u16);
+        }
+        11 => {
+            let _ = vm_instance.heap.write_u8(field_addr, u8::from(value != 0));
+        }
+        _ => {
+            let _ = vm_instance.heap.write_u32(field_addr, value as u32);
+        }
+    }
+}
+
+/// Legacy helper reading a 32-bit integer field using field index `< 8` or byte offset `>= 8`.
+///
+/// Prefer `solix_vm_get_field_i32_by_index` or `solix_vm_get_field_i32_by_offset` to avoid
+/// collisions on classes with small offsets or >= 8 fields.
+///
+/// # Safety
+/// The caller must ensure `vm_context` is either null or points to a valid `VirtualMachine`
+/// or `SolixVmContext` instance, and that `object_address` references valid heap memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn solix_vm_get_field_i32(
     vm_context: *mut c_void,
     object_address: u32,
     offset: u32,
 ) -> i32 {
-    if vm_context.is_null() {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return 0;
+    };
+    if object_address == 0 {
         return 0;
     }
-    let actual_vm_ptr = unsafe {
-        let context_ptr = vm_context as *mut SolixVmContext;
-        if !context_ptr.is_null() && (*context_ptr).magic == SOLIX_VM_CONTEXT_MAGIC {
-            (*context_ptr).vm_ptr
-        } else {
-            vm_context
-        }
-    };
-    let vm = unsafe { &mut *(actual_vm_ptr as *mut VirtualMachine) };
-    let actual_offset = if offset < 8 {
-        let resolved_offset = vm
-            .heap
-            .read_u32(object_address)
-            .ok()
-            .and_then(|vtable_id| vm.context.get_class_by_vtable_id(vtable_id))
-            .and_then(|class_desc| {
-                let mut sorted_fields = class_desc.field_types.clone();
-                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
-                sorted_fields
-                    .get(offset as usize)
-                    .map(|&(field_offset, _)| field_offset as u32)
-            });
-        resolved_offset.unwrap_or(8 + offset * 4)
+    let Some((actual_offset, field_tag)) = (if offset < 8 {
+        resolve_field_by_index(vm_instance, object_address, offset, 4)
     } else {
-        offset
+        Some(resolve_field_by_offset(vm_instance, object_address, offset))
+    }) else {
+        return 0;
     };
-    vm.heap
-        .read_u32(object_address + actual_offset)
-        .map(|value| value as i32)
-        .unwrap_or(0)
+    read_field_i32_resolved(vm_instance, object_address, actual_offset, field_tag)
 }
 
-/// Instance helper export allowing native C callbacks to write a 32-bit field to a Solix object.
+/// Legacy helper writing a 32-bit integer field using field index `< 8` or byte offset `>= 8`.
+///
+/// Prefer `solix_vm_set_field_i32_by_index` or `solix_vm_set_field_i32_by_offset` to avoid
+/// collisions on classes with small offsets or >= 8 fields.
 ///
 /// # Safety
 /// The caller must ensure `vm_context` is either null or points to a valid `VirtualMachine`
@@ -572,38 +687,112 @@ pub unsafe extern "C" fn solix_vm_set_field_i32(
     offset: u32,
     value: i32,
 ) {
-    if vm_context.is_null() {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return;
+    };
+    if object_address == 0 {
         return;
     }
-    let actual_vm_ptr = unsafe {
-        let context_ptr = vm_context as *mut SolixVmContext;
-        if !context_ptr.is_null() && (*context_ptr).magic == SOLIX_VM_CONTEXT_MAGIC {
-            (*context_ptr).vm_ptr
-        } else {
-            vm_context
-        }
-    };
-    let vm = unsafe { &mut *(actual_vm_ptr as *mut VirtualMachine) };
-    let actual_offset = if offset < 8 {
-        let resolved_offset = vm
-            .heap
-            .read_u32(object_address)
-            .ok()
-            .and_then(|vtable_id| vm.context.get_class_by_vtable_id(vtable_id))
-            .and_then(|class_desc| {
-                let mut sorted_fields = class_desc.field_types.clone();
-                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
-                sorted_fields
-                    .get(offset as usize)
-                    .map(|&(field_offset, _)| field_offset as u32)
-            });
-        resolved_offset.unwrap_or(8 + offset * 4)
+    let Some((actual_offset, field_tag)) = (if offset < 8 {
+        resolve_field_by_index(vm_instance, object_address, offset, 4)
     } else {
-        offset
+        Some(resolve_field_by_offset(vm_instance, object_address, offset))
+    }) else {
+        return;
     };
-    let _ = vm
-        .heap
-        .write_u32(object_address + actual_offset, value as u32);
+    write_field_i32_resolved(vm_instance, object_address, actual_offset, field_tag, value);
+}
+
+/// Reads a 32-bit signed integer field from an object instance using its explicit 0-based `field_index`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` is null or points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_get_field_i32_by_index(
+    vm_context: *mut c_void,
+    object_address: u32,
+    field_index: u32,
+) -> i32 {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return 0;
+    };
+    if object_address == 0 {
+        return 0;
+    }
+    let Some((actual_offset, field_tag)) =
+        resolve_field_by_index(vm_instance, object_address, field_index, 4)
+    else {
+        return 0;
+    };
+    read_field_i32_resolved(vm_instance, object_address, actual_offset, field_tag)
+}
+
+/// Writes a 32-bit signed integer field to an object instance using its explicit 0-based `field_index`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` is null or points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_set_field_i32_by_index(
+    vm_context: *mut c_void,
+    object_address: u32,
+    field_index: u32,
+    value: i32,
+) {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return;
+    };
+    if object_address == 0 {
+        return;
+    }
+    let Some((actual_offset, field_tag)) =
+        resolve_field_by_index(vm_instance, object_address, field_index, 4)
+    else {
+        return;
+    };
+    write_field_i32_resolved(vm_instance, object_address, actual_offset, field_tag, value);
+}
+
+/// Reads a 32-bit signed integer field from an object instance using its explicit `byte_offset`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` is null or points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_get_field_i32_by_offset(
+    vm_context: *mut c_void,
+    object_address: u32,
+    byte_offset: u32,
+) -> i32 {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return 0;
+    };
+    if object_address == 0 {
+        return 0;
+    }
+    let (actual_offset, field_tag) =
+        resolve_field_by_offset(vm_instance, object_address, byte_offset);
+    read_field_i32_resolved(vm_instance, object_address, actual_offset, field_tag)
+}
+
+/// Writes a 32-bit signed integer field to an object instance using its explicit `byte_offset`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` is null or points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_set_field_i32_by_offset(
+    vm_context: *mut c_void,
+    object_address: u32,
+    byte_offset: u32,
+    value: i32,
+) {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return;
+    };
+    if object_address == 0 {
+        return;
+    }
+    let (actual_offset, field_tag) =
+        resolve_field_by_offset(vm_instance, object_address, byte_offset);
+    write_field_i32_resolved(vm_instance, object_address, actual_offset, field_tag, value);
 }
 
 /// Safely resolves a `*mut c_void` context pointer into an optional `VirtualMachine` reference.
@@ -614,6 +803,7 @@ unsafe fn resolve_vm<'vm>(vm_context: *mut c_void) -> Option<&'vm mut VirtualMac
     let actual_vm_ptr = {
         let context_pointer = vm_context as *mut SolixVmContext;
         if !context_pointer.is_null()
+            && context_pointer.is_aligned()
             && unsafe { (*context_pointer).magic } == SOLIX_VM_CONTEXT_MAGIC
         {
             unsafe { (*context_pointer).vm_ptr }
@@ -621,15 +811,17 @@ unsafe fn resolve_vm<'vm>(vm_context: *mut c_void) -> Option<&'vm mut VirtualMac
             vm_context
         }
     };
-    if actual_vm_ptr.is_null() {
+    let vm_pointer = actual_vm_ptr as *mut VirtualMachine;
+    if actual_vm_ptr.is_null() || !vm_pointer.is_aligned() {
         None
     } else {
-        Some(unsafe { &mut *(actual_vm_ptr as *mut VirtualMachine) })
+        Some(unsafe { &mut *vm_pointer })
     }
 }
 
 /// Reads bytes from a guest `string`, `char[]`, or `int8[]` into `out_buffer` (up to `capacity` bytes).
-/// Returns the total byte/element length of the string or array.
+/// For `char[]` arrays holding Unicode scalar values (`type_tag == 12`, `element_size >= 4`),
+/// transcodes elements to UTF-8 and returns the full UTF-8 byte length.
 ///
 /// # Safety
 /// The caller must ensure `out_buffer` is valid for writing `capacity` bytes if non-null.
@@ -658,8 +850,9 @@ pub unsafe extern "C" fn solix_vm_read_bytes(
         if !out_buffer.is_null() && capacity > 0 {
             let copy_length = (capacity as usize).min(total_length as usize);
             let start_offset = source_address as usize;
-            let end_offset = start_offset + copy_length;
-            if end_offset <= vm_instance.heap.buffer.len() {
+            if let Some(end_offset) = start_offset.checked_add(copy_length)
+                && end_offset <= vm_instance.heap.buffer.len()
+            {
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         vm_instance.heap.buffer[start_offset..end_offset].as_ptr(),
@@ -673,19 +866,98 @@ pub unsafe extern "C" fn solix_vm_read_bytes(
     } else if header.tag == BlockTag::ArrayRef {
         let total_length = vm_instance.heap.read_u32(source_address).unwrap_or(0);
         let array_offset = source_address as usize;
-        let element_size = vm_instance
-            .heap
-            .buffer
-            .get(array_offset + 4)
-            .copied()
+        let element_size = array_offset
+            .checked_add(4)
+            .and_then(|meta_offset| vm_instance.heap.buffer.get(meta_offset).copied())
             .unwrap_or(8)
             .max(1) as usize;
+        let type_tag = array_offset
+            .checked_add(7)
+            .and_then(|tag_offset| vm_instance.heap.buffer.get(tag_offset).copied())
+            .unwrap_or(0);
+        let Some(data_start) = array_offset.checked_add(8) else {
+            return 0;
+        };
+
+        if type_tag == 12 && element_size >= 4 {
+            let mut total_utf8_bytes = 0usize;
+            let mut written_bytes = 0usize;
+            let target_cap = if out_buffer.is_null() {
+                0
+            } else {
+                capacity as usize
+            };
+            let heap_len = vm_instance.heap.buffer.len();
+            let mut utf8_scratch = [0u8; 4];
+
+            for element_index in 0..total_length as usize {
+                let Some(element_offset) = element_index
+                    .checked_mul(element_size)
+                    .and_then(|relative_offset| data_start.checked_add(relative_offset))
+                else {
+                    break;
+                };
+                let Some(element_end) = element_offset.checked_add(element_size) else {
+                    break;
+                };
+                if element_end > heap_len {
+                    break;
+                }
+                let raw_word = if element_size >= 8 {
+                    let bytes: [u8; 8] = vm_instance.heap.buffer
+                        [element_offset..element_offset + 8]
+                        .try_into()
+                        .unwrap_or([0; 8]);
+                    u64::from_le_bytes(bytes)
+                } else {
+                    let bytes: [u8; 4] = vm_instance.heap.buffer
+                        [element_offset..element_offset + 4]
+                        .try_into()
+                        .unwrap_or([0; 4]);
+                    u64::from(u32::from_le_bytes(bytes))
+                };
+                let code_point = raw_word as u32;
+                if code_point < 0x80 {
+                    if written_bytes < target_cap {
+                        unsafe {
+                            *out_buffer.add(written_bytes) = code_point as u8;
+                        }
+                        written_bytes += 1;
+                    }
+                    total_utf8_bytes = total_utf8_bytes.saturating_add(1);
+                } else {
+                    let unicode_char =
+                        char::from_u32(code_point).unwrap_or(char::REPLACEMENT_CHARACTER);
+                    let encoded_bytes = unicode_char.encode_utf8(&mut utf8_scratch).as_bytes();
+                    let remaining_cap = target_cap.saturating_sub(written_bytes);
+                    let copy_bytes = remaining_cap.min(encoded_bytes.len());
+                    if copy_bytes > 0 {
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                encoded_bytes.as_ptr(),
+                                out_buffer.add(written_bytes),
+                                copy_bytes,
+                            );
+                        }
+                        written_bytes += copy_bytes;
+                    }
+                    total_utf8_bytes = total_utf8_bytes.saturating_add(encoded_bytes.len());
+                }
+            }
+            return u32::try_from(total_utf8_bytes).unwrap_or(u32::MAX);
+        }
 
         if !out_buffer.is_null() && capacity > 0 {
             let copy_count = (capacity as usize).min(total_length as usize);
+            let heap_len = vm_instance.heap.buffer.len();
             for element_index in 0..copy_count {
-                let element_offset = array_offset + 8 + (element_index * element_size);
-                if element_offset < vm_instance.heap.buffer.len() {
+                let Some(element_offset) = element_index
+                    .checked_mul(element_size)
+                    .and_then(|relative_offset| data_start.checked_add(relative_offset))
+                else {
+                    break;
+                };
+                if element_offset < heap_len {
                     let byte_value = vm_instance.heap.buffer[element_offset];
                     unsafe {
                         *out_buffer.add(element_index) = byte_value;
@@ -743,6 +1015,86 @@ pub unsafe extern "C" fn solix_vm_alloc_chars(
         Some(resolved_instance) => resolved_instance,
         None => return 0,
     };
+
+    if !source_pointer.is_null() && char_count > 0 {
+        let source_slice =
+            unsafe { std::slice::from_raw_parts(source_pointer, char_count as usize) };
+        if source_slice.is_ascii() {
+            let element_count = source_slice.len();
+            let payload_size = match element_count
+                .checked_mul(8)
+                .and_then(|computed_bytes| computed_bytes.checked_add(8))
+            {
+                Some(calculated_size) if calculated_size <= u32::MAX as usize => calculated_size,
+                _ => return 0,
+            };
+            let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
+                Ok(allocated_address) => allocated_address,
+                Err(_) => return 0,
+            };
+            let _ = vm_instance
+                .heap
+                .write_u32(array_address, element_count as u32);
+            if let Some(meta_addr) = array_address.checked_add(4) {
+                let _ = vm_instance.heap.write_u8(meta_addr, 8);
+            }
+            if let Some(tag_addr) = array_address.checked_add(7) {
+                let _ = vm_instance.heap.write_u8(tag_addr, 12); // Type tag 12 = Char
+            }
+            for (character_index, &character_byte) in source_slice.iter().enumerate() {
+                let Some(slot_address) = (character_index as u32)
+                    .checked_mul(8)
+                    .and_then(|relative_offset| relative_offset.checked_add(8))
+                    .and_then(|offset_bytes| array_address.checked_add(offset_bytes))
+                else {
+                    break;
+                };
+                let _ = vm_instance
+                    .heap
+                    .write_u64(slot_address, character_byte as u64);
+            }
+            return array_address;
+        }
+
+        let decoded_text = String::from_utf8_lossy(source_slice);
+        let code_points: Vec<u32> = decoded_text
+            .chars()
+            .map(|unicode_char| unicode_char as u32)
+            .collect();
+        let element_count = code_points.len();
+        let payload_size = match element_count
+            .checked_mul(8)
+            .and_then(|computed_bytes| computed_bytes.checked_add(8))
+        {
+            Some(calculated_size) if calculated_size <= u32::MAX as usize => calculated_size,
+            _ => return 0,
+        };
+        let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
+            Ok(allocated_address) => allocated_address,
+            Err(_) => return 0,
+        };
+        let _ = vm_instance
+            .heap
+            .write_u32(array_address, element_count as u32);
+        if let Some(meta_addr) = array_address.checked_add(4) {
+            let _ = vm_instance.heap.write_u8(meta_addr, 8);
+        }
+        if let Some(tag_addr) = array_address.checked_add(7) {
+            let _ = vm_instance.heap.write_u8(tag_addr, 12); // Type tag 12 = Char
+        }
+        for (character_index, code_point) in code_points.into_iter().enumerate() {
+            let Some(slot_address) = (character_index as u32)
+                .checked_mul(8)
+                .and_then(|relative_offset| relative_offset.checked_add(8))
+                .and_then(|offset_bytes| array_address.checked_add(offset_bytes))
+            else {
+                break;
+            };
+            let _ = vm_instance.heap.write_u64(slot_address, code_point as u64);
+        }
+        return array_address;
+    }
+
     let payload_size = match (char_count as usize)
         .checked_mul(8)
         .and_then(|computed_bytes| computed_bytes.checked_add(8))
@@ -755,25 +1107,11 @@ pub unsafe extern "C" fn solix_vm_alloc_chars(
         Err(_) => return 0,
     };
     let _ = vm_instance.heap.write_u32(array_address, char_count);
-    let _ = vm_instance.heap.write_u8(array_address + 4, 8);
-    let _ = vm_instance.heap.write_u8(array_address + 7, 12); // Type tag 12 = Char
-
-    if !source_pointer.is_null() && char_count > 0 {
-        let source_slice =
-            unsafe { std::slice::from_raw_parts(source_pointer, char_count as usize) };
-        for (character_index, &character_byte) in source_slice.iter().enumerate() {
-            let offset_bytes = match (character_index as u32)
-                .checked_mul(8)
-                .and_then(|relative_offset| relative_offset.checked_add(8))
-            {
-                Some(computed_offset) => computed_offset,
-                None => break,
-            };
-            let slot_address = array_address + offset_bytes;
-            let _ = vm_instance
-                .heap
-                .write_u64(slot_address, character_byte as u64);
-        }
+    if let Some(meta_addr) = array_address.checked_add(4) {
+        let _ = vm_instance.heap.write_u8(meta_addr, 8);
+    }
+    if let Some(tag_addr) = array_address.checked_add(7) {
+        let _ = vm_instance.heap.write_u8(tag_addr, 12); // Type tag 12 = Char
     }
     array_address
 }
@@ -805,21 +1143,24 @@ pub unsafe extern "C" fn solix_vm_alloc_byte_array(
         Err(_) => return 0,
     };
     let _ = vm_instance.heap.write_u32(array_address, byte_count);
-    let _ = vm_instance.heap.write_u8(array_address + 4, 8);
-    let _ = vm_instance.heap.write_u8(array_address + 7, 1); // Type tag 1 = Int8
+    if let Some(meta_addr) = array_address.checked_add(4) {
+        let _ = vm_instance.heap.write_u8(meta_addr, 8);
+    }
+    if let Some(tag_addr) = array_address.checked_add(7) {
+        let _ = vm_instance.heap.write_u8(tag_addr, 1); // Type tag 1 = Int8
+    }
 
     if !source_pointer.is_null() && byte_count > 0 {
         let source_slice =
             unsafe { std::slice::from_raw_parts(source_pointer, byte_count as usize) };
         for (byte_index, &raw_byte) in source_slice.iter().enumerate() {
-            let offset_bytes = match (byte_index as u32)
+            let Some(slot_address) = (byte_index as u32)
                 .checked_mul(8)
                 .and_then(|relative_offset| relative_offset.checked_add(8))
-            {
-                Some(computed_offset) => computed_offset,
-                None => break,
+                .and_then(|offset_bytes| array_address.checked_add(offset_bytes))
+            else {
+                break;
             };
-            let slot_address = array_address + offset_bytes;
             let _ = vm_instance
                 .heap
                 .write_u64(slot_address, (raw_byte as i8 as i64) as u64);
@@ -854,8 +1195,12 @@ pub unsafe extern "C" fn solix_vm_alloc_array(
         Err(_) => return 0,
     };
     let _ = vm_instance.heap.write_u32(array_address, element_count);
-    let _ = vm_instance.heap.write_u8(array_address + 4, 8);
-    let _ = vm_instance.heap.write_u8(array_address + 7, type_tag);
+    if let Some(meta_addr) = array_address.checked_add(4) {
+        let _ = vm_instance.heap.write_u8(meta_addr, 8);
+    }
+    if let Some(tag_addr) = array_address.checked_add(7) {
+        let _ = vm_instance.heap.write_u8(tag_addr, type_tag);
+    }
     array_address
 }
 
@@ -900,13 +1245,21 @@ pub unsafe extern "C" fn solix_vm_array_get_u64(
     if element_index >= total_length {
         return 0;
     }
-    let element_size = vm_instance
-        .heap
-        .read_u8(array_address + 4)
+    let element_size = array_address
+        .checked_add(4)
+        .and_then(|meta_addr| vm_instance.heap.read_u8(meta_addr).ok())
         .unwrap_or(8)
-        .max(1) as usize;
-    let type_tag = vm_instance.heap.read_u8(array_address + 7).unwrap_or(0);
-    let slot_address = array_address + 8 + (element_index * element_size as u32);
+        .max(1) as u32;
+    let type_tag = array_address
+        .checked_add(7)
+        .and_then(|tag_addr| vm_instance.heap.read_u8(tag_addr).ok())
+        .unwrap_or(0);
+    let Some(slot_address) = element_index
+        .checked_mul(element_size)
+        .and_then(|relative_offset| array_address.checked_add(8)?.checked_add(relative_offset))
+    else {
+        return 0;
+    };
     if type_tag == 9 {
         let raw_u32 = vm_instance.heap.read_u32(slot_address).unwrap_or(0);
         let float_val = f32::from_bits(raw_u32);
@@ -943,13 +1296,21 @@ pub unsafe extern "C" fn solix_vm_array_set_u64(
     if element_index >= total_length {
         return;
     }
-    let element_size = vm_instance
-        .heap
-        .read_u8(array_address + 4)
+    let element_size = array_address
+        .checked_add(4)
+        .and_then(|meta_addr| vm_instance.heap.read_u8(meta_addr).ok())
         .unwrap_or(8)
-        .max(1) as usize;
-    let type_tag = vm_instance.heap.read_u8(array_address + 7).unwrap_or(0);
-    let slot_address = array_address + 8 + (element_index * element_size as u32);
+        .max(1) as u32;
+    let type_tag = array_address
+        .checked_add(7)
+        .and_then(|tag_addr| vm_instance.heap.read_u8(tag_addr).ok())
+        .unwrap_or(0);
+    let Some(slot_address) = element_index
+        .checked_mul(element_size)
+        .and_then(|relative_offset| array_address.checked_add(8)?.checked_add(relative_offset))
+    else {
+        return;
+    };
     if type_tag == 9 {
         let float_val = f64::from_bits(raw_value) as f32;
         let _ = vm_instance
@@ -1010,6 +1371,87 @@ pub unsafe extern "C" fn solix_vm_alloc_object(
 ///
 /// # Safety
 /// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+fn read_field_u64_impl(
+    vm_instance: &VirtualMachine,
+    object_address: u32,
+    actual_offset: u32,
+    field_tag: u8,
+) -> u64 {
+    let Some(field_addr) = object_address.checked_add(actual_offset) else {
+        return 0;
+    };
+    match field_tag {
+        1 => vm_instance.heap.read_u8(field_addr).unwrap_or(0) as i8 as i64 as u64,
+        2 => vm_instance.heap.read_u8(field_addr).unwrap_or(0) as u64,
+        3 => vm_instance.heap.read_u16(field_addr).unwrap_or(0) as i16 as i64 as u64,
+        4 => vm_instance.heap.read_u16(field_addr).unwrap_or(0) as u64,
+        5 => vm_instance.heap.read_u32(field_addr).unwrap_or(0) as i32 as i64 as u64,
+        6 | 9 => vm_instance.heap.read_u32(field_addr).unwrap_or(0) as u64,
+        7 | 8 | 10 => vm_instance.heap.read_u64(field_addr).unwrap_or(0),
+        11 => u64::from(vm_instance.heap.read_u8(field_addr).unwrap_or(0) != 0),
+        12 => {
+            let raw_word = vm_instance.heap.read_u64(field_addr).unwrap_or(0);
+            match Value::from_raw_u64(raw_word) {
+                Value::Ref(addr) => addr as u64,
+                Value::Null => 0,
+                _ => raw_word & 0xFFFF_FFFF,
+            }
+        }
+        _ => vm_instance.heap.read_u64(field_addr).unwrap_or(0),
+    }
+}
+
+fn write_field_u64_impl(
+    vm_instance: &mut VirtualMachine,
+    object_address: u32,
+    actual_offset: u32,
+    field_tag: u8,
+    raw_value: u64,
+) {
+    let Some(field_addr) = object_address.checked_add(actual_offset) else {
+        return;
+    };
+    match field_tag {
+        1 | 2 => {
+            let _ = vm_instance.heap.write_u8(field_addr, raw_value as u8);
+        }
+        3 | 4 => {
+            let _ = vm_instance.heap.write_u16(field_addr, raw_value as u16);
+        }
+        5 | 6 | 9 => {
+            let _ = vm_instance.heap.write_u32(field_addr, raw_value as u32);
+        }
+        7 | 8 | 10 => {
+            let _ = vm_instance.heap.write_u64(field_addr, raw_value);
+        }
+        11 => {
+            let _ = vm_instance
+                .heap
+                .write_u8(field_addr, u8::from(raw_value != 0));
+        }
+        12 => {
+            let tagged_word = if raw_value == 0 {
+                Value::Null.to_raw_u64()
+            } else if (raw_value & Value::TAG_MASK) == Value::TAG_REF {
+                raw_value
+            } else {
+                Value::Ref(raw_value as u32).to_raw_u64()
+            };
+            let _ = vm_instance.heap.write_u64(field_addr, tagged_word);
+        }
+        _ => {
+            let _ = vm_instance.heap.write_u64(field_addr, raw_value);
+        }
+    }
+}
+
+/// Legacy helper reading a 64-bit field from an object using field index `< 64` or byte offset.
+///
+/// Prefer `solix_vm_read_field_u64_by_index` or `solix_vm_read_field_u64_by_offset` to avoid
+/// ambiguity on classes with small offsets (`< 64`) or >= 8 fields.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn solix_vm_read_field_u64(
     vm_context: *mut c_void,
@@ -1023,68 +1465,35 @@ pub unsafe extern "C" fn solix_vm_read_field_u64(
     if object_address == 0 {
         return 0;
     }
-    let class_descriptor_opt =
-        vm_instance
-            .heap
-            .read_u32(object_address)
-            .ok()
-            .and_then(|vtable_identifier| {
-                vm_instance
-                    .context
-                    .get_class_by_vtable_id(vtable_identifier)
-            });
-
-    if let Some(class_descriptor) = class_descriptor_opt
+    if let Some(class_descriptor) = lookup_class_descriptor(vm_instance, object_address)
         && !class_descriptor.field_types.is_empty()
     {
-        let (actual_offset, field_tag) =
-            if offset < 64 && (offset as usize) < class_descriptor.field_types.len() {
-                let mut sorted_field_list = class_descriptor.field_types.clone();
-                sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
-                let (field_offset, resolved_tag) = sorted_field_list[offset as usize];
-                (field_offset as u32, resolved_tag)
+        let Some((actual_offset, field_tag)) =
+            (if offset < 64 && (offset as usize) < class_descriptor.field_types.len() {
+                resolve_field_by_index(vm_instance, object_address, offset, 8)
             } else {
-                let direct_offset = offset as usize;
-                let resolved_tag = class_descriptor.get_field_type(direct_offset).unwrap_or(0);
-                (offset, resolved_tag)
-            };
-
-        let field_addr = object_address + actual_offset;
-        match field_tag {
-            1 => vm_instance.heap.read_u8(field_addr).unwrap_or(0) as i8 as i64 as u64,
-            2 => vm_instance.heap.read_u8(field_addr).unwrap_or(0) as u64,
-            3 => vm_instance.heap.read_u16(field_addr).unwrap_or(0) as i16 as i64 as u64,
-            4 => vm_instance.heap.read_u16(field_addr).unwrap_or(0) as u64,
-            5 => vm_instance.heap.read_u32(field_addr).unwrap_or(0) as i32 as i64 as u64,
-            6 | 9 => vm_instance.heap.read_u32(field_addr).unwrap_or(0) as u64,
-            7 | 8 | 10 => vm_instance.heap.read_u64(field_addr).unwrap_or(0),
-            11 => {
-                if vm_instance.heap.read_u8(field_addr).unwrap_or(0) != 0 {
-                    1
-                } else {
-                    0
-                }
-            }
-            12 => {
-                let raw_word = vm_instance.heap.read_u64(field_addr).unwrap_or(0);
-                match Value::from_raw_u64(raw_word) {
-                    Value::Ref(addr) => addr as u64,
-                    Value::Null => 0,
-                    _ => raw_word & 0xFFFF_FFFF,
-                }
-            }
-            _ => vm_instance.heap.read_u64(field_addr).unwrap_or(0),
-        }
+                Some(resolve_field_by_offset(vm_instance, object_address, offset))
+            })
+        else {
+            return 0;
+        };
+        read_field_u64_impl(vm_instance, object_address, actual_offset, field_tag)
     } else {
-        let actual_offset = if offset < 8 { 8 + offset * 8 } else { offset };
-        vm_instance
-            .heap
-            .read_u64(object_address + actual_offset)
-            .unwrap_or(0)
+        let Some(actual_offset) = (if offset < 8 {
+            offset.checked_mul(8).and_then(|rel| 8u32.checked_add(rel))
+        } else {
+            Some(offset)
+        }) else {
+            return 0;
+        };
+        read_field_u64_impl(vm_instance, object_address, actual_offset, 0)
     }
 }
 
-/// Writes a 64-bit field to an object at a field index or direct byte offset.
+/// Legacy helper writing a 64-bit field to an object using field index `< 64` or byte offset.
+///
+/// Prefer `solix_vm_write_field_u64_by_index` or `solix_vm_write_field_u64_by_offset` to avoid
+/// ambiguity on classes with small offsets (`< 64`) or >= 8 fields.
 ///
 /// # Safety
 /// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
@@ -1102,71 +1511,139 @@ pub unsafe extern "C" fn solix_vm_write_field_u64(
     if object_address == 0 {
         return;
     }
-    let class_descriptor_opt =
-        vm_instance
-            .heap
-            .read_u32(object_address)
-            .ok()
-            .and_then(|vtable_identifier| {
-                vm_instance
-                    .context
-                    .get_class_by_vtable_id(vtable_identifier)
-            });
-
-    if let Some(class_descriptor) = class_descriptor_opt
+    if let Some(class_descriptor) = lookup_class_descriptor(vm_instance, object_address)
         && !class_descriptor.field_types.is_empty()
     {
-        let (actual_offset, field_tag) =
-            if offset < 64 && (offset as usize) < class_descriptor.field_types.len() {
-                let mut sorted_field_list = class_descriptor.field_types.clone();
-                sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
-                let (field_offset, resolved_tag) = sorted_field_list[offset as usize];
-                (field_offset as u32, resolved_tag)
+        let Some((actual_offset, field_tag)) =
+            (if offset < 64 && (offset as usize) < class_descriptor.field_types.len() {
+                resolve_field_by_index(vm_instance, object_address, offset, 8)
             } else {
-                let direct_offset = offset as usize;
-                let resolved_tag = class_descriptor.get_field_type(direct_offset).unwrap_or(0);
-                (offset, resolved_tag)
-            };
-
-        let field_addr = object_address + actual_offset;
-        match field_tag {
-            1 | 2 => {
-                let _ = vm_instance.heap.write_u8(field_addr, raw_value as u8);
-            }
-            3 | 4 => {
-                let _ = vm_instance.heap.write_u16(field_addr, raw_value as u16);
-            }
-            5 | 6 | 9 => {
-                let _ = vm_instance.heap.write_u32(field_addr, raw_value as u32);
-            }
-            7 | 8 | 10 => {
-                let _ = vm_instance.heap.write_u64(field_addr, raw_value);
-            }
-            11 => {
-                let _ = vm_instance
-                    .heap
-                    .write_u8(field_addr, if raw_value != 0 { 1 } else { 0 });
-            }
-            12 => {
-                let tagged_word = if raw_value == 0 {
-                    Value::Null.to_raw_u64()
-                } else if (raw_value & Value::TAG_MASK) == Value::TAG_REF {
-                    raw_value
-                } else {
-                    Value::Ref(raw_value as u32).to_raw_u64()
-                };
-                let _ = vm_instance.heap.write_u64(field_addr, tagged_word);
-            }
-            _ => {
-                let _ = vm_instance.heap.write_u64(field_addr, raw_value);
-            }
-        }
+                Some(resolve_field_by_offset(vm_instance, object_address, offset))
+            })
+        else {
+            return;
+        };
+        write_field_u64_impl(
+            vm_instance,
+            object_address,
+            actual_offset,
+            field_tag,
+            raw_value,
+        );
     } else {
-        let actual_offset = if offset < 8 { 8 + offset * 8 } else { offset };
-        let _ = vm_instance
-            .heap
-            .write_u64(object_address + actual_offset, raw_value);
+        let Some(actual_offset) = (if offset < 8 {
+            offset.checked_mul(8).and_then(|rel| 8u32.checked_add(rel))
+        } else {
+            Some(offset)
+        }) else {
+            return;
+        };
+        write_field_u64_impl(vm_instance, object_address, actual_offset, 0, raw_value);
     }
+}
+
+/// Reads a 64-bit (or sub-64-bit normalized) field from an object using its explicit 0-based `field_index`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_read_field_u64_by_index(
+    vm_context: *mut c_void,
+    object_address: u32,
+    field_index: u32,
+) -> u64 {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return 0;
+    };
+    if object_address == 0 {
+        return 0;
+    }
+    let Some((actual_offset, field_tag)) =
+        resolve_field_by_index(vm_instance, object_address, field_index, 8)
+    else {
+        return 0;
+    };
+    read_field_u64_impl(vm_instance, object_address, actual_offset, field_tag)
+}
+
+/// Writes a 64-bit (or sub-64-bit normalized) field to an object using its explicit 0-based `field_index`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_write_field_u64_by_index(
+    vm_context: *mut c_void,
+    object_address: u32,
+    field_index: u32,
+    raw_value: u64,
+) {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return;
+    };
+    if object_address == 0 {
+        return;
+    }
+    let Some((actual_offset, field_tag)) =
+        resolve_field_by_index(vm_instance, object_address, field_index, 8)
+    else {
+        return;
+    };
+    write_field_u64_impl(
+        vm_instance,
+        object_address,
+        actual_offset,
+        field_tag,
+        raw_value,
+    );
+}
+
+/// Reads a 64-bit (or sub-64-bit normalized) field from an object using its explicit `byte_offset`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_read_field_u64_by_offset(
+    vm_context: *mut c_void,
+    object_address: u32,
+    byte_offset: u32,
+) -> u64 {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return 0;
+    };
+    if object_address == 0 {
+        return 0;
+    }
+    let (actual_offset, field_tag) =
+        resolve_field_by_offset(vm_instance, object_address, byte_offset);
+    read_field_u64_impl(vm_instance, object_address, actual_offset, field_tag)
+}
+
+/// Writes a 64-bit (or sub-64-bit normalized) field to an object using its explicit `byte_offset`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_write_field_u64_by_offset(
+    vm_context: *mut c_void,
+    object_address: u32,
+    byte_offset: u32,
+    raw_value: u64,
+) {
+    let Some(vm_instance) = (unsafe { resolve_vm(vm_context) }) else {
+        return;
+    };
+    if object_address == 0 {
+        return;
+    }
+    let (actual_offset, field_tag) =
+        resolve_field_by_offset(vm_instance, object_address, byte_offset);
+    write_field_u64_impl(
+        vm_instance,
+        object_address,
+        actual_offset,
+        field_tag,
+        raw_value,
+    );
 }
 
 /// Looks up a registered class VTable ID by qualified or simple name. Returns 0 if not found.

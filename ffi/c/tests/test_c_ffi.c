@@ -168,6 +168,58 @@ static void mock_set_cycle_threshold(void* vm_ptr, uint32_t threshold) {
     ((MockVmState*)vm_ptr)->last_threshold = threshold;
 }
 
+static int32_t mock_get_field_i32_by_index(void* vm_ptr, uint32_t obj_addr, uint32_t field_index) {
+    return mock_get_field_i32(vm_ptr, obj_addr, field_index);
+}
+
+static void mock_set_field_i32_by_index(
+    void* vm_ptr,
+    uint32_t obj_addr,
+    uint32_t field_index,
+    int32_t value
+) {
+    mock_set_field_i32(vm_ptr, obj_addr, field_index, value);
+}
+
+static int32_t mock_get_field_i32_by_offset(void* vm_ptr, uint32_t obj_addr, uint32_t byte_offset) {
+    return mock_get_field_i32(vm_ptr, obj_addr, byte_offset);
+}
+
+static void mock_set_field_i32_by_offset(
+    void* vm_ptr,
+    uint32_t obj_addr,
+    uint32_t byte_offset,
+    int32_t value
+) {
+    mock_set_field_i32(vm_ptr, obj_addr, byte_offset, value);
+}
+
+static uint64_t mock_read_field_u64_by_index(void* vm_ptr, uint32_t obj_addr, uint32_t field_index) {
+    return mock_read_field_u64(vm_ptr, obj_addr, field_index);
+}
+
+static void mock_write_field_u64_by_index(
+    void* vm_ptr,
+    uint32_t obj_addr,
+    uint32_t field_index,
+    uint64_t raw_val
+) {
+    mock_write_field_u64(vm_ptr, obj_addr, field_index, raw_val);
+}
+
+static uint64_t mock_read_field_u64_by_offset(void* vm_ptr, uint32_t obj_addr, uint32_t byte_offset) {
+    return mock_read_field_u64(vm_ptr, obj_addr, byte_offset);
+}
+
+static void mock_write_field_u64_by_offset(
+    void* vm_ptr,
+    uint32_t obj_addr,
+    uint32_t byte_offset,
+    uint64_t raw_val
+) {
+    mock_write_field_u64(vm_ptr, obj_addr, byte_offset, raw_val);
+}
+
 static SolixCValue native_sample_add(
     void* vm_context,
     const SolixCValue* arguments,
@@ -211,8 +263,23 @@ int main(void) {
     TEST_CHECK(solix_cvalue_as_ref(solix_cvalue_ref(4096U)) == 4096U);
     TEST_CHECK(solix_cvalue_as_fnptr(solix_cvalue_fnptr(17U)) == 17U);
 
-    /* 2. Verify SolixVmContext C-ABI layout size (19 pointers/u64 fields = 152 bytes on 64-bit) */
-    TEST_CHECK(sizeof(SolixVmContext) == sizeof(void*) * 19U);
+    /* 1b. Verify complete SOLIX_ARRAY_TAG_* constants */
+    TEST_CHECK(SOLIX_ARRAY_TAG_I8 == 1U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_I16 == 2U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_I32 == 3U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_I64 == 4U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_U8 == 5U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_U16 == 6U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_U32 == 7U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_U64 == 8U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_F32 == 9U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_F64 == 10U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_BOOL == 11U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_CHAR == 12U);
+    TEST_CHECK(SOLIX_ARRAY_TAG_REF == 13U);
+
+    /* 2. Verify SolixVmContext C-ABI layout size (27 pointers/u64 fields = 216 bytes on 64-bit) */
+    TEST_CHECK(sizeof(SolixVmContext) == sizeof(void*) * 27U);
 
     /* 3. Verify SolixVmContext helpers end-to-end */
     MockVmState state;
@@ -237,6 +304,14 @@ int main(void) {
         mock_get_vm_metric,
         mock_collect_cycles,
         mock_set_cycle_threshold,
+        mock_get_field_i32_by_index,
+        mock_set_field_i32_by_index,
+        mock_get_field_i32_by_offset,
+        mock_set_field_i32_by_offset,
+        mock_read_field_u64_by_index,
+        mock_write_field_u64_by_index,
+        mock_read_field_u64_by_offset,
+        mock_write_field_u64_by_offset,
     };
 
     const SolixVmContext* verified = solix_vm_context_from_ptr(&vm_ctx);
@@ -264,6 +339,15 @@ int main(void) {
     TEST_CHECK(solix_vm_get_field_i32(verified, obj_addr, 0U) == -123);
     solix_vm_write_field_u64(verified, obj_addr, 16U, UINT64_C(555666));
     TEST_CHECK(solix_vm_read_field_u64(verified, obj_addr, 16U) == UINT64_C(555666));
+
+    solix_vm_set_field_i32_by_index(verified, obj_addr, 9U, -456);
+    TEST_CHECK(solix_vm_get_field_i32_by_index(verified, obj_addr, 9U) == -456);
+    solix_vm_set_field_i32_by_offset(verified, obj_addr, 12U, 789);
+    TEST_CHECK(solix_vm_get_field_i32_by_offset(verified, obj_addr, 12U) == 789);
+    solix_vm_write_field_u64_by_index(verified, obj_addr, 10U, UINT64_C(112233));
+    TEST_CHECK(solix_vm_read_field_u64_by_index(verified, obj_addr, 10U) == UINT64_C(112233));
+    solix_vm_write_field_u64_by_offset(verified, obj_addr, 24U, UINT64_C(445566));
+    TEST_CHECK(solix_vm_read_field_u64_by_offset(verified, obj_addr, 24U) == UINT64_C(445566));
 
     TEST_CHECK(solix_vm_get_metric(verified, 3U) == UINT64_C(300));
     solix_vm_set_cycle_threshold(verified, 512U);

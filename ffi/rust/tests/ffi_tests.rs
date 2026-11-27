@@ -69,7 +69,7 @@ unsafe extern "C" fn mock_collector_callback(
     collector_reference.symbols.push(symbol_string);
 }
 
-unsafe extern "C" fn test_native_dummy_function(
+unsafe extern "C-unwind" fn test_native_dummy_function(
     _context: *mut c_void,
     _arguments: *const SolixCValue,
     _count: u32,
@@ -96,8 +96,26 @@ fn test_native_registry_symbol_registration() {
 
 mod export_test_module {
     use super::*;
+    use std::collections::HashMap;
 
-    unsafe extern "C" fn bridge_fast_sqrt(
+    struct ExportEntryCollector {
+        entries: HashMap<String, NativeCFunctionPtr>,
+    }
+
+    unsafe extern "C" fn collect_export_entry(
+        collector: *mut c_void,
+        symbol_pointer: *const c_char,
+        function_ptr: NativeCFunctionPtr,
+    ) {
+        let collector_ref = unsafe { &mut *(collector as *mut ExportEntryCollector) };
+        let symbol_string = unsafe { CStr::from_ptr(symbol_pointer) }
+            .to_str()
+            .expect("Valid UTF-8 symbol name")
+            .to_string();
+        collector_ref.entries.insert(symbol_string, function_ptr);
+    }
+
+    unsafe extern "C-unwind" fn bridge_fast_sqrt(
         _context: *mut c_void,
         _arguments: *const SolixCValue,
         _count: u32,
@@ -106,27 +124,65 @@ mod export_test_module {
         SolixCValue::from_f64(4.0)
     }
 
+    unsafe extern "C-unwind" fn bridge_panicking_plugin(
+        _context: *mut c_void,
+        _arguments: *const SolixCValue,
+        _count: u32,
+        _error: *mut SolixCValue,
+    ) -> SolixCValue {
+        panic!("simulated native panic inside solix_export");
+    }
+
     solix_export! {
         "Math::fast_sqrt" => bridge_fast_sqrt,
+        "Math::panic_trap" => bridge_panicking_plugin,
     }
 
     #[test]
-    fn test_solix_export_macro_invocation() {
+    fn test_solix_export_macro_invocation_null_guards_and_panic_catch() {
+        // Null host pointers must safely no-op without UB or panics.
+        unsafe {
+            solix_register_natives(std::ptr::null_mut(), None);
+            solix_register_natives(std::ptr::null_mut(), Some(mock_collector_callback));
+        }
         let mut collector = TestCollector {
             symbols: Vec::new(),
         };
         let collector_pointer = (&mut collector as *mut TestCollector).cast::<c_void>();
         unsafe {
-            solix_register_natives(collector_pointer, mock_collector_callback);
+            solix_register_natives(collector_pointer, None);
+            solix_register_natives(collector_pointer, Some(mock_collector_callback));
         }
-        assert_eq!(collector.symbols.len(), 1);
+        assert_eq!(collector.symbols.len(), 2);
         assert_eq!(collector.symbols[0], "Math::fast_sqrt");
+        assert_eq!(collector.symbols[1], "Math::panic_trap");
+
+        // Invoking the registered trampoline for a panicking callback catches the unwind cleanly.
+        let mut entry_collector = ExportEntryCollector {
+            entries: HashMap::new(),
+        };
+        let entry_ptr = (&mut entry_collector as *mut ExportEntryCollector).cast::<c_void>();
+        unsafe { solix_register_natives(entry_ptr, Some(collect_export_entry)) };
+
+        let panic_fn = *entry_collector
+            .entries
+            .get("Math::panic_trap")
+            .expect("panic_trap must be registered");
+        let mut err_slot = SolixCValue::null();
+        let ret_val = unsafe { panic_fn(std::ptr::null_mut(), std::ptr::null(), 0, &mut err_slot) };
+        assert!(ret_val.is_null());
+        assert!(!err_slot.is_null());
     }
 }
 
 mod vm_context_wrapper_tests {
     use super::*;
-    use solix_ffi::{SOLIX_ARRAY_TAG_I64, SOLIX_VM_CONTEXT_MAGIC, SolixVmContext, TAG_FNPTR};
+    use solix_ffi::{
+        SOLIX_ARRAY_TAG_BOOL, SOLIX_ARRAY_TAG_CHAR, SOLIX_ARRAY_TAG_F32, SOLIX_ARRAY_TAG_F64,
+        SOLIX_ARRAY_TAG_I8, SOLIX_ARRAY_TAG_I16, SOLIX_ARRAY_TAG_I32, SOLIX_ARRAY_TAG_I64,
+        SOLIX_ARRAY_TAG_REF, SOLIX_ARRAY_TAG_U8, SOLIX_ARRAY_TAG_U16, SOLIX_ARRAY_TAG_U32,
+        SOLIX_ARRAY_TAG_U64, SOLIX_VM_CONTEXT_MAGIC, SolixVmContext, TAG_FNPTR,
+    };
 
     struct MockHostVm {
         stored_text: String,
@@ -229,6 +285,20 @@ mod vm_context_wrapper_tests {
         assert_eq!(fn_val.tag, TAG_FNPTR);
         assert_eq!(fn_val.as_fn_ptr(), 21);
 
+        assert_eq!(SOLIX_ARRAY_TAG_I8, 1);
+        assert_eq!(SOLIX_ARRAY_TAG_I16, 2);
+        assert_eq!(SOLIX_ARRAY_TAG_I32, 3);
+        assert_eq!(SOLIX_ARRAY_TAG_I64, 4);
+        assert_eq!(SOLIX_ARRAY_TAG_U8, 5);
+        assert_eq!(SOLIX_ARRAY_TAG_U16, 6);
+        assert_eq!(SOLIX_ARRAY_TAG_U32, 7);
+        assert_eq!(SOLIX_ARRAY_TAG_U64, 8);
+        assert_eq!(SOLIX_ARRAY_TAG_F32, 9);
+        assert_eq!(SOLIX_ARRAY_TAG_F64, 10);
+        assert_eq!(SOLIX_ARRAY_TAG_BOOL, 11);
+        assert_eq!(SOLIX_ARRAY_TAG_CHAR, 12);
+        assert_eq!(SOLIX_ARRAY_TAG_REF, 13);
+
         let mut host = MockHostVm {
             stored_text: String::new(),
             field_i32: 0,
@@ -257,6 +327,14 @@ mod vm_context_wrapper_tests {
             get_vm_metric: mock_get_metric,
             collect_cycles: mock_collect_cycles,
             set_cycle_threshold: mock_set_threshold,
+            get_field_i32_by_index: mock_get_i32,
+            set_field_i32_by_index: mock_set_i32,
+            get_field_i32_by_offset: mock_get_i32,
+            set_field_i32_by_offset: mock_set_i32,
+            read_field_u64_by_index: mock_read_field_u64,
+            write_field_u64_by_index: mock_write_field_u64,
+            read_field_u64_by_offset: mock_read_field_u64,
+            write_field_u64_by_offset: mock_write_field_u64,
         };
 
         let validated =
@@ -279,8 +357,19 @@ mod vm_context_wrapper_tests {
             assert_eq!(obj_addr, 4096);
             validated.set_field_i32(obj_addr, 0, -55);
             assert_eq!(validated.get_field_i32(obj_addr, 0), -55);
+            validated.set_field_i32_by_index(obj_addr, 9, -77);
+            assert_eq!(validated.get_field_i32_by_index(obj_addr, 9), -77);
+            validated.set_field_i32_by_offset(obj_addr, 12, 88);
+            assert_eq!(validated.get_field_i32_by_offset(obj_addr, 12), 88);
             validated.write_field_u64(obj_addr, 16, 123456);
             assert_eq!(validated.read_field_u64(obj_addr, 16), 123456);
+            validated.write_field_u64_by_index(obj_addr, 10, 223344);
+            assert_eq!(validated.read_field_u64_by_index(obj_addr, 10), 223344);
+            validated.write_field_u64_by_offset(obj_addr, 24, 556677);
+            assert_eq!(validated.read_field_u64_by_offset(obj_addr, 24), 556677);
+            let mut err_slot = SolixCValue::null();
+            validated.set_error(&mut err_slot, "explicit error string");
+            assert_eq!(err_slot.tag, TAG_REF);
             assert_eq!(validated.get_vm_metric(4), 40);
             validated.set_cycle_threshold(256);
             assert_eq!(validated.collect_cycles(), 1);

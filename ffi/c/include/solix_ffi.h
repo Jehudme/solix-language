@@ -57,9 +57,16 @@ extern "C" {
 #define SOLIX_TAG_FNPTR UINT32_C(6)
 
 #define SOLIX_ARRAY_TAG_I8   UINT8_C(1)
+#define SOLIX_ARRAY_TAG_I16  UINT8_C(2)
+#define SOLIX_ARRAY_TAG_I32  UINT8_C(3)
 #define SOLIX_ARRAY_TAG_I64  UINT8_C(4)
+#define SOLIX_ARRAY_TAG_U8   UINT8_C(5)
+#define SOLIX_ARRAY_TAG_U16  UINT8_C(6)
+#define SOLIX_ARRAY_TAG_U32  UINT8_C(7)
+#define SOLIX_ARRAY_TAG_U64  UINT8_C(8)
 #define SOLIX_ARRAY_TAG_F32  UINT8_C(9)
 #define SOLIX_ARRAY_TAG_F64  UINT8_C(10)
+#define SOLIX_ARRAY_TAG_BOOL UINT8_C(11)
 #define SOLIX_ARRAY_TAG_CHAR UINT8_C(12)
 #define SOLIX_ARRAY_TAG_REF  UINT8_C(13)
 
@@ -166,6 +173,34 @@ typedef struct SolixVmContext {
     uint64_t (*get_vm_metric)(void* vm_ptr, uint32_t metric_id);
     uint64_t (*collect_cycles)(void* vm_ptr);
     void (*set_cycle_threshold)(void* vm_ptr, uint32_t threshold);
+    int32_t (*get_field_i32_by_index)(void* vm_ptr, uint32_t object_address, uint32_t field_index);
+    void (*set_field_i32_by_index)(
+        void* vm_ptr,
+        uint32_t object_address,
+        uint32_t field_index,
+        int32_t field_value
+    );
+    int32_t (*get_field_i32_by_offset)(void* vm_ptr, uint32_t object_address, uint32_t byte_offset);
+    void (*set_field_i32_by_offset)(
+        void* vm_ptr,
+        uint32_t object_address,
+        uint32_t byte_offset,
+        int32_t field_value
+    );
+    uint64_t (*read_field_u64_by_index)(void* vm_ptr, uint32_t object_address, uint32_t field_index);
+    void (*write_field_u64_by_index)(
+        void* vm_ptr,
+        uint32_t object_address,
+        uint32_t field_index,
+        uint64_t raw_value
+    );
+    uint64_t (*read_field_u64_by_offset)(void* vm_ptr, uint32_t object_address, uint32_t byte_offset);
+    void (*write_field_u64_by_offset)(
+        void* vm_ptr,
+        uint32_t object_address,
+        uint32_t byte_offset,
+        uint64_t raw_value
+    );
 } SolixVmContext;
 
 /* ------------------------------------------------------------------------- */
@@ -465,6 +500,94 @@ static inline void solix_vm_write_field_u64(
     }
 }
 
+static inline int32_t solix_vm_get_field_i32_by_index(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t field_index
+) {
+    if (ctx == NULL || ctx->get_field_i32_by_index == NULL || object_address == 0) {
+        return 0;
+    }
+    return ctx->get_field_i32_by_index(ctx->vm_ptr, object_address, field_index);
+}
+
+static inline void solix_vm_set_field_i32_by_index(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t field_index,
+    int32_t field_value
+) {
+    if (ctx != NULL && ctx->set_field_i32_by_index != NULL && object_address != 0) {
+        ctx->set_field_i32_by_index(ctx->vm_ptr, object_address, field_index, field_value);
+    }
+}
+
+static inline int32_t solix_vm_get_field_i32_by_offset(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t byte_offset
+) {
+    if (ctx == NULL || ctx->get_field_i32_by_offset == NULL || object_address == 0) {
+        return 0;
+    }
+    return ctx->get_field_i32_by_offset(ctx->vm_ptr, object_address, byte_offset);
+}
+
+static inline void solix_vm_set_field_i32_by_offset(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t byte_offset,
+    int32_t field_value
+) {
+    if (ctx != NULL && ctx->set_field_i32_by_offset != NULL && object_address != 0) {
+        ctx->set_field_i32_by_offset(ctx->vm_ptr, object_address, byte_offset, field_value);
+    }
+}
+
+static inline uint64_t solix_vm_read_field_u64_by_index(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t field_index
+) {
+    if (ctx == NULL || ctx->read_field_u64_by_index == NULL || object_address == 0) {
+        return 0;
+    }
+    return ctx->read_field_u64_by_index(ctx->vm_ptr, object_address, field_index);
+}
+
+static inline void solix_vm_write_field_u64_by_index(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t field_index,
+    uint64_t raw_value
+) {
+    if (ctx != NULL && ctx->write_field_u64_by_index != NULL && object_address != 0) {
+        ctx->write_field_u64_by_index(ctx->vm_ptr, object_address, field_index, raw_value);
+    }
+}
+
+static inline uint64_t solix_vm_read_field_u64_by_offset(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t byte_offset
+) {
+    if (ctx == NULL || ctx->read_field_u64_by_offset == NULL || object_address == 0) {
+        return 0;
+    }
+    return ctx->read_field_u64_by_offset(ctx->vm_ptr, object_address, byte_offset);
+}
+
+static inline void solix_vm_write_field_u64_by_offset(
+    const SolixVmContext* ctx,
+    uint32_t object_address,
+    uint32_t byte_offset,
+    uint64_t raw_value
+) {
+    if (ctx != NULL && ctx->write_field_u64_by_offset != NULL && object_address != 0) {
+        ctx->write_field_u64_by_offset(ctx->vm_ptr, object_address, byte_offset, raw_value);
+    }
+}
+
 static inline uint64_t solix_vm_get_metric(const SolixVmContext* ctx, uint32_t metric_id) {
     if (ctx == NULL || ctx->get_vm_metric == NULL) {
         return 0;
@@ -521,7 +644,7 @@ static inline void solix_vm_set_error(
         void* collector_context,                                                      \
         SolixRegisterCallback register_callback                                       \
     ) {                                                                               \
-        if (register_callback == NULL) {                                              \
+        if (collector_context == NULL || register_callback == NULL) {                 \
             return;                                                                   \
         }                                                                             \
         size_t entry_count = sizeof(table_array) / sizeof((table_array)[0]);          \
@@ -542,7 +665,7 @@ static inline void solix_vm_set_error(
         void* collector_context,                                                      \
         SolixRegisterCallback register_callback                                       \
     ) {                                                                               \
-        if (register_callback == NULL) {                                              \
+        if (collector_context == NULL || register_callback == NULL) {                 \
             return;                                                                   \
         }
 

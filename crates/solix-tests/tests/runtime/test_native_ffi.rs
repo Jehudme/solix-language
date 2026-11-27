@@ -632,6 +632,38 @@ fn test_case_49_10_ffi_sdk_abi_layout_and_magic_parity() {
         std::mem::offset_of!(solix_ffi::SolixVmContext, set_cycle_threshold),
         std::mem::offset_of!(rt_ffi::SolixVmContext, set_cycle_threshold)
     );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, get_field_i32_by_index),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, get_field_i32_by_index)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, set_field_i32_by_index),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, set_field_i32_by_index)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, get_field_i32_by_offset),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, get_field_i32_by_offset)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, set_field_i32_by_offset),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, set_field_i32_by_offset)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, read_field_u64_by_index),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, read_field_u64_by_index)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, write_field_u64_by_index),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, write_field_u64_by_index)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, read_field_u64_by_offset),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, read_field_u64_by_offset)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, write_field_u64_by_offset),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, write_field_u64_by_offset)
+    );
 }
 
 #[test]
@@ -692,4 +724,196 @@ pub unsafe extern "C" fn FailBridge_boom(
         matches!(run_result, Err(RuntimeError::NativeFunctionError { .. })),
         "Expected NativeFunctionError when out_error is set, got: {run_result:?}"
     );
+}
+
+#[test]
+fn test_case_49_12_by_index_by_offset_and_unicode_char_array_roundtrip() {
+    let solix_code = r#"
+public class WideRecord {
+    public int64 id;
+    public int32 f1;
+    public int32 f2;
+    public int32 f3;
+    public int32 f4;
+    public int32 f5;
+    public int32 f6;
+    public int32 f7;
+    public int32 f8;
+    public int32 tail_val;
+
+    public static native int32 exercise_wide(WideRecord rec);
+    public static native char[] make_unicode();
+    public static native int32 verify_unicode(char[] input);
+}
+
+public class Main {
+    public static int32 main() {
+        WideRecord rec = new WideRecord();
+        rec.id = 9000000001;
+        rec.tail_val = 41;
+        int32 observed = WideRecord.exercise_wide(rec);
+
+        char[] unicode_chars = WideRecord.make_unicode();
+        int32 verified_bytes = WideRecord.verify_unicode(unicode_chars);
+
+        bool fields_ok = (observed == 41) && (rec.tail_val == 99) && (rec.id == 9000000009);
+        bool unicode_ok = (unicode_chars.length == 3)
+            && ((int32)unicode_chars[0] == 233)
+            && ((int32)unicode_chars[1] == 955)
+            && ((int32)unicode_chars[2] == 128512)
+            && (verified_bytes == 8);
+        return (fields_ok && unicode_ok) ? 0 : 1;
+    }
+}
+"#;
+    let rust_bridge = r#"
+use std::ffi::{c_char, c_void};
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SolixCValue {
+    pub tag: u32,
+    pub flags: u32,
+    pub payload: u64,
+}
+
+#[repr(C)]
+pub struct SolixVmContext {
+    pub magic: u64,
+    pub vm_ptr: *mut c_void,
+    pub get_field_i32: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
+    pub set_field_i32: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+    pub read_bytes: unsafe extern "C" fn(*mut c_void, u32, *mut u8, u32) -> u32,
+    pub alloc_string: unsafe extern "C" fn(*mut c_void, *const u8, u32) -> u32,
+    pub alloc_chars: unsafe extern "C" fn(*mut c_void, *const u8, u32) -> u32,
+    pub alloc_byte_array: unsafe extern "C" fn(*mut c_void, *const u8, u32) -> u32,
+    pub alloc_array: unsafe extern "C" fn(*mut c_void, u32, u8) -> u32,
+    pub array_len: unsafe extern "C" fn(*mut c_void, u32) -> u32,
+    pub array_get_u64: unsafe extern "C" fn(*mut c_void, u32, u32) -> u64,
+    pub array_set_u64: unsafe extern "C" fn(*mut c_void, u32, u32, u64),
+    pub alloc_object: unsafe extern "C" fn(*mut c_void, u32, u32) -> u32,
+    pub read_field_u64: unsafe extern "C" fn(*mut c_void, u32, u32) -> u64,
+    pub write_field_u64: unsafe extern "C" fn(*mut c_void, u32, u32, u64),
+    pub get_class_vtable_id: unsafe extern "C" fn(*mut c_void, *const c_char) -> u32,
+    pub get_vm_metric: unsafe extern "C" fn(*mut c_void, u32) -> u64,
+    pub collect_cycles: unsafe extern "C" fn(*mut c_void) -> u64,
+    pub set_cycle_threshold: unsafe extern "C" fn(*mut c_void, u32),
+    pub get_field_i32_by_index: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
+    pub set_field_i32_by_index: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+    pub get_field_i32_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
+    pub set_field_i32_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+    pub read_field_u64_by_index: unsafe extern "C" fn(*mut c_void, u32, u32) -> u64,
+    pub write_field_u64_by_index: unsafe extern "C" fn(*mut c_void, u32, u32, u64),
+    pub read_field_u64_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32) -> u64,
+    pub write_field_u64_by_offset: unsafe extern "C" fn(*mut c_void, u32, u32, u64),
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn WideRecord_exercise_wide(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_err: *mut SolixCValue,
+) -> SolixCValue {
+    assert_eq!(arg_count, 1);
+    let rec_addr = unsafe { (*args.add(0)).payload as u32 };
+    let ctx = unsafe { &*(vm_context as *const SolixVmContext) };
+    let tail_by_index = unsafe { (ctx.get_field_i32_by_index)(ctx.vm_ptr, rec_addr, 9) };
+    let tail_by_offset = unsafe { (ctx.get_field_i32_by_offset)(ctx.vm_ptr, rec_addr, 48) };
+    let prev_id = unsafe { (ctx.read_field_u64_by_index)(ctx.vm_ptr, rec_addr, 0) };
+    let prev_id_by_offset = unsafe { (ctx.read_field_u64_by_offset)(ctx.vm_ptr, rec_addr, 8) };
+    if tail_by_index != tail_by_offset || prev_id != prev_id_by_offset {
+        return SolixCValue {
+            tag: 2,
+            flags: 0,
+            payload: u64::MAX,
+        };
+    }
+    unsafe { (ctx.set_field_i32_by_index)(ctx.vm_ptr, rec_addr, 9, 50) };
+    unsafe { (ctx.set_field_i32_by_offset)(ctx.vm_ptr, rec_addr, 48, 99) };
+
+    unsafe { (ctx.write_field_u64_by_index)(ctx.vm_ptr, rec_addr, 0, prev_id + 4) };
+    let mid_id = unsafe { (ctx.read_field_u64_by_offset)(ctx.vm_ptr, rec_addr, 8) };
+    unsafe { (ctx.write_field_u64_by_offset)(ctx.vm_ptr, rec_addr, 8, mid_id + 4) };
+
+    SolixCValue {
+        tag: 2,
+        flags: 0,
+        payload: tail_by_index as i64 as u64,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn WideRecord_make_unicode(
+    vm_context: *mut c_void,
+    _args: *const SolixCValue,
+    _arg_count: u32,
+    _out_err: *mut SolixCValue,
+) -> SolixCValue {
+    let ctx = unsafe { &*(vm_context as *const SolixVmContext) };
+    let utf8_text = "éλ😀";
+    let new_addr = unsafe {
+        (ctx.alloc_chars)(
+            ctx.vm_ptr,
+            utf8_text.as_ptr(),
+            utf8_text.len() as u32,
+        )
+    };
+    SolixCValue {
+        tag: 5,
+        flags: 0,
+        payload: u64::from(new_addr),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn WideRecord_verify_unicode(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_err: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count != 1 || args.is_null() {
+        return SolixCValue {
+            tag: 2,
+            flags: 0,
+            payload: u64::MAX,
+        };
+    }
+    let arr_addr = unsafe { (*args.add(0)).payload as u32 };
+    let ctx = unsafe { &*(vm_context as *const SolixVmContext) };
+    let mut probe = [0u8; 4];
+    let needed = unsafe { (ctx.read_bytes)(ctx.vm_ptr, arr_addr, probe.as_mut_ptr(), 4) };
+    if needed != 8 {
+        return SolixCValue {
+            tag: 2,
+            flags: 0,
+            payload: u64::MAX,
+        };
+    }
+    let mut utf8_buf = vec![0u8; needed as usize];
+    let actual = unsafe { (ctx.read_bytes)(ctx.vm_ptr, arr_addr, utf8_buf.as_mut_ptr(), needed) };
+    if actual != 8 || std::str::from_utf8(&utf8_buf).ok() != Some("éλ😀") {
+        return SolixCValue {
+            tag: 2,
+            flags: 0,
+            payload: u64::MAX,
+        };
+    }
+    SolixCValue {
+        tag: 2,
+        flags: 0,
+        payload: u64::from(actual),
+    }
+}
+"#;
+    let binary = compile_solix_source(solix_code);
+    let library_path = compile_rust_cdylib(rust_bridge, "test_wide_unicode_49_12");
+    let options = RuntimeOptions::new()
+        .with_binary(binary)
+        .with_native_library(&library_path);
+    let context = RuntimeContext::new(options).expect("create context");
+    let mut vm = VirtualMachine::new(context);
+    let exit_value = vm.run().expect("VM execution failed");
+    assert_eq!(exit_value, Value::I32(0));
 }

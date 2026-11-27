@@ -713,7 +713,7 @@ mod solix_bridge {{
     use std::ffi::c_void;
 
     #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn solix_native_entry(
+    pub unsafe extern "C-unwind" fn solix_native_entry(
         _vm_context: *mut c_void,
         arguments: *const SolixCValue,
         argument_count: u32,

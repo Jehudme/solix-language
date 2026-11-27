@@ -250,14 +250,14 @@ SolixCValue native_create_box(
         return solix_cvalue_null();
     }
     uint32_t box_addr = solix_vm_alloc_object(ctx, vtable_id, 3U);
-    solix_vm_set_field_i32(ctx, box_addr, 0U, solix_cvalue_as_i32(arguments[0]));
-    solix_vm_write_field_u64(
+    solix_vm_set_field_i32_by_index(ctx, box_addr, 0U, solix_cvalue_as_i32(arguments[0]));
+    solix_vm_write_field_u64_by_index(
         ctx,
         box_addr,
         1U,
         static_cast<uint64_t>(solix_cvalue_as_i64(arguments[1]))
     );
-    solix_vm_write_field_u64(
+    solix_vm_write_field_u64_by_index(
         ctx,
         box_addr,
         2U,
@@ -279,10 +279,10 @@ SolixCValue native_mutate_box(
     }
     uint32_t box_addr = solix_cvalue_as_ref(arguments[0]);
     int32_t delta = solix_cvalue_as_i32(arguments[1]);
-    int32_t prev_tag = solix_vm_get_field_i32(ctx, box_addr, 0U);
+    int32_t prev_tag = solix_vm_get_field_i32_by_index(ctx, box_addr, 0U);
     int32_t next_tag = prev_tag + delta;
-    solix_vm_set_field_i32(ctx, box_addr, 0U, next_tag);
-    int64_t weight = static_cast<int64_t>(solix_vm_read_field_u64(ctx, box_addr, 1U));
+    solix_vm_set_field_i32_by_index(ctx, box_addr, 0U, next_tag);
+    int64_t weight = static_cast<int64_t>(solix_vm_read_field_u64_by_index(ctx, box_addr, 1U));
     return solix_cvalue_i64(static_cast<int64_t>(next_tag) + weight);
 }
 

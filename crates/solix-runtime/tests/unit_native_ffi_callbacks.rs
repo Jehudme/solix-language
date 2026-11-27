@@ -6,22 +6,19 @@ use solix_runtime::native::ffi::{
     SOLIX_VM_CONTEXT_MAGIC, SolixVmContext, solix_vm_alloc_array, solix_vm_alloc_byte_array,
     solix_vm_alloc_chars, solix_vm_alloc_object, solix_vm_alloc_string, solix_vm_array_get_u64,
     solix_vm_array_len, solix_vm_array_set_u64, solix_vm_collect_cycles,
-    solix_vm_get_class_vtable_id, solix_vm_get_field_i32, solix_vm_get_metric, solix_vm_read_bytes,
-    solix_vm_read_field_u64, solix_vm_set_cycle_threshold, solix_vm_set_field_i32,
-    solix_vm_write_field_u64,
+    solix_vm_get_class_vtable_id, solix_vm_get_field_i32, solix_vm_get_field_i32_by_index,
+    solix_vm_get_field_i32_by_offset, solix_vm_get_metric, solix_vm_read_bytes,
+    solix_vm_read_field_u64, solix_vm_read_field_u64_by_index, solix_vm_read_field_u64_by_offset,
+    solix_vm_set_cycle_threshold, solix_vm_set_field_i32, solix_vm_set_field_i32_by_index,
+    solix_vm_set_field_i32_by_offset, solix_vm_write_field_u64, solix_vm_write_field_u64_by_index,
+    solix_vm_write_field_u64_by_offset,
 };
 use solix_runtime::options::RuntimeOptions;
 use solix_runtime::vm::VirtualMachine;
 use std::ffi::c_void;
 
-#[test]
-fn test_ffi_string_allocation_and_read() {
-    let options = RuntimeOptions::new().with_binary(BinaryProgram::new());
-    let context = RuntimeContext::new(options).expect("failed to construct context");
-    let mut virtual_machine = VirtualMachine::new(context);
-
-    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
-    let mut context_wrapper = SolixVmContext {
+fn make_test_context(vm_pointer: *mut c_void) -> SolixVmContext {
+    SolixVmContext {
         magic: SOLIX_VM_CONTEXT_MAGIC,
         vm_ptr: vm_pointer,
         get_field_i32: solix_vm_get_field_i32,
@@ -41,7 +38,25 @@ fn test_ffi_string_allocation_and_read() {
         get_vm_metric: solix_vm_get_metric,
         collect_cycles: solix_vm_collect_cycles,
         set_cycle_threshold: solix_vm_set_cycle_threshold,
-    };
+        get_field_i32_by_index: solix_vm_get_field_i32_by_index,
+        set_field_i32_by_index: solix_vm_set_field_i32_by_index,
+        get_field_i32_by_offset: solix_vm_get_field_i32_by_offset,
+        set_field_i32_by_offset: solix_vm_set_field_i32_by_offset,
+        read_field_u64_by_index: solix_vm_read_field_u64_by_index,
+        write_field_u64_by_index: solix_vm_write_field_u64_by_index,
+        read_field_u64_by_offset: solix_vm_read_field_u64_by_offset,
+        write_field_u64_by_offset: solix_vm_write_field_u64_by_offset,
+    }
+}
+
+#[test]
+fn test_ffi_string_allocation_and_read() {
+    let options = RuntimeOptions::new().with_binary(BinaryProgram::new());
+    let context = RuntimeContext::new(options).expect("failed to construct context");
+    let mut virtual_machine = VirtualMachine::new(context);
+
+    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
+    let mut context_wrapper = make_test_context(vm_pointer);
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
     let sample_text = b"Hello Solix Standard Library!";
@@ -73,27 +88,7 @@ fn test_ffi_char_and_byte_arrays() {
     let mut virtual_machine = VirtualMachine::new(context);
 
     let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
-    let mut context_wrapper = SolixVmContext {
-        magic: SOLIX_VM_CONTEXT_MAGIC,
-        vm_ptr: vm_pointer,
-        get_field_i32: solix_vm_get_field_i32,
-        set_field_i32: solix_vm_set_field_i32,
-        read_bytes: solix_vm_read_bytes,
-        alloc_string: solix_vm_alloc_string,
-        alloc_chars: solix_vm_alloc_chars,
-        alloc_byte_array: solix_vm_alloc_byte_array,
-        alloc_array: solix_vm_alloc_array,
-        array_len: solix_vm_array_len,
-        array_get_u64: solix_vm_array_get_u64,
-        array_set_u64: solix_vm_array_set_u64,
-        alloc_object: solix_vm_alloc_object,
-        read_field_u64: solix_vm_read_field_u64,
-        write_field_u64: solix_vm_write_field_u64,
-        get_class_vtable_id: solix_vm_get_class_vtable_id,
-        get_vm_metric: solix_vm_get_metric,
-        collect_cycles: solix_vm_collect_cycles,
-        set_cycle_threshold: solix_vm_set_cycle_threshold,
-    };
+    let mut context_wrapper = make_test_context(vm_pointer);
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
     let sample_chars = b"SolixChars";
@@ -152,27 +147,7 @@ fn test_ffi_generic_array_manipulation() {
     let mut virtual_machine = VirtualMachine::new(context);
 
     let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
-    let mut context_wrapper = SolixVmContext {
-        magic: SOLIX_VM_CONTEXT_MAGIC,
-        vm_ptr: vm_pointer,
-        get_field_i32: solix_vm_get_field_i32,
-        set_field_i32: solix_vm_set_field_i32,
-        read_bytes: solix_vm_read_bytes,
-        alloc_string: solix_vm_alloc_string,
-        alloc_chars: solix_vm_alloc_chars,
-        alloc_byte_array: solix_vm_alloc_byte_array,
-        alloc_array: solix_vm_alloc_array,
-        array_len: solix_vm_array_len,
-        array_get_u64: solix_vm_array_get_u64,
-        array_set_u64: solix_vm_array_set_u64,
-        alloc_object: solix_vm_alloc_object,
-        read_field_u64: solix_vm_read_field_u64,
-        write_field_u64: solix_vm_write_field_u64,
-        get_class_vtable_id: solix_vm_get_class_vtable_id,
-        get_vm_metric: solix_vm_get_metric,
-        collect_cycles: solix_vm_collect_cycles,
-        set_cycle_threshold: solix_vm_set_cycle_threshold,
-    };
+    let mut context_wrapper = make_test_context(vm_pointer);
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
     // Allocate an array of 5 int64 elements (type tag 4)
@@ -223,27 +198,7 @@ fn test_ffi_object_allocation_and_u64_fields() {
     let mut virtual_machine = VirtualMachine::new(context);
 
     let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
-    let mut context_wrapper = SolixVmContext {
-        magic: SOLIX_VM_CONTEXT_MAGIC,
-        vm_ptr: vm_pointer,
-        get_field_i32: solix_vm_get_field_i32,
-        set_field_i32: solix_vm_set_field_i32,
-        read_bytes: solix_vm_read_bytes,
-        alloc_string: solix_vm_alloc_string,
-        alloc_chars: solix_vm_alloc_chars,
-        alloc_byte_array: solix_vm_alloc_byte_array,
-        alloc_array: solix_vm_alloc_array,
-        array_len: solix_vm_array_len,
-        array_get_u64: solix_vm_array_get_u64,
-        array_set_u64: solix_vm_array_set_u64,
-        alloc_object: solix_vm_alloc_object,
-        read_field_u64: solix_vm_read_field_u64,
-        write_field_u64: solix_vm_write_field_u64,
-        get_class_vtable_id: solix_vm_get_class_vtable_id,
-        get_vm_metric: solix_vm_get_metric,
-        collect_cycles: solix_vm_collect_cycles,
-        set_cycle_threshold: solix_vm_set_cycle_threshold,
-    };
+    let mut context_wrapper = make_test_context(vm_pointer);
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
     let target_vtable_id: u32 = 42;
@@ -301,27 +256,7 @@ fn test_ffi_get_class_vtable_id_lookup() {
     let mut virtual_machine = VirtualMachine::new(context);
 
     let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
-    let mut context_wrapper = SolixVmContext {
-        magic: SOLIX_VM_CONTEXT_MAGIC,
-        vm_ptr: vm_pointer,
-        get_field_i32: solix_vm_get_field_i32,
-        set_field_i32: solix_vm_set_field_i32,
-        read_bytes: solix_vm_read_bytes,
-        alloc_string: solix_vm_alloc_string,
-        alloc_chars: solix_vm_alloc_chars,
-        alloc_byte_array: solix_vm_alloc_byte_array,
-        alloc_array: solix_vm_alloc_array,
-        array_len: solix_vm_array_len,
-        array_get_u64: solix_vm_array_get_u64,
-        array_set_u64: solix_vm_array_set_u64,
-        alloc_object: solix_vm_alloc_object,
-        read_field_u64: solix_vm_read_field_u64,
-        write_field_u64: solix_vm_write_field_u64,
-        get_class_vtable_id: solix_vm_get_class_vtable_id,
-        get_vm_metric: solix_vm_get_metric,
-        collect_cycles: solix_vm_collect_cycles,
-        set_cycle_threshold: solix_vm_set_cycle_threshold,
-    };
+    let mut context_wrapper = make_test_context(vm_pointer);
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
     let vector2_vtable =
@@ -361,27 +296,7 @@ fn test_ffi_get_vm_metric_telemetry() {
     let mut virtual_machine = VirtualMachine::new(context);
 
     let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
-    let mut context_wrapper = SolixVmContext {
-        magic: SOLIX_VM_CONTEXT_MAGIC,
-        vm_ptr: vm_pointer,
-        get_field_i32: solix_vm_get_field_i32,
-        set_field_i32: solix_vm_set_field_i32,
-        read_bytes: solix_vm_read_bytes,
-        alloc_string: solix_vm_alloc_string,
-        alloc_chars: solix_vm_alloc_chars,
-        alloc_byte_array: solix_vm_alloc_byte_array,
-        alloc_array: solix_vm_alloc_array,
-        array_len: solix_vm_array_len,
-        array_get_u64: solix_vm_array_get_u64,
-        array_set_u64: solix_vm_array_set_u64,
-        alloc_object: solix_vm_alloc_object,
-        read_field_u64: solix_vm_read_field_u64,
-        write_field_u64: solix_vm_write_field_u64,
-        get_class_vtable_id: solix_vm_get_class_vtable_id,
-        get_vm_metric: solix_vm_get_metric,
-        collect_cycles: solix_vm_collect_cycles,
-        set_cycle_threshold: solix_vm_set_cycle_threshold,
-    };
+    let mut context_wrapper = make_test_context(vm_pointer);
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
     // Metric 28: func_total_registered
@@ -520,4 +435,120 @@ fn test_ffi_allocators_checked_arithmetic_overflow_guards() {
         overflow_object, 0,
         "Overflowing object count must return null"
     );
+}
+
+#[test]
+fn test_ffi_explicit_field_index_and_offset_with_many_fields() {
+    let mut binary_program = BinaryProgram::new();
+    let mut class_def = solix_common::CompiledClass::new("BigStruct", 55, None, 72);
+    // 12 fields starting at offset 8 (offsets: 8, 12, 16, ..., 64)
+    class_def.field_types = vec![
+        (8, 5),   // index 0: i32
+        (12, 5),  // index 1: i32
+        (16, 5),  // index 2: i32
+        (20, 5),  // index 3: i32
+        (24, 5),  // index 4: i32
+        (28, 5),  // index 5: i32
+        (32, 5),  // index 6: i32
+        (36, 5),  // index 7: i32
+        (40, 5),  // index 8: i32 (collides with legacy < 8 threshold!)
+        (44, 6),  // index 9: u32
+        (48, 7),  // index 10: i64
+        (56, 12), // index 11: ref
+    ];
+    binary_program.classes.push(class_def);
+
+    let options = RuntimeOptions::new().with_binary(binary_program);
+    let context = RuntimeContext::new(options).expect("construct runtime context");
+    let mut virtual_machine = VirtualMachine::new(context);
+    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
+    let mut ctx = make_test_context(vm_pointer);
+    let ctx_ptr = &mut ctx as *mut SolixVmContext as *mut c_void;
+
+    let obj = unsafe { (ctx.alloc_object)(ctx_ptr, 55, 12) };
+    assert_ne!(obj, 0);
+
+    unsafe {
+        // Indices >= 8 and small byte offsets (< 64) remain completely unambiguous.
+        (ctx.set_field_i32_by_index)(ctx_ptr, obj, 8, -987_654);
+        assert_eq!((ctx.get_field_i32_by_index)(ctx_ptr, obj, 8), -987_654);
+        assert_eq!((ctx.get_field_i32_by_offset)(ctx_ptr, obj, 40), -987_654);
+
+        (ctx.set_field_i32_by_offset)(ctx_ptr, obj, 8, 123_456);
+        assert_eq!((ctx.get_field_i32_by_index)(ctx_ptr, obj, 0), 123_456);
+
+        (ctx.write_field_u64_by_index)(ctx_ptr, obj, 10, 0x1122_3344_5566_7788);
+        assert_eq!(
+            (ctx.read_field_u64_by_index)(ctx_ptr, obj, 10),
+            0x1122_3344_5566_7788
+        );
+        assert_eq!(
+            (ctx.read_field_u64_by_offset)(ctx_ptr, obj, 48),
+            0x1122_3344_5566_7788
+        );
+
+        let str_addr = (ctx.alloc_string)(ctx_ptr, b"field-ref".as_ptr(), 9);
+        (ctx.write_field_u64_by_offset)(ctx_ptr, obj, 56, str_addr as u64);
+        assert_eq!(
+            (ctx.read_field_u64_by_index)(ctx_ptr, obj, 11),
+            str_addr as u64
+        );
+
+        // Out-of-bounds index safely returns 0 without corrupting heap.
+        assert_eq!((ctx.get_field_i32_by_index)(ctx_ptr, obj, 99), 0);
+        assert_eq!((ctx.read_field_u64_by_index)(ctx_ptr, obj, 99), 0);
+    }
+}
+
+#[test]
+fn test_ffi_utf8_char_array_and_array_checked_overflow_guards() {
+    let options = RuntimeOptions::new().with_binary(BinaryProgram::new());
+    let context = RuntimeContext::new(options).expect("construct runtime context");
+    let mut virtual_machine = VirtualMachine::new(context);
+    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
+    let mut ctx = make_test_context(vm_pointer);
+    let ctx_ptr = &mut ctx as *mut SolixVmContext as *mut c_void;
+
+    let sample = "café 🚀 Solix Ω";
+    let utf8_bytes = sample.as_bytes();
+    let expected_chars = sample.chars().count() as u32;
+    let chars_addr =
+        unsafe { (ctx.alloc_chars)(ctx_ptr, utf8_bytes.as_ptr(), utf8_bytes.len() as u32) };
+    assert_ne!(chars_addr, 0);
+
+    // Element count matches Unicode scalar count (not UTF-8 byte count).
+    assert_eq!(
+        unsafe { (ctx.array_len)(ctx_ptr, chars_addr) },
+        expected_chars
+    );
+    // Element 5 is '🚀' (U+1F680), preserving full Unicode scalar value.
+    assert_eq!(
+        unsafe { (ctx.array_get_u64)(ctx_ptr, chars_addr, 5) },
+        '🚀' as u64
+    );
+
+    // Querying byte length returns exact UTF-8 byte length; partial & full reads succeed cleanly.
+    let queried_len = unsafe { (ctx.read_bytes)(ctx_ptr, chars_addr, std::ptr::null_mut(), 0) };
+    assert_eq!(queried_len as usize, utf8_bytes.len());
+
+    let mut read_back = vec![0u8; queried_len as usize];
+    let copied_len = unsafe {
+        (ctx.read_bytes)(
+            ctx_ptr,
+            chars_addr,
+            read_back.as_mut_ptr(),
+            read_back.len() as u32,
+        )
+    };
+    assert_eq!(copied_len as usize, utf8_bytes.len());
+    assert_eq!(std::str::from_utf8(&read_back).ok(), Some(sample));
+
+    // Checked arithmetic guards prevent overflow on huge array indices/addresses.
+    assert_eq!(
+        unsafe { (ctx.array_get_u64)(ctx_ptr, u32::MAX - 2, u32::MAX) },
+        0
+    );
+    unsafe {
+        (ctx.array_set_u64)(ctx_ptr, u32::MAX - 2, u32::MAX, 42);
+    }
 }

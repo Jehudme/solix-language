@@ -394,7 +394,7 @@ name = "{bridge_name}"
 crate-type = ["cdylib"]
 
 [dependencies]
-solix-ffi = ">=1.1.3, <2.0.0"
+solix-ffi = {{ git = "https://github.com/Jehudme/solix-language.git", branch = "dev" }}
 """
         (bridge_dir / "Cargo.toml").write_text(cargo_toml_content, encoding="utf-8")
 
@@ -402,7 +402,7 @@ solix-ffi = ">=1.1.3, <2.0.0"
 
 use solix_ffi::{{NativeRegistry, SolixCValue, solix_export}};
 
-pub unsafe extern "C" fn {pascal_name}Native_fast_add(
+pub unsafe extern "C-unwind" fn {pascal_name}Native_fast_add(
     _vm_context: *mut std::ffi::c_void,
     args: *const SolixCValue,
     arg_count: u32,
