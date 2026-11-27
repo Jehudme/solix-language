@@ -171,6 +171,88 @@ class TestRaylibBindgen(unittest.TestCase):
         self.assertNotIn("ctx.read_field_u64(", rust_source)
         self.assertNotIn("ctx.write_field_u64(", rust_source)
 
+    def test_solix_ergonomic_operators_helpers_and_raii_wrappers(self) -> None:
+        ergonomic_schema = {
+            "defines": [],
+            "structs": [
+                {
+                    "name": "Vector2",
+                    "description": "2D vector",
+                    "fields": [{"name": "x", "type": "float"}, {"name": "y", "type": "float"}],
+                },
+                {
+                    "name": "Vector3",
+                    "description": "3D vector",
+                    "fields": [
+                        {"name": "x", "type": "float"},
+                        {"name": "y", "type": "float"},
+                        {"name": "z", "type": "float"},
+                    ],
+                },
+                {
+                    "name": "Color",
+                    "description": "RGBA color",
+                    "fields": [
+                        {"name": "r", "type": "unsigned char"},
+                        {"name": "g", "type": "unsigned char"},
+                        {"name": "b", "type": "unsigned char"},
+                        {"name": "a", "type": "unsigned char"},
+                    ],
+                },
+                {
+                    "name": "Rectangle",
+                    "description": "Rectangle",
+                    "fields": [
+                        {"name": "x", "type": "float"},
+                        {"name": "y", "type": "float"},
+                        {"name": "width", "type": "float"},
+                        {"name": "height", "type": "float"},
+                    ],
+                },
+                {
+                    "name": "Texture",
+                    "description": "GPU texture",
+                    "fields": [{"name": "id", "type": "unsigned int"}],
+                },
+                {
+                    "name": "Camera3D",
+                    "description": "3D camera",
+                    "fields": [{"name": "fovy", "type": "float"}],
+                },
+            ],
+            "aliases": [{"name": "Texture2D", "type": "Texture", "description": "Texture2D"}],
+            "enums": [],
+            "callbacks": [],
+            "functions": [
+                {"name": "BeginDrawing", "description": "", "returnType": "void", "params": []},
+                {"name": "EndDrawing", "description": "", "returnType": "void", "params": []},
+                {
+                    "name": "BeginMode3D",
+                    "description": "",
+                    "returnType": "void",
+                    "params": [{"name": "camera", "type": "Camera3D"}],
+                },
+                {"name": "EndMode3D", "description": "", "returnType": "void", "params": []},
+                {
+                    "name": "UnloadTexture",
+                    "description": "",
+                    "returnType": "void",
+                    "params": [{"name": "texture", "type": "Texture2D"}],
+                },
+            ],
+        }
+        api_ir = generate_bindings.parse_api_to_ir(ergonomic_schema, "RLAPI")
+        solix_source = generate_bindings.emit_solix_declarations(api_ir, "raylib", "Raylib")
+
+        self.assertIn("public Vector2 operator+(Vector2 other)", solix_source)
+        self.assertIn("public Vector3 cross(Vector3 other)", solix_source)
+        self.assertIn("public static Color from_hex(int32 rgba_hex)", solix_source)
+        self.assertIn("public bool contains(Vector2 point)", solix_source)
+        self.assertIn("public class ManagedTexture {", solix_source)
+        self.assertIn("~ManagedTexture()", solix_source)
+        self.assertIn("public void with_drawing(void(*)() draw_callback)", solix_source)
+        self.assertIn("public void with_mode_3d(Camera3D camera, void(*)() draw_callback)", solix_source)
+
 
 if __name__ == "__main__":
     unittest.main()

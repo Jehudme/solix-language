@@ -822,8 +822,500 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
     )
 
 
-# ============================================================================
-# Pass 2: Solix Declarations Emitter (--out-slx)
+def _clamp_byte_expr(expr_name: str) -> str:
+    return f"(uint8)({expr_name} < 0 ? 0 : ({expr_name} > 255 ? 255 : {expr_name}))"
+
+
+def _emit_vector_ergonomics(lines: list[str], struct_name: str, fields: list[str]) -> None:
+    """Emits presets, arithmetic operators, and vector algebra helpers for Vector2/Vector3/Vector4."""
+    params_f32 = ", ".join(f"float32 init_{fld}" for fld in fields)
+    params_f64 = ", ".join(f"float64 init_{fld}" for fld in fields)
+    params_i32 = ", ".join(f"int32 init_{fld}" for fld in fields)
+    init_from_f64 = "\n".join(f"        this.{fld} = (float32)init_{fld};" for fld in fields)
+    init_from_i32 = "\n".join(f"        this.{fld} = (float32)init_{fld};" for fld in fields)
+
+    lines.extend([
+        "",
+        f"    public {struct_name}({params_f64}) {{",
+        init_from_f64,
+        "    }",
+        "",
+        f"    public {struct_name}({params_i32}) {{",
+        init_from_i32,
+        "    }",
+        "",
+        f"    public static {struct_name} ZERO = new {struct_name}({', '.join('(float32)0.0' for _ in fields)});",
+        f"    public static {struct_name} ONE = new {struct_name}({', '.join('(float32)1.0' for _ in fields)});",
+    ])
+    for unit_idx, unit_fld in enumerate(fields):
+        unit_args = ", ".join("(float32)1.0" if idx == unit_idx else "(float32)0.0" for idx in range(len(fields)))
+        lines.append(f"    public static {struct_name} UNIT_{unit_fld.upper()} = new {struct_name}({unit_args});")
+
+    # Component-wise binary operators (+, -, *, /)
+    for op_sym in ("+", "-", "*", "/"):
+        args_expr = ", ".join(f"this.{fld} {op_sym} other.{fld}" for fld in fields)
+        lines.extend([
+            "",
+            f"    public {struct_name} operator{op_sym}({struct_name} other) {{",
+            f"        if (other == null) {{ return new {struct_name}({', '.join(f'this.{fld}' for fld in fields)}); }}",
+            f"        return new {struct_name}({args_expr});",
+            "    }",
+        ])
+
+    # Scalar operators (* and / for float32, float64, int32)
+    for op_sym in ("*", "/"):
+        for scalar_type in ("float32", "float64", "int32"):
+            cast_scalar = "scalar_val" if scalar_type == "float32" else "(float32)scalar_val"
+            args_expr = ", ".join(f"this.{fld} {op_sym} {cast_scalar}" for fld in fields)
+            lines.extend([
+                "",
+                f"    public {struct_name} operator{op_sym}({scalar_type} scalar_val) {{",
+                f"        return new {struct_name}({args_expr});",
+                "    }",
+            ])
+
+    eq_checks = " && ".join(f"this.{fld} == other.{fld}" for fld in fields)
+    neg_args = ", ".join(f"-this.{fld}" for fld in fields)
+    dot_terms = " + ".join(f"(this.{fld} * other.{fld})" for fld in fields)
+    len_sq_terms = " + ".join(f"(this.{fld} * this.{fld})" for fld in fields)
+    norm_args = ", ".join(f"this.{fld} * inv_length" for fld in fields)
+    dist_terms = " + ".join(f"((this.{fld} - other.{fld}) * (this.{fld} - other.{fld}))" for fld in fields)
+    lerp_args = ", ".join(f"this.{fld} + ((target.{fld} - this.{fld}) * amount)" for fld in fields)
+
+    lines.extend([
+        "",
+        f"    public bool equals({struct_name} other) {{",
+        "        if (other == null) { return false; }",
+        f"        return {eq_checks};",
+        "    }",
+        "",
+        f"    public bool operator==({struct_name} other) {{",
+        "        return this.equals(other);",
+        "    }",
+        "",
+        f"    public bool operator!=({struct_name} other) {{",
+        "        return !this.equals(other);",
+        "    }",
+        "",
+        f"    public {struct_name} negated() {{",
+        f"        return new {struct_name}({neg_args});",
+        "    }",
+        "",
+        f"    public float32 dot({struct_name} other) {{",
+        "        if (other == null) { return (float32)0.0; }",
+        f"        return {dot_terms};",
+        "    }",
+        "",
+        "    public float32 length_squared() {",
+        f"        return {len_sq_terms};",
+        "    }",
+        "",
+        "    public float32 length() {",
+        "        return _raylib_sqrt_f32(this.length_squared());",
+        "    }",
+        "",
+        f"    public {struct_name} normalized() {{",
+        "        float32 magnitude = this.length();",
+        "        if (magnitude <= (float32)0.0) {",
+        f"            return new {struct_name}({', '.join('(float32)0.0' for _ in fields)});",
+        "        }",
+        "        float32 inv_length = (float32)1.0 / magnitude;",
+        f"        return new {struct_name}({norm_args});",
+        "    }",
+        "",
+        f"    public float32 distance_to({struct_name} other) {{",
+        "        if (other == null) { return this.length(); }",
+        f"        return _raylib_sqrt_f32({dist_terms});",
+        "    }",
+        "",
+        f"    public {struct_name} lerp({struct_name} target, float32 amount) {{",
+        f"        if (target == null) {{ return new {struct_name}({', '.join(f'this.{fld}' for fld in fields)}); }}",
+        f"        return new {struct_name}({lerp_args});",
+        "    }",
+    ])
+
+    if struct_name == "Vector3":
+        lines.extend([
+            "",
+            "    public Vector3 cross(Vector3 other) {",
+            "        if (other == null) { return new Vector3(); }",
+            "        return new Vector3(",
+            "            (this.y * other.z) - (this.z * other.y),",
+            "            (this.z * other.x) - (this.x * other.z),",
+            "            (this.x * other.y) - (this.y * other.x)",
+            "        );",
+            "    }",
+        ])
+
+
+def _emit_matrix_ergonomics(lines: list[str]) -> None:
+    """Emits identity, component operators, and 4x4 matrix multiplication on Matrix."""
+    matrix_fields = [
+        "m0", "m4", "m8", "m12",
+        "m1", "m5", "m9", "m13",
+        "m2", "m6", "m10", "m14",
+        "m3", "m7", "m11", "m15",
+    ]
+    lines.extend([
+        "",
+        "    public static Matrix identity() {",
+        "        Matrix result = new Matrix();",
+        "        result.m0 = (float32)1.0;",
+        "        result.m5 = (float32)1.0;",
+        "        result.m10 = (float32)1.0;",
+        "        result.m15 = (float32)1.0;",
+        "        return result;",
+        "    }",
+    ])
+    for op_sym in ("+", "-"):
+        assigns = "\n".join(f"        result.{fld} = this.{fld} {op_sym} other.{fld};" for fld in matrix_fields)
+        lines.extend([
+            "",
+            f"    public Matrix operator{op_sym}(Matrix other) {{",
+            "        Matrix result = new Matrix();",
+            "        if (other == null) { return this; }",
+            assigns,
+            "        return result;",
+            "    }",
+        ])
+    for scalar_type in ("float32", "float64", "int32"):
+        cast_scalar = "scalar_val" if scalar_type == "float32" else "(float32)scalar_val"
+        assigns = "\n".join(f"        result.{fld} = this.{fld} * {cast_scalar};" for fld in matrix_fields)
+        lines.extend([
+            "",
+            f"    public Matrix operator*({scalar_type} scalar_val) {{",
+            "        Matrix result = new Matrix();",
+            assigns,
+            "        return result;",
+            "    }",
+        ])
+    mul_assigns: list[str] = []
+    for row in range(4):
+        for col in range(4):
+            dst_fld = f"m{row + col * 4}"
+            terms = " + ".join(
+                f"(this.m{row + inner * 4} * other.m{inner + col * 4})"
+                for inner in range(4)
+            )
+            mul_assigns.append(f"        result.{dst_fld} = {terms};")
+    eq_expr = " && ".join(f"this.{fld} == other.{fld}" for fld in matrix_fields)
+    lines.extend([
+        "",
+        "    public Matrix operator*(Matrix other) {",
+        "        Matrix result = new Matrix();",
+        "        if (other == null) { return result; }",
+        *mul_assigns,
+        "        return result;",
+        "    }",
+        "",
+        "    public bool equals(Matrix other) {",
+        "        if (other == null) { return false; }",
+        f"        return {eq_expr};",
+        "    }",
+        "",
+        "    public bool operator==(Matrix other) {",
+        "        return this.equals(other);",
+        "    }",
+        "",
+        "    public bool operator!=(Matrix other) {",
+        "        return !this.equals(other);",
+        "    }",
+    ])
+
+
+def _emit_color_ergonomics(lines: list[str]) -> None:
+    """Emits ergonomic int32/hex constructors and alpha/equality helpers on Color."""
+    lines.extend([
+        "",
+        "    public Color(int32 init_r, int32 init_g, int32 init_b) {",
+        f"        this.r = {_clamp_byte_expr('init_r')};",
+        f"        this.g = {_clamp_byte_expr('init_g')};",
+        f"        this.b = {_clamp_byte_expr('init_b')};",
+        "        this.a = (uint8)255;",
+        "    }",
+        "",
+        "    public Color(int32 init_r, int32 init_g, int32 init_b, int32 init_a) {",
+        f"        this.r = {_clamp_byte_expr('init_r')};",
+        f"        this.g = {_clamp_byte_expr('init_g')};",
+        f"        this.b = {_clamp_byte_expr('init_b')};",
+        f"        this.a = {_clamp_byte_expr('init_a')};",
+        "    }",
+        "",
+        "    public static Color from_hex(int32 rgba_hex) {",
+        "        uint8 red_byte = (uint8)((rgba_hex >> 24) & 255);",
+        "        uint8 green_byte = (uint8)((rgba_hex >> 16) & 255);",
+        "        uint8 blue_byte = (uint8)((rgba_hex >> 8) & 255);",
+        "        uint8 alpha_byte = (uint8)(rgba_hex & 255);",
+        "        return new Color(red_byte, green_byte, blue_byte, alpha_byte);",
+        "    }",
+        "",
+        "    public static Color from_rgb(int32 rgb_hex) {",
+        "        uint8 red_byte = (uint8)((rgb_hex >> 16) & 255);",
+        "        uint8 green_byte = (uint8)((rgb_hex >> 8) & 255);",
+        "        uint8 blue_byte = (uint8)(rgb_hex & 255);",
+        "        return new Color(red_byte, green_byte, blue_byte, (uint8)255);",
+        "    }",
+        "",
+        "    public Color with_alpha(int32 alpha_byte) {",
+        f"        return new Color(this.r, this.g, this.b, {_clamp_byte_expr('alpha_byte')});",
+        "    }",
+        "",
+        "    public Color with_alpha(float32 alpha_norm) {",
+        "        int32 scaled_alpha = (int32)(alpha_norm * (float32)255.0);",
+        f"        return new Color(this.r, this.g, this.b, {_clamp_byte_expr('scaled_alpha')});",
+        "    }",
+        "",
+        "    public Color with_alpha(float64 alpha_norm) {",
+        "        int32 scaled_alpha = (int32)(alpha_norm * 255.0);",
+        f"        return new Color(this.r, this.g, this.b, {_clamp_byte_expr('scaled_alpha')});",
+        "    }",
+        "",
+        "    public bool equals(Color other) {",
+        "        if (other == null) { return false; }",
+        "        return this.r == other.r && this.g == other.g && this.b == other.b && this.a == other.a;",
+        "    }",
+        "",
+        "    public bool operator==(Color other) {",
+        "        return this.equals(other);",
+        "    }",
+        "",
+        "    public bool operator!=(Color other) {",
+        "        return !this.equals(other);",
+        "    }",
+    ])
+
+
+def _emit_rectangle_ergonomics(lines: list[str], has_vector2: bool) -> None:
+    """Emits geometric query and collision helpers on Rectangle."""
+    lines.extend([
+        "",
+        "    public Rectangle(float64 init_x, float64 init_y, float64 init_width, float64 init_height) {",
+        "        this.x = (float32)init_x;",
+        "        this.y = (float32)init_y;",
+        "        this.width = (float32)init_width;",
+        "        this.height = (float32)init_height;",
+        "    }",
+        "",
+        "    public Rectangle(int32 init_x, int32 init_y, int32 init_width, int32 init_height) {",
+        "        this.x = (float32)init_x;",
+        "        this.y = (float32)init_y;",
+        "        this.width = (float32)init_width;",
+        "        this.height = (float32)init_height;",
+        "    }",
+    ])
+    if has_vector2:
+        lines.extend([
+            "",
+            "    public Rectangle(Vector2 pos_vec, Vector2 size_vec) {",
+            "        this.x = (pos_vec != null) ? pos_vec.x : (float32)0.0;",
+            "        this.y = (pos_vec != null) ? pos_vec.y : (float32)0.0;",
+            "        this.width = (size_vec != null) ? size_vec.x : (float32)0.0;",
+            "        this.height = (size_vec != null) ? size_vec.y : (float32)0.0;",
+            "    }",
+            "",
+            "    public Vector2 position() {",
+            "        return new Vector2(this.x, this.y);",
+            "    }",
+            "",
+            "    public Vector2 size() {",
+            "        return new Vector2(this.width, this.height);",
+            "    }",
+            "",
+            "    public Vector2 center() {",
+            "        return new Vector2(this.x + (this.width * (float32)0.5), this.y + (this.height * (float32)0.5));",
+            "    }",
+            "",
+            "    public bool contains(Vector2 point) {",
+            "        if (point == null) { return false; }",
+            "        return this.contains(point.x, point.y);",
+            "    }",
+        ])
+    lines.extend([
+        "",
+        "    public float32 right() {",
+        "        return this.x + this.width;",
+        "    }",
+        "",
+        "    public float32 bottom() {",
+        "        return this.y + this.height;",
+        "    }",
+        "",
+        "    public bool contains(float32 point_x, float32 point_y) {",
+        "        return point_x >= this.x && point_x <= (this.x + this.width) && point_y >= this.y && point_y <= (this.y + this.height);",
+        "    }",
+        "",
+        "    public bool overlaps(Rectangle other) {",
+        "        if (other == null) { return false; }",
+        "        return (this.x < other.x + other.width)",
+        "            && (this.x + this.width > other.x)",
+        "            && (this.y < other.y + other.height)",
+        "            && (this.y + this.height > other.y);",
+        "    }",
+        "",
+        "    public bool equals(Rectangle other) {",
+        "        if (other == null) { return false; }",
+        "        return this.x == other.x && this.y == other.y && this.width == other.width && this.height == other.height;",
+        "    }",
+        "",
+        "    public bool operator==(Rectangle other) {",
+        "        return this.equals(other);",
+        "    }",
+        "",
+        "    public bool operator!=(Rectangle other) {",
+        "        return !this.equals(other);",
+        "    }",
+    ])
+
+
+def _emit_solix_struct_ergonomics(lines: list[str], struct_name: str, ir: ApiIR) -> None:
+    """Emits OOP operators, convenience constructors, and geometry helpers on core math/color structs."""
+    if struct_name == "Vector2":
+        _emit_vector_ergonomics(lines, "Vector2", ["x", "y"])
+    elif struct_name == "Vector3":
+        _emit_vector_ergonomics(lines, "Vector3", ["x", "y", "z"])
+    elif struct_name == "Vector4":
+        _emit_vector_ergonomics(lines, "Vector4", ["x", "y", "z", "w"])
+    elif struct_name == "Matrix":
+        _emit_matrix_ergonomics(lines)
+    elif struct_name == "Color":
+        _emit_color_ergonomics(lines)
+    elif struct_name == "Rectangle":
+        _emit_rectangle_ergonomics(lines, "Vector2" in ir.struct_map)
+
+
+def _emit_solix_managed_wrappers_and_scopes(lines: list[str], ir: ApiIR) -> None:
+    """Emits internal math helper, RAII Managed* wrappers, and scoped frame helpers."""
+    func_names = {func_obj.name for func_obj in ir.functions}
+    struct_names = set(ir.struct_map.keys()) | {alias_obj.name for alias_obj in ir.aliases}
+
+    if any(name in ir.struct_map for name in ("Vector2", "Vector3", "Vector4")):
+        lines.extend([
+            "",
+            "// ===========================================================================",
+            "// Internal Vector Math Helpers",
+            "// ===========================================================================",
+            "float32 _raylib_sqrt_f32(float32 value) {",
+            "    if (value <= (float32)0.0) {",
+            "        return (float32)0.0;",
+            "    }",
+            "    float64 scaled_val = (float64)value;",
+            "    float64 scale_factor = 1.0;",
+            "    while (scaled_val >= 4.0) {",
+            "        scaled_val = scaled_val * 0.25;",
+            "        scale_factor = scale_factor * 2.0;",
+            "    }",
+            "    while (scaled_val < 0.25) {",
+            "        scaled_val = scaled_val * 4.0;",
+            "        scale_factor = scale_factor * 0.5;",
+            "    }",
+            "    float64 approx = scaled_val > 1.0 ? scaled_val * 0.5 : 1.0;",
+            "    for (int32 step_index = 0; step_index < 8; step_index = step_index + 1) {",
+            "        approx = 0.5 * (approx + (scaled_val / approx));",
+            "    }",
+            "    return (float32)(approx * scale_factor);",
+            "}",
+        ])
+
+    # (wrapper_name, resource_type, unload_fn, active_check, load_signature, load_call)
+    managed_specs = [
+        ("ManagedTexture", "Texture2D", "UnloadTexture", "this.resource.id != (uint32)0", "string file_name", "LoadTexture(file_name)"),
+        ("ManagedRenderTexture", "RenderTexture2D", "UnloadRenderTexture", "this.resource.id != (uint32)0", "int32 width, int32 height", "LoadRenderTexture(width, height)"),
+        ("ManagedImage", "Image", "UnloadImage", "this.resource.data != (uint64)0", "string file_name", "LoadImage(file_name)"),
+        ("ManagedShader", "Shader", "UnloadShader", "this.resource.id != (uint32)0", "string vs_file_name, string fs_file_name", "LoadShader(vs_file_name, fs_file_name)"),
+        ("ManagedFont", "Font", "UnloadFont", "this.resource.texture != null && this.resource.texture.id != (uint32)0", "string file_name", "LoadFont(file_name)"),
+        ("ManagedModel", "Model", "UnloadModel", "this.resource.meshes != (uint64)0", "string file_name", "LoadModel(file_name)"),
+        ("ManagedSound", "Sound", "UnloadSound", "this.resource.frameCount != (uint32)0", "string file_name", "LoadSound(file_name)"),
+        ("ManagedMusic", "Music", "UnloadMusicStream", "this.resource.frameCount != (uint32)0", "string file_name", "LoadMusicStream(file_name)"),
+    ]
+    emitted_managed_header = False
+    for wrapper_name, res_type, unload_fn, active_expr, load_params, load_call in managed_specs:
+        if res_type not in struct_names or unload_fn not in func_names:
+            continue
+        if not emitted_managed_header:
+            lines.extend([
+                "",
+                "// ===========================================================================",
+                "// Managed RAII GPU / Audio Resource Wrappers",
+                "// ===========================================================================",
+            ])
+            emitted_managed_header = True
+        load_fn_name = load_call.split("(", 1)[0]
+        lines.extend([
+            f"public class {wrapper_name} {{",
+            f"    public {res_type} resource;",
+            "    private bool owns_resource;",
+            "",
+            f"    public {wrapper_name}({res_type} handle) {{",
+            "        this.resource = handle;",
+            "        this.owns_resource = handle != null;",
+            "    }",
+        ])
+        if load_fn_name in func_names:
+            lines.extend([
+                "",
+                f"    public static {wrapper_name} load({load_params}) {{",
+                f"        return new {wrapper_name}({load_call});",
+                "    }",
+            ])
+        lines.extend([
+            "",
+            "    public bool is_valid() {",
+            f"        return this.resource != null && ({active_expr});",
+            "    }",
+            "",
+            f"    public {res_type} get() {{",
+            "        return this.resource;",
+            "    }",
+            "",
+            f"    public {res_type} release() {{",
+            "        this.owns_resource = false;",
+            "        return this.resource;",
+            "    }",
+            "",
+            "    public void dispose() {",
+            f"        if (this.owns_resource && this.resource != null && ({active_expr})) {{",
+            f"            {unload_fn}(this.resource);",
+            "        }",
+            "        this.owns_resource = false;",
+            "    }",
+            "",
+            f"    ~{wrapper_name}() {{",
+            "        this.dispose();",
+            "    }",
+            "}",
+            "",
+        ])
+
+    scope_specs = [
+        ("with_drawing", "void(*)() draw_callback", "BeginDrawing", "EndDrawing", "BeginDrawing()", "EndDrawing()"),
+        ("with_mode_2d", "Camera2D camera, void(*)() draw_callback", "BeginMode2D", "EndMode2D", "BeginMode2D(camera)", "EndMode2D()"),
+        ("with_mode_3d", "Camera3D camera, void(*)() draw_callback", "BeginMode3D", "EndMode3D", "BeginMode3D(camera)", "EndMode3D()"),
+        ("with_texture_mode", "RenderTexture2D target, void(*)() draw_callback", "BeginTextureMode", "EndTextureMode", "BeginTextureMode(target)", "EndTextureMode()"),
+    ]
+    emitted_scope_header = False
+    for helper_name, sig_params, begin_fn, end_fn, begin_call, end_call in scope_specs:
+        if begin_fn not in func_names or end_fn not in func_names:
+            continue
+        if not emitted_scope_header:
+            lines.extend([
+                "// ===========================================================================",
+                "// Scoped Frame & Mode Guards",
+                "// ===========================================================================",
+            ])
+            emitted_scope_header = True
+        lines.extend([
+            f"public void {helper_name}({sig_params}) {{",
+            f"    {begin_call};",
+            "    try {",
+            "        if (draw_callback != null) {",
+            "            draw_callback();",
+            "        }",
+            "    } finally {",
+            f"        {end_call};",
+            "    }",
+            "}",
+            "",
+        ])
 # ============================================================================
 
 def emit_solix_declarations(ir: ApiIR, package_name: str, _class_name: str = "") -> str:
@@ -962,6 +1454,8 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, _class_name: str = "")
                     f"    public static {struct_obj.name} {preset_item.name} = new {struct_obj.name}({', '.join(typed_args)});"
                 )
 
+        _emit_solix_struct_ergonomics(lines, struct_obj.name, ir)
+
         lines.append("}")
         lines.append("")
 
@@ -975,6 +1469,13 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, _class_name: str = "")
                 lines.append(f"/// {alias_obj.description}")
             lines.append(f"public class {alias_obj.name} extends {alias_obj.resolved_target} {{")
             lines.append(f"    public {alias_obj.name}() {{}}")
+            if alias_obj.name == "Quaternion":
+                lines.extend([
+                    "",
+                    "    public Quaternion(float32 init_x, float32 init_y, float32 init_z, float32 init_w) : super(init_x, init_y, init_z, init_w) {}",
+                    "    public Quaternion(float64 init_x, float64 init_y, float64 init_z, float64 init_w) : super(init_x, init_y, init_z, init_w) {}",
+                    "    public static Quaternion IDENTITY = new Quaternion((float32)0.0, (float32)0.0, (float32)0.0, (float32)1.0);",
+                ])
             lines.append("}")
             lines.append("")
 
@@ -993,6 +1494,8 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, _class_name: str = "")
         if func_obj.description:
             lines.append(f"/// {func_obj.description}")
         lines.append(f"public native {func_obj.solix_return_type} {func_obj.name}({param_list_str});")
+
+    _emit_solix_managed_wrappers_and_scopes(lines, ir)
 
     return "\n".join(lines) + "\n"
 
