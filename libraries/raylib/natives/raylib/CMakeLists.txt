@@ -58,9 +58,11 @@ if(BUILD_HOST_PARSER_ONLY)
 
     add_custom_target(extract_api_json
         COMMAND $<TARGET_FILE:rlparser> -i "${API_INPUT_HEADER}" -o "${API_OUTPUT_FILE}" -f JSON -d "${API_DEFINE_GUARD}"
+        COMMAND $<TARGET_FILE:rlparser> -i "${raylib_SOURCE_DIR}/src/rlgl.h" -o "${API_OUTPUT_DIR}/rlgl_api.json" -f JSON -d "RLAPI"
+        COMMAND $<TARGET_FILE:rlparser> -i "${raylib_SOURCE_DIR}/src/raymath.h" -o "${API_OUTPUT_DIR}/raymath_api.json" -f JSON -d "RMAPI"
         DEPENDS rlparser
         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-        COMMENT "Extracting C API JSON schema via rlparser: ${API_INPUT_HEADER} -> ${API_OUTPUT_FILE}"
+        COMMENT "Extracting C API JSON schemas (raylib, rlgl, raymath) via rlparser -> ${API_OUTPUT_DIR}"
     )
 else()
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

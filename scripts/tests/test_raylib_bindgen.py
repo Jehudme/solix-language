@@ -252,6 +252,76 @@ class TestRaylibBindgen(unittest.TestCase):
         self.assertIn("~ManagedTexture()", solix_source)
         self.assertIn("public void with_drawing(void(*)() draw_callback)", solix_source)
         self.assertIn("public void with_mode_3d(Camera3D camera, void(*)() draw_callback)", solix_source)
+        self.assertIn("alias Texture2D = Texture;", solix_source)
+        self.assertNotIn("public class Texture2D extends Texture", solix_source)
+
+    def test_merge_api_schemas_deduplicates_shared_types_and_filters_rlgl_artifacts(self) -> None:
+        rl_schema = {
+            "defines": [{"name": "PI", "type": "FLOAT", "value": 3.14159}],
+            "structs": [
+                {"name": "Vector2", "fields": [{"name": "x", "type": "float"}, {"name": "y", "type": "float"}]},
+                {"name": "Matrix", "fields": [{"name": "m0", "type": "float"}]},
+            ],
+            "aliases": [],
+            "enums": [],
+            "callbacks": [],
+            "functions": [
+                {"name": "InitWindow", "returnType": "void", "params": []},
+            ],
+        }
+        rlgl_schema = {
+            "defines": [{"name": "PI", "type": "FLOAT", "value": 3.14159}, {"name": "RL_LINES", "type": "INT", "value": 1}],
+            "structs": [
+                {"name": "Matrix", "fields": [{"name": "m0", "type": "float"}]},
+                {"name": "rl_float16", "fields": [{"name": "", "type": "static rl_float16 foo"}]},
+                {"name": "rlglData", "fields": [{"name": "vertexCounter", "type": "int"}]},
+                {
+                    "name": "rlVertexBuffer",
+                    "fields": [
+                        {"name": "elementCount", "type": "int"},
+                        {"name": "indices", "type": "#if defined(OPENGL_33)"},
+                        {"name": "indices", "type": "unsigned int *"},
+                        {"name": "indices", "type": "unsigned short *"},
+                    ],
+                },
+            ],
+            "aliases": [],
+            "enums": [],
+            "callbacks": [],
+            "functions": [
+                {"name": "rlMatrixMode", "returnType": "void", "params": [{"name": "mode", "type": "int"}]},
+            ],
+        }
+        raymath_schema = {
+            "defines": [{"name": "RMAPI", "type": "GUARD", "value": ""}],
+            "structs": [
+                {"name": "Vector2", "fields": [{"name": "x", "type": "float"}, {"name": "y", "type": "float"}]},
+            ],
+            "aliases": [{"name": "Quaternion", "type": "Vector4"}],
+            "enums": [],
+            "callbacks": [],
+            "functions": [
+                {"name": "Vector2Add", "returnType": "Vector2", "params": [{"name": "v1", "type": "Vector2"}, {"name": "v2", "type": "Vector2"}]},
+            ],
+        }
+
+        merged = generate_bindings.merge_api_schemas([rl_schema, rlgl_schema, raymath_schema])
+        struct_names = [item["name"] for item in merged["structs"]]
+        self.assertEqual(struct_names.count("Vector2"), 1)
+        self.assertEqual(struct_names.count("Matrix"), 1)
+        self.assertNotIn("rl_float16", struct_names)
+        self.assertNotIn("rlglData", struct_names)
+        self.assertIn("rlVertexBuffer", struct_names)
+
+        vb_struct = next(item for item in merged["structs"] if item["name"] == "rlVertexBuffer")
+        self.assertEqual([field["name"] for field in vb_struct["fields"]], ["elementCount", "indices"])
+        self.assertEqual(vb_struct["fields"][1]["type"], "unsigned int *")
+
+        ir = generate_bindings.parse_api_to_ir(merged, ["RLAPI", "RMAPI"])
+        solix_source = generate_bindings.emit_solix_declarations(ir, "raylib", "Raylib")
+        self.assertIn("public native void rlMatrixMode(int32 mode);", solix_source)
+        self.assertIn("public native Vector2 Vector2Add(Vector2 v1, Vector2 v2);", solix_source)
+        self.assertNotIn("RMAPI", solix_source)
 
 
 if __name__ == "__main__":

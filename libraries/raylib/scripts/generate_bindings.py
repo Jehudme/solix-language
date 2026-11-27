@@ -282,8 +282,64 @@ class ApiIR:
 # Pass 1: Parse JSON Schema into Pure IR Lists
 # ============================================================================
 
-def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
+def merge_api_schemas(api_schemas: list[dict]) -> dict:
+    """Merges multiple rlparser JSON schemas (e.g. raylib, rlgl, raymath), deduplicating shared symbols."""
+    merged: dict[str, list] = {
+        "defines": [],
+        "structs": [],
+        "aliases": [],
+        "enums": [],
+        "callbacks": [],
+        "functions": [],
+    }
+    seen_names: dict[str, set[str]] = {section: set() for section in merged}
+    skipped_internal_structs = {"rl_float16", "rlglData"}
+
+    for schema in api_schemas:
+        for section in ("defines", "structs", "aliases", "enums", "callbacks", "functions"):
+            for entry in schema.get(section, []):
+                entry_name = str(entry.get("name", "")).strip()
+                if not entry_name or entry_name in seen_names[section]:
+                    continue
+
+                if section == "structs":
+                    if entry_name in skipped_internal_structs:
+                        continue
+                    cleaned_fields = []
+                    seen_field_names: set[str] = set()
+                    has_unparseable_field = False
+                    for field_entry in entry.get("fields", []):
+                        field_name = str(field_entry.get("name", "")).strip()
+                        field_type = str(field_entry.get("type", "")).strip()
+                        if not field_name:
+                            has_unparseable_field = True
+                            break
+                        if field_type.startswith("#") or field_name in ("{", "}"):
+                            continue
+                        if field_type.startswith("unsigned short *") and entry_name == "rlVertexBuffer":
+                            # Skip GLES2 alternative indices branch; keep OpenGL 3.3 unsigned int *indices
+                            continue
+                        if field_name in seen_field_names:
+                            continue
+                        seen_field_names.add(field_name)
+                        cleaned_fields.append(field_entry)
+                    if has_unparseable_field or not cleaned_fields:
+                        continue
+                    entry = dict(entry)
+                    entry["fields"] = cleaned_fields
+
+                seen_names[section].add(entry_name)
+                merged[section].append(entry)
+
+    return merged
+
+
+def parse_api_to_ir(api_data: dict, define_guard: str | list[str] | set[str]) -> ApiIR:
     """Normalizes raw C-API JSON schema into a fully resolved two-pass IR representation."""
+    if isinstance(define_guard, str):
+        guard_names = {define_guard}
+    else:
+        guard_names = set(define_guard)
     # 1. Build fundamental raw lookup maps
     raw_structs = api_data.get("structs", [])
     raw_aliases = api_data.get("aliases", [])
@@ -318,7 +374,7 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
         raw_val = str(define_item.get("value", ""))
         def_desc = str(define_item.get("description", ""))
 
-        if def_name == define_guard or def_type in ("GUARD", "MACRO"):
+        if def_name in guard_names or def_type in ("GUARD", "MACRO"):
             continue
 
         # Check for struct-literal defines
@@ -1175,6 +1231,10 @@ def _emit_solix_struct_ergonomics(lines: list[str], struct_name: str, ir: ApiIR)
         _emit_vector_ergonomics(lines, "Vector3", ["x", "y", "z"])
     elif struct_name == "Vector4":
         _emit_vector_ergonomics(lines, "Vector4", ["x", "y", "z", "w"])
+        lines.extend([
+            "",
+            "    public static Vector4 IDENTITY = new Vector4((float32)0.0, (float32)0.0, (float32)0.0, (float32)1.0);",
+        ])
     elif struct_name == "Matrix":
         _emit_matrix_ergonomics(lines)
     elif struct_name == "Color":
@@ -1460,23 +1520,14 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, _class_name: str = "")
         lines.append("")
 
     lines.append("// ===========================================================================")
-    lines.append("// Type Aliases (Extended Subclasses)")
+    lines.append("// Type Aliases")
     lines.append("// ===========================================================================")
 
     for alias_obj in ir.aliases:
         if not alias_obj.is_pointer_alias and alias_obj.resolved_target in ir.struct_map:
             if alias_obj.description:
                 lines.append(f"/// {alias_obj.description}")
-            lines.append(f"public class {alias_obj.name} extends {alias_obj.resolved_target} {{")
-            lines.append(f"    public {alias_obj.name}() {{}}")
-            if alias_obj.name == "Quaternion":
-                lines.extend([
-                    "",
-                    "    public Quaternion(float32 init_x, float32 init_y, float32 init_z, float32 init_w) : super(init_x, init_y, init_z, init_w) {}",
-                    "    public Quaternion(float64 init_x, float64 init_y, float64 init_z, float64 init_w) : super(init_x, init_y, init_z, init_w) {}",
-                    "    public static Quaternion IDENTITY = new Quaternion((float32)0.0, (float32)0.0, (float32)0.0, (float32)1.0);",
-                ])
-            lines.append("}")
+            lines.append(f"alias {alias_obj.name} = {alias_obj.resolved_target};")
             lines.append("")
 
     lines.append("// ===========================================================================")
@@ -2030,7 +2081,8 @@ def main() -> None:
     parser.add_argument(
         "--api",
         required=True,
-        help="Path to rlparser C-API JSON schema (e.g. build/.cache/api/raylib_api.json)",
+        nargs="+",
+        help="Path(s) to rlparser C-API JSON schema(s) (e.g. raylib_api.json rlgl_api.json raymath_api.json)",
     )
     parser.add_argument(
         "--out-slx",
@@ -2054,22 +2106,26 @@ def main() -> None:
     )
     parser.add_argument(
         "--define-guard",
-        default="RLAPI",
-        help="API macro define guard to skip (default: RLAPI)",
+        nargs="+",
+        default=["RLAPI", "RMAPI"],
+        help="API macro define guard(s) to skip (default: RLAPI RMAPI)",
     )
 
     cli_arguments = parser.parse_args()
 
-    api_path = Path(cli_arguments.api)
+    api_paths = [Path(raw_api_path) for raw_api_path in cli_arguments.api]
     out_slx_path = Path(cli_arguments.out_slx)
     out_rs_path = Path(cli_arguments.out_rs)
 
-    if not api_path.exists():
-        print(f"Error: Schema file not found at '{api_path}'", file=sys.stderr)
-        sys.exit(1)
+    api_schemas: list[dict] = []
+    for api_path in api_paths:
+        if not api_path.exists():
+            print(f"Error: Schema file not found at '{api_path}'", file=sys.stderr)
+            sys.exit(1)
+        with open(api_path, "r", encoding="utf-8") as schema_file:
+            api_schemas.append(json.load(schema_file))
 
-    with open(api_path, "r", encoding="utf-8") as schema_file:
-        api_data = json.load(schema_file)
+    api_data = merge_api_schemas(api_schemas)
 
     # Pass 1: Normalize into pure IR representation
     ir = parse_api_to_ir(api_data, cli_arguments.define_guard)
