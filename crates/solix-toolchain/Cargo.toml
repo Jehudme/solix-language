@@ -33,6 +33,7 @@ serde_json.workspace = true
 toml.workspace = true
 tempfile.workspace = true
 zip.workspace = true
+mimalloc.workspace = true
 
 [build-dependencies]
 zip.workspace = true

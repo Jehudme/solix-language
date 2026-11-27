@@ -1311,10 +1311,25 @@ fn archive_sidecar_prefix(archive_path: &Path) -> String {
 pub struct SlxpPackage;
 
 impl SlxpPackage {
-    /// Packages an entire directory tree into a deterministic `.slxp` package archive.
+    /// Packages an entire directory tree into a deterministic `.slxp` package archive
+    /// using standard Deflate compression.
     pub fn pack_directory(
         staging_directory: &Path,
         output_archive_path: &Path,
+    ) -> Result<(), EmissionError> {
+        Self::pack_directory_with_compression(
+            staging_directory,
+            output_archive_path,
+            zip::CompressionMethod::Deflated,
+        )
+    }
+
+    /// Packages an entire directory tree into a deterministic `.slxp` package archive
+    /// using the specified ZIP compression method (e.g. `Stored` for fast debug builds).
+    pub fn pack_directory_with_compression(
+        staging_directory: &Path,
+        output_archive_path: &Path,
+        compression_method: zip::CompressionMethod,
     ) -> Result<(), EmissionError> {
         if let Some(parent_dir) = output_archive_path.parent() {
             fs::create_dir_all(parent_dir).map_err(|io_error| {
@@ -1338,7 +1353,7 @@ impl SlxpPackage {
 
         let mut zip_writer = ZipWriter::new(archive_file);
         let options = SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
+            .compression_method(compression_method)
             .unix_permissions(0o755);
 
         let mut collected_entries = Vec::<PathBuf>::new();
@@ -3058,5 +3073,44 @@ profiles:
         let fallback_load =
             SlxpPackage::extract_and_load(&package_path, &extract_cache).expect("fallback load");
         assert_eq!(fallback_load.binaries.len(), 1);
+    }
+
+    #[test]
+    fn test_slxp_package_stored_compression_packs_and_loads_cleanly() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let stage_dir = temp_dir.path().join("stage");
+        fs::create_dir_all(&stage_dir).expect("create stage dir");
+
+        let manifest_yaml = r#"configuration:
+  name: stored_pkg
+  version: "0.1.0"
+profiles:
+  release: {}
+  debug: {}
+"#;
+        fs::write(stage_dir.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+
+        let mut program = BinaryProgram::new();
+        program.package_name = "stored_pkg".to_string();
+        fs::write(stage_dir.join("binaries.slxb"), program.to_bytes()).expect("write binaries");
+
+        let package_path = temp_dir.path().join("stored_pkg.slxp");
+        SlxpPackage::pack_directory_with_compression(
+            &stage_dir,
+            &package_path,
+            zip::CompressionMethod::Stored,
+        )
+        .expect("pack stored slxp");
+
+        let archive_file = File::open(&package_path).expect("open slxp");
+        let mut archive = zip::ZipArchive::new(archive_file).expect("read zip");
+        let entry = archive.by_name("binaries.slxb").expect("binaries entry");
+        assert_eq!(entry.compression(), zip::CompressionMethod::Stored);
+        drop(entry);
+
+        let extract_cache = temp_dir.path().join("cache");
+        let loaded = SlxpPackage::extract_and_load(&package_path, &extract_cache)
+            .expect("extract and load stored slxp");
+        assert_eq!(loaded.binaries.len(), 1);
     }
 }

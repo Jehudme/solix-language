@@ -53,11 +53,22 @@ pub(crate) fn find_parent_manifest(initial_path: &Path) -> Option<PathBuf> {
         initial_path.parent()?.to_path_buf()
     };
 
+    let home_dir = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+
     for _ in 0..12 {
         if let Some(manifest_candidate) =
             solix_common::project::find_manifest_path(&current_directory)
         {
             return Some(manifest_candidate);
+        }
+        if current_directory.join(".git").exists()
+            || home_dir
+                .as_deref()
+                .is_some_and(|home| home == current_directory.as_path())
+        {
+            break;
         }
         if !current_directory.pop() {
             break;
@@ -692,4 +703,34 @@ pub fn execute_compile_package_to_output(
         force: false,
         no_verify: !resolved_profile.verify_checksum,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_parent_manifest;
+    use std::fs;
+
+    #[test]
+    fn test_find_parent_manifest_stops_at_git_boundary() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let outer_manifest = temp_dir.path().join("manifest.yaml");
+        fs::write(
+            &outer_manifest,
+            "configuration:\n  name: outer\n  version: \"0.1.0\"\n",
+        )
+        .expect("write outer manifest");
+
+        let repo_root = temp_dir.path().join("repo");
+        let nested_src = repo_root.join("examples").join("standalone");
+        fs::create_dir_all(repo_root.join(".git")).expect("create .git");
+        fs::create_dir_all(&nested_src).expect("create nested dir");
+
+        let standalone_file = nested_src.join("main.slx");
+        fs::write(&standalone_file, "int32 main() { return 0; }").expect("write source");
+
+        assert!(
+            find_parent_manifest(&standalone_file).is_none(),
+            "Traversal must stop at .git boundary instead of walking past the repository root"
+        );
+    }
 }
