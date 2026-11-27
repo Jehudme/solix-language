@@ -24,7 +24,7 @@ flowchart TD
   - Traverses the `Program` AST across all parsed source files.
   - Records the active package declaration from `PackageStatement` (e.g. `package solix.io;`).
   - Registers all `ClassDeclaration`, `InterfaceDeclaration`, and `EnumDeclaration` identifiers in the global symbol table using their fully qualified names (`SymbolTable`).
-  - Collects `alias` declarations and queues `import` / `extern import` statements for dependency resolution.
+  - Collects `alias` declarations, re-resolves their target type annotations after all package declarations are registered, and queues `import` / `extern import` statements for dependency resolution.
   - Validates that type names are globally unique within their declaring package namespace and enforces checked `u16` source ID bounds (`<= 65,536` sources).
 
 ---
