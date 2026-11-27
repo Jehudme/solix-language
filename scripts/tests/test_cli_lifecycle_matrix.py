@@ -1013,6 +1013,72 @@ public class Main {
         execute_step(
             [
                 solix_executable_string,
+                "check",
+                str(application_directory),
+                "--pkg-dir",
+                package_store_argument,
+            ],
+            working_directory=application_directory,
+            step_description="Type-check application via 'solix check'",
+            environment_variables=execution_environment,
+        )
+
+        execute_step(
+            [
+                solix_executable_string,
+                "test",
+                str(application_directory),
+                "--pkg-dir",
+                package_store_argument,
+            ],
+            working_directory=application_directory,
+            step_description="Run application test suite via 'solix test'",
+            environment_variables=execution_environment,
+        )
+
+        init_workspace = workspace_path / "init_probe"
+        init_workspace.mkdir(parents=True, exist_ok=True)
+        execute_step(
+            [
+                solix_executable_string,
+                "init",
+                str(init_workspace),
+            ],
+            working_directory=workspace_path,
+            step_description="Initialize manifest in existing dir via 'solix init'",
+            environment_variables=execution_environment,
+        )
+
+        execute_step(
+            [
+                solix_executable_string,
+                "add",
+                "raylib@5.5.0",
+                "--path",
+                str(init_workspace),
+                "--pkg-dir",
+                package_store_argument,
+            ],
+            working_directory=workspace_path,
+            step_description="Add dependency to manifest via 'solix add'",
+            environment_variables=execution_environment,
+        )
+
+        execute_step(
+            [
+                solix_executable_string,
+                "clean",
+                str(application_directory),
+                "--dry-run",
+            ],
+            working_directory=application_directory,
+            step_description="Preview build cleanup via 'solix clean --dry-run'",
+            environment_variables=execution_environment,
+        )
+
+        execute_step(
+            [
+                solix_executable_string,
                 "clean",
                 str(application_directory),
                 "--cache-only",
