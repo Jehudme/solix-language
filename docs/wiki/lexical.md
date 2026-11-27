@@ -57,7 +57,7 @@ Quick atomic reference for Solix tokenization rules, literals, escape sequences,
 | **Assignment** | `=`, `+=`, `-=`, `*=`, `/=`, `%=` |
 | **Comparison** | `==`, `!=`, `<`, `>`, `<=`, `>=` |
 | **Logical** | `&&`, `\|\|`, `!` |
-| **Bitwise** | `~`, `&` |
+| **Bitwise** | `~`, `&`, `\|`, `^`, `<<`, `>>` |
 | **Increment / Decrement** | `++`, `--` |
 | **Arrow / Conditional** | `=>`, `?`, `:` |
 | **Punctuation & Scope** | `;`, `,`, `.`, `::`, `...` |

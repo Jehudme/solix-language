@@ -8,7 +8,7 @@ This section documents runtime trap codes and execution faults emitted by the So
 | :---: | :---: | :--- | :--- |
 | **`R0000`** | 0 | `Success` | Normal successful VM termination |
 | **`R0001`** | 1 | `OutOfMemory` | `VirtualHeap` exhausted available memory during dynamic allocation |
-| **`R0002`** | 2 | `StackOverflow` | Call frame depth exceeded maximum recursion ceiling (default: 10,000 frames) |
+| **`R0002`** | 2 | `StackOverflow` | Call frame depth exceeded maximum recursion ceiling (default: 1,024 frames) |
 | **`R0003`** | 3 | `DivideByZero` | Integer division or modulo by zero (`numerator / 0` or `numerator % 0`) |
 | **`R0004`** | 4 | `IndexOutOfBounds` | Array, string, or collection indexed with negative or out-of-range index |
 | **`R0005`** | 5 | `NullReferenceAccess` | Attempted field read, write, method invocation on null, or throw of a null reference |

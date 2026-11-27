@@ -15,20 +15,21 @@ All heap management structures are implemented in safe Rust under `#![forbid(uns
 Every dynamically allocated heap block (objects, primitive arrays, reference arrays, closures, strings, tuples) resides in the dynamic heap partition with an 8-byte packed header positioned immediately before the payload address:
 
 ```text
-+-----------------------------+-----------------------------+
-| Bytes 0..4 (32 bits)        | Bytes 4..8 (32 bits)        |
-+-----------------------------+-----------------------------+
-| Payload Size / Count (u32)  | Tag (4 bits) | RefCount(28) |
-+-----------------------------+-----------------------------+
-^ Address - 8                                               ^ Base Payload Address (Address + 0)
++------------------------------------+-------------------------------------------+
+| Bytes 0..4 (32 bits)               | Bytes 4..8 (32 bits)                      |
++------------------------------------+-------------------------------------------+
+| Payload Size / Count (u32)         | Tag (4b) | GcColor (2b) | RefCount (26b)  |
++------------------------------------+-------------------------------------------+
+^ Address - 8                                                                    ^ Base Payload Address (Address + 0)
 ```
 
 ### 2.1. Header Packing Specification
-The 8-byte header ([`crates/solix-runtime/src/memory/layout.rs`](../../crates/solix-runtime/src/memory/layout.rs#L80-L150)) packs:
+The 8-byte header ([`crates/solix-runtime/src/memory/layout.rs`](../../crates/solix-runtime/src/memory/layout.rs#L138-L241)) packs:
 - **`size` (Bytes 0..4)**: 32-bit unsigned integer holding the allocated byte size or array element count.
 - **`tag_and_ref` (Bytes 4..8)**:
-  - **Upper 4 bits (`bits [31:28]`)**: Strongly typed `BlockTag` indicating the runtime representation.
-  - **Lower 28 bits (`bits [27:0]`)**: Active reference counter (`ref_count`). Maximum allowable reference count is `268,435,455` (`MAX_REF_COUNT = 0x0FFF_FFFF`).
+  - **Bits `[31:28]` (4 bits)**: Strongly typed `BlockTag` indicating the runtime representation.
+  - **Bits `[27:26]` (2 bits)**: Tricolor `GcColor` state used by the Bacon & Rajan cycle collector.
+  - **Bits `[25:0]` (26 bits)**: Active reference counter (`ref_count`). Maximum allowable reference count is `67,108,863` (`MAX_REF_COUNT = 0x03FF_FFFF`).
 
 ### 2.2. Block Tags (`BlockTag`)
 

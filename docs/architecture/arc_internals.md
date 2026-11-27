@@ -10,14 +10,14 @@ Objects and dynamic collections are allocated on the byte-addressed heap with an
 
 ## 2. Reference Count Lifecycle
 
-Every dynamic heap block contains a 28-bit unsigned reference counter embedded in the lower bits of its header's second word:
+Every dynamic heap block contains a 26-bit unsigned reference counter embedded in the lower bits of its header's second word:
 
 ```text
-Address - 4: [ 4 bits BlockTag | 28 bits ref_count ]
+Address - 4: [ 4 bits BlockTag | 2 bits GcColor | 26 bits ref_count ]
 ```
 
 ### 2.1. Initialization
-When an allocation instruction executes (`NewObject`, `NewArrayRef`, `NewClosure`, `AllocString`), the memory allocator sets `ref_count = 1`.
+When an allocation instruction executes (`AllocObject`, `AllocArray`, `PackClosure`, `AllocTuple`), the memory allocator sets `ref_count = 1`.
 
 ### 2.2. Retain (`IncRef`)
 Whenever an object reference is duplicated:
@@ -26,7 +26,7 @@ Whenever an object reference is duplicated:
 - Storing a reference into an instance field of another heap object.
 - Appending a reference to a dynamic collection or array.
 
-The VM increments the 28-bit counter via [`crates/solix-runtime/src/memory/layout.rs`](../../crates/solix-runtime/src/memory/layout.rs#L122):
+The VM increments the 26-bit counter via [`crates/solix-runtime/src/memory/layout.rs`](../../crates/solix-runtime/src/memory/layout.rs#L214):
 ```rust
 pub fn inc_ref(&mut self) -> Result<u32, RuntimeError> {
     if self.ref_count == MAX_REF_COUNT {
