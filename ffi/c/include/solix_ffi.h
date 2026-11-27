@@ -19,8 +19,8 @@
 
 #define SOLIX_FFI_VERSION_MAJOR 3
 #define SOLIX_FFI_VERSION_MINOR 1
-#define SOLIX_FFI_VERSION_PATCH 0
-#define SOLIX_FFI_VERSION "3.1.0"
+#define SOLIX_FFI_VERSION_PATCH 1
+#define SOLIX_FFI_VERSION "3.1.1"
 
 #ifdef __cplusplus
 extern "C" {
