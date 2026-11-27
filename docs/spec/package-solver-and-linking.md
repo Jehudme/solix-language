@@ -65,14 +65,12 @@ The local package store organizes artifacts using strict versioned directory pat
 
 ```text
 ~/.solix/packages/
-├── solix/
-│   ├── 1.0.0/
-│   │   └── solix.slxp
-│   └── 2.0.0/
-│       └── solix.slxp
-└── raylib/
-    └── 5.0.0/
-        └── raylib.slxp
+├── solix-release@2.2.1/
+│   └── solix.slxp
+├── solix-debug@2.2.1/
+│   └── solix.slxp
+└── raylib-release@6.0.1/
+    └── raylib.slxp
 ```
 
 Resolution Priority:
@@ -111,8 +109,7 @@ Solix supports two complementary binary linking strategies:
 
 2. **Static Linking (`--link static`):**
    * Transitive bytecode dependencies are merged into a single consolidated binary payload.
-   * Controlled via the `SOLIX_LINK_MODE=static` environment variable or the `--link static` CLI compilation flag.
-   * `solix_build.py` checks `os.environ.get("SOLIX_LINK_MODE")` during project build scripts and forwards the flag to `solix compile`.
+   * Controlled via the `SOLIX_LINK_MODE=static` environment variable, `static: true` / `link: static` in `manifest.yaml`, or the `--link static` / `--static` CLI compilation flag.
 
 ---
 
@@ -124,7 +121,7 @@ When cross-compiling native modules across disparate operating systems and archi
 * **CMake Dependencies (`CMakeLists.txt`):** Solix dispatches through official `dockcross/<target>` images (e.g. `dockcross/linux-arm64`, `dockcross/windows-static-x64`).
 * **Custom Containers:** Projects can override default images by declaring `docker_image: <custom_image>` in the native target configuration.
 * **Target Cache Isolation:** Solix segregates container compilation target directories (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) from host build caches, preventing host-compiled build scripts from being executed under container dynamic linkers.
-* **Native Target Platform Scoping:** Individual native subprojects can restrict their compiled targets with `platforms: [host, windows-x86_64]` under `profiles.<name>.natives.<key>` while retaining universal pure-Solix packaging.
+* **Native Target Platform Inheritance:** Native subprojects inherit target platforms from `profiles.<name>.platforms`.
 
 > [!NOTE]
 > Containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild and targeted sysroots, but it is practical and sufficient for complex native dependencies with extensive system library requirements.

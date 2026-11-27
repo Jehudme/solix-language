@@ -120,7 +120,7 @@ café         // non-ASCII character
 
 ## 5. Reserved Keywords
 
-The following 40 tokens are **reserved keywords**. They may not be used as identifiers.
+The following 44 tokens are **reserved keywords**. They may not be used as identifiers.
 
 ### Control Flow
 
@@ -151,6 +151,7 @@ The following 40 tokens are **reserved keywords**. They may not be used as ident
 | `enum`      | Declare a strongly-typed enumeration                  |
 | `package`   | Declare the compilation unit's namespace              |
 | `import`    | Bring symbols from another package into scope         |
+| `extern`    | Import external package APIs on-the-fly (`extern import`) |
 | `alias`     | Declare a type synonym or generic alias               |
 
 ### Modifiers
@@ -163,8 +164,9 @@ The following 40 tokens are **reserved keywords**. They may not be used as ident
 | `internal`   | Accessible only within the same package                             |
 | `static`     | Belongs to the class rather than an instance                        |
 | `inline`     | Hint to inline the method body at call sites                        |
-| `native`     | Body is implemented by a registered C++ native function             |
+| `native`     | Body is implemented by a registered native FFI function             |
 | `const`      | Declares an immutable field or variable                             |
+| `final`      | Prevents overriding a method or subclassing a class                 |
 | `virtual`    | Method may be overridden in a subclass                              |
 | `override`   | Method explicitly overrides a `virtual` method from a superclass    |
 | `weak`       | Field holds a weak (non-owning) reference for ARC cycle-breaking    |
@@ -179,6 +181,8 @@ The following 40 tokens are **reserved keywords**. They may not be used as ident
 | `this`       | Reference the current object instance                      |
 | `instanceof` | Test whether a reference is an instance of a type          |
 | `sizeof`     | Query compile-time or runtime byte size of a type or instance |
+| `assert`     | Runtime boolean assertion check (`assert(cond)`)           |
+| `exit`       | Terminate program execution immediately with an exit code  |
 | `operator`   | Declare an operator overload                               |
 | `null`       | The null reference literal                                 |
 | `true`       | Boolean literal true                                       |
@@ -211,6 +215,7 @@ The following identifiers are reserved as **primitive type names**. They denote 
 | `uint64`  | Unsigned 64-bit integer             | 64 bits |
 | `float32` | 32-bit IEEE 754 floating-point      | 32 bits |
 | `float64` | 64-bit IEEE 754 floating-point      | 64 bits |
+| `tuple`   | Heterogeneous fixed-length tuple    | 64-bit ref |
 | `void`    | Absence of a value (return type only)| —      |
 
 ---

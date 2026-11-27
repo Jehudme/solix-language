@@ -12,16 +12,17 @@
 
 ## 1. `.slxb` Bytecode Container Layout
 
-Every compiled `.slxb` file consists of a 16-byte fixed container header followed by sequentially serialized binary sections:
+Every compiled `.slxb` file consists of a header (fixed 12-byte magic/version/flags prefix followed by variable-length entrypoint specifiers and static size) followed by sequentially serialized binary sections:
 
 ```text
 ┌────────────────────────────────────────────────────────┐
-│ Header (16 Bytes)                                      │
+│ Header (Variable-Length)                               │
 │   • Magic Bytes: b"SLXB" (0x53, 0x4C, 0x58, 0x42)      │
 │   • Version Major (u16: 1)                             │
 │   • Version Minor (u16: 0)                             │
 │   • Target Flags (u32)                                 │
-│   • Entrypoint Specifiers & Static Size (u32)          │
+│   • Entrypoint Specifiers (entry_point_id / symbol) &  │
+│     Static Size (u32)                                  │
 ├────────────────────────────────────────────────────────┤
 │ Section 2: Static Symbols Map                          │
 │   • List of (Symbol Name, Memory Slot Index) pairs     │
@@ -61,13 +62,13 @@ package.slxp (ZIP Container)
 ├── binaries.slxb              # Primary compiled bytecode container at package root
 ├── bin/
 │   ├── x86_64-unknown-linux-gnu/
-│   │   ├── libnative_core.so  # Native library (prefixed with native_ or libnative_)
-│   │   └── libhelper.so       # Transitive support library (unregistered in FFI table)
+│   │   ├── lib__native_core.so # Native library (prefixed with __native_ or lib__native_)
+│   │   └── libhelper.so        # Transitive support library (unregistered in FFI table)
 │   ├── x86_64-pc-windows-msvc/
-│   │   ├── native_core.dll
+│   │   ├── __native_core.dll
 │   │   └── helper.dll
 │   └── aarch64-apple-darwin/
-│       ├── libnative_core.dylib
+│       ├── lib__native_core.dylib
 │       └── libhelper.dylib
 └── resources/                 # Application assets (fonts, images, data files)
 ```
@@ -79,7 +80,7 @@ package.slxp (ZIP Container)
 
 ### Native Loader & Isolation Policy
 * At runtime, native libraries matching the active host target triple (`host_triple`) are extracted to isolated cache directory `~/.solix/cache/packages/<name>-<version>/bin/<target>/`.
-* **Strict Loading Rule**: The runtime ONLY loads and registers libraries whose filenames start with `native_` (or platform equivalent `libnative_`).
-* **Transitive Dependency Isolation**: Auxiliary or transitive support libraries located in `bin/<target>/` that do not start with `native_` remain un-registered in the Solix VM FFI symbol table, ensuring dependencies cannot collide with user FFI bindings.
+* **Strict Loading Rule**: The runtime ONLY loads and registers libraries whose filenames start with `__native_` (or platform equivalent `lib__native_`).
+* **Transitive Dependency Isolation**: Auxiliary or transitive support libraries located in `bin/<target>/` that do not start with `__native_` remain un-registered in the Solix VM FFI symbol table, ensuring dependencies cannot collide with user FFI bindings.
 * **Hermetic Search**: The runtime never searches host system `PATH` or arbitrary system directories; all native symbols are resolved strictly from the active package's `bin/<target>/` location.
 * **Root Binary Deduplication & Interface Bounds**: When an archive bundles both root `binaries.slxb` and a byte-identical legacy `bin/<package>.slxb` alias, `SlxarcArchive::extract_and_load` deduplicates them by SHA-256 digest before runtime loading; across multi-module loads, `RuntimeContext` rejects relocated `CallInterface` interface IDs exceeding the 8-bit opcode ceiling (`255`) rather than wrapping.

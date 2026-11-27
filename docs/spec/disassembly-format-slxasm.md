@@ -14,9 +14,6 @@
 Solix produces human-readable register VM assembly listings from either source compilation or precompiled binary containers:
 
 ```bash
-# Emit .slxasm alongside compiled .slxb during compilation
-solix compile src/main.slx --emit-disassembly
-
 # Inspect an existing .slxb or .slxp package on stdout
 solix info build/release/app.slxb --disasm
 ```
@@ -41,7 +38,7 @@ A complete `.slxb` disassembly consists of four ordered sections:
 ```text
 ; ================================================================
 ; Solix SLXB Binary Disassembly
-; Version: 2.0, Flags: 0x00000000
+; Version: 1.0, Flags: 0x00000000
 ; Entry Point: Some("CounterApp::main") (id: Some(2))
 ; Static Reservation: 0 slots
 ; ================================================================

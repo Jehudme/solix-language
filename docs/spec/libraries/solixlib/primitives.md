@@ -132,12 +132,12 @@ Package `solix.core` provides friendly synonyms for core primitive scalar types 
 ```solix
 import solix.core.*;
 
-int add(int a, int b) {
-    return a + b;
+int32 add(int32 left, int32 right) {
+    return left + right;
 }
 
-double multiply(double a, double b) {
-    return a * b;
+float64 multiply(float64 left, float64 right) {
+    return left * right;
 }
 ```
 

@@ -7,18 +7,18 @@ A `LambdaExpression` (`(params) => expr` or `(params) => { ... }`) defines an an
 ### Syntax
 - Expression body:
   ```solix
-  int32(*)(int32) sq = (x) => x * x;
+  int32(*)(int32) sq = (val) => val * val;
   ```
 - Block body:
   ```solix
-  int32(*)(int32, int32) add = (a, b) => {
-      return a + b;
+  int32(*)(int32, int32) add = (left, right) => {
+      return left + right;
   };
   ```
 - Capturing closure:
   ```solix
   int32 factor = 5;
-  int32(*)(int32) multiplier = (x) => x * factor;
+  int32(*)(int32) multiplier = (val) => val * factor;
   ```
 
 ---

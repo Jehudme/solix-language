@@ -4,9 +4,9 @@
 
 * **Specification ID:** SPEC-0011
 * **Scope:** Native Interoperability, FFI SDKs (`ffi/c`, `ffi/rust`), ABI & Dynamic Shared Libraries (`crates/solix-runtime/src/native/`)
-* **Status:** Final Normative Standard (SDK Release `2.0.0`+)
+* **Status:** Final Normative Standard (SDK Release `3.1.1`)
 * **Implementation Source:** [`crates/solix-runtime/src/native/ffi.rs`](../../crates/solix-runtime/src/native/ffi.rs)
-* **SDK Version Constant:** `SOLIX_FFI_VERSION` (`2.0.0`), `SOLIX_FFI_VERSION_MAJOR` (2)
+* **SDK Version Constant:** `SOLIX_FFI_VERSION` (`3.1.1`), `SOLIX_FFI_VERSION_MAJOR` (3)
 
 ---
 
@@ -134,9 +134,9 @@ To eliminate security risks and unpredictable host environment pollution, the So
 
 1. **Restricted Target Platform Directory**: The runtime never searches arbitrary system directories or the host system environment search paths. Instead, native modules are resolved exclusively from the active platform target directory (`bin/<target_triple>/` with fallback to `lib/<target_triple>/`) inside the extracted package cache or explicit `--lib` command options.
 2. **Solix Native Module Prefix & Suffix Filtering**: By default, dynamic loader discovery automatically loads only shared libraries following Solix native plugin naming conventions:
-   - Module prefix: `native_*` or `libnative_*` (e.g., `libnative_math.so`, `native_math.dll`).
+   - Module prefix: `__native_*` or `lib__native_*` (e.g., `lib__native_math.so`, `__native_math.dll`).
    - Module suffix: `*_native` or `lib*native` (e.g., `libsolixlib_native.so`).
-3. **Explicit Declaration via `dynamic_libraries`**: Shared libraries that do not use standard `native_*` naming prefixes are only loaded into the virtual machine symbol table if explicitly declared in the project's `manifest.yaml` (under `dynamic_libraries` or profile `natives`) or embedded within the binary container's `dynamic_libraries` metadata list.
+3. **Explicit Declaration via `dynamic_libraries`**: Shared libraries that do not use standard `__native_*` naming prefixes are only loaded into the virtual machine symbol table if explicitly declared in the project's `manifest.yaml` (under `dynamic_libraries` or profile `natives`) or embedded within the binary container's `dynamic_libraries` metadata list.
 4. **Transitive Support Library Isolation**: Non-Solix third-party companion libraries (such as system drivers, rendering libraries, or windowing dependencies like `libglfw.so` or `glfw3.dll`) placed alongside native plugins in target folders are extracted to disk for operating system dynamic linker resolution, but are strictly excluded from registration in the Solix VM FFI native dispatch table.
 
 ---
@@ -146,10 +146,10 @@ To eliminate security risks and unpredictable host environment pollution, the So
 The C/C++ FFI SDK header (`solix_ffi.h`) defines compile-time SemVer preprocessor macros to ensure binary and structural interface compatibility:
 
 ```c
-#define SOLIX_FFI_VERSION_MAJOR 2
-#define SOLIX_FFI_VERSION_MINOR 0
+#define SOLIX_FFI_VERSION_MAJOR 3
+#define SOLIX_FFI_VERSION_MINOR 1
 #define SOLIX_FFI_VERSION_PATCH 1
-#define SOLIX_FFI_VERSION       "2.0.1"
+#define SOLIX_FFI_VERSION       "3.1.1"
 ```
 
 During initialization, native extension modules can verify that the runtime major and minor versions satisfy their structural expectations. Automated CTest suites dynamically validate that `SOLIX_FFI_VERSION` correctly formats `SOLIX_FFI_VERSION_MAJOR`, `SOLIX_FFI_VERSION_MINOR`, and `SOLIX_FFI_VERSION_PATCH` without requiring hardcoded patch numbers.
