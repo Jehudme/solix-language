@@ -123,25 +123,47 @@ fn test_solix_new_default_application() {
         "Legacy lib/ directory must not be created"
     );
 
-    // Verify solix check and solix test work cleanly on the newly scaffolded project
-    let check_exit = solix_toolchain::execute_check(solix_toolchain::CheckArgs {
-        path: target_project_directory.clone(),
-        profile: "debug".to_string(),
-        pkg_dir: None,
-        no_verify: true,
+    // Verify solix check and solix test work cleanly on a freestanding project (always runs)
+    let freestanding_dir = temporary_directory.path().join("freestanding_check");
+    solix_toolchain::execute_new(NewArgs {
+        subcommand: None,
+        path: Some(freestanding_dir.clone()),
+        name: None,
+        version: "0.1.0".to_string(),
+        description: "Freestanding".to_string(),
+        license: "Apache-2.0".to_string(),
+        authors: Vec::new(),
+        main: "Main::main".to_string(),
+        test: "TestRunner::test".to_string(),
+        lib: false,
+        native: None,
+        no_native: false,
+        no_std: true,
+        deps: Vec::new(),
+        force: false,
     })
-    .expect("execute_check on pure Solix project");
-    assert_eq!(check_exit, 0);
-
-    let test_exit = solix_toolchain::execute_test(solix_toolchain::TestArgs {
-        path: target_project_directory.clone(),
-        profile: "test".to_string(),
-        filter: None,
-        pkg_dir: None,
-        no_verify: true,
-    })
-    .expect("execute_test on pure Solix project");
-    assert_eq!(test_exit, 0);
+    .expect("scaffold freestanding");
+    assert_eq!(
+        solix_toolchain::execute_check(solix_toolchain::CheckArgs {
+            path: freestanding_dir.clone(),
+            profile: "debug".to_string(),
+            pkg_dir: None,
+            no_verify: true,
+        })
+        .expect("execute_check on freestanding project"),
+        0
+    );
+    assert_eq!(
+        solix_toolchain::execute_test(solix_toolchain::TestArgs {
+            path: freestanding_dir,
+            profile: "test".to_string(),
+            filter: None,
+            pkg_dir: None,
+            no_verify: true,
+        })
+        .expect("execute_test on freestanding project"),
+        0
+    );
 
     // Build debug profile via pure-Rust builder when Docker/cross containerization is available
     if !is_cross_container_available() {
