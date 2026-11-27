@@ -92,7 +92,7 @@ solix <subcommand> [options] [arguments...]
 | `init` | Initializes a `manifest.yaml` in an existing directory without overwriting sources | [docs/spec/tools/cli/init.md](../spec/tools/cli/init.md) |
 | `add` | Adds a package dependency to the project's `manifest.yaml` | [docs/spec/tools/cli/add.md](../spec/tools/cli/add.md) |
 | `compile` | Directly compiles source files into executable bytecode (`.slxb`) | [docs/spec/tools/cli/compile.md](../spec/tools/cli/compile.md) |
-| `build` | Builds multi-file projects into distribution packages (`.slxp`) | [docs/spec/tools/cli/build.md](../spec/tools/cli/build.md) |
+| `build` | Builds multi-file projects into distribution packages (`.slxp`; uncompressed `Stored` for `debug`/`test`, `Deflated` for `release`) | [docs/spec/tools/cli/build.md](../spec/tools/cli/build.md) |
 | `check` | Type-checks a Solix project without emitting bytecode | [docs/spec/tools/cli/check.md](../spec/tools/cli/check.md) |
 | `test` | Compiles and runs discovered `test_*` functions or `TestRunner::test` | [docs/spec/tools/cli/test.md](../spec/tools/cli/test.md) |
 | `run` | Executes bytecode containers, packages, or runs `.slx` files on-the-fly | [docs/spec/tools/cli/run.md](../spec/tools/cli/run.md) |
