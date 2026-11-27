@@ -13,21 +13,23 @@ pub mod solver;
 pub mod telemetry;
 
 pub use cli::{
-    BuildArgs, CleanArgs, Cli, Commands, CompileArgs, CompilePackageArgs, CompileSourceArgs,
-    CompileSubcommand, DapArgs, DocArgs, ExportArgs, ExportBinariesArgs, ExportPackageArgs,
-    ExportSubcommand, FmtArgs, InfoArgs, InstallArgs, InstallBinariesArgs, InstallPackageArgs,
-    InstallSubcommand, ListArgs, LspArgs, NewArgs, NewNativeArgs, NewPackageArgs, NewSubcommand,
-    RunArgs, RunPackageArgs, RunSourceArgs, RunSubcommand, UninstallArgs, UninstallBinariesArgs,
-    UninstallPackageArgs, UninstallSubcommand, WikiArgs,
+    AddArgs, BuildArgs, CheckArgs, CleanArgs, Cli, Commands, CompileArgs, CompilePackageArgs,
+    CompileSourceArgs, CompileSubcommand, DapArgs, DocArgs, ExportArgs, ExportBinariesArgs,
+    ExportPackageArgs, ExportSubcommand, FmtArgs, InfoArgs, InitArgs, InstallArgs,
+    InstallBinariesArgs, InstallPackageArgs, InstallSubcommand, ListArgs, LspArgs, NewArgs,
+    NewNativeArgs, NewPackageArgs, NewSubcommand, RunArgs, RunPackageArgs, RunSourceArgs,
+    RunSubcommand, TestArgs, UninstallArgs, UninstallBinariesArgs, UninstallPackageArgs,
+    UninstallSubcommand, WikiArgs,
 };
 pub use commands::{
     APPLE_DARWIN_CROSS_IMAGE, CargoBuildStrategy, cross_image_for_triple,
-    dockcross_image_for_triple, execute_build, execute_clean, execute_compile,
-    execute_compile_package, execute_compile_source, execute_dap, execute_doc, execute_export,
-    execute_fmt, execute_info, execute_install, execute_install_binaries, execute_install_package,
-    execute_list, execute_lsp, execute_new, execute_new_native, execute_new_package, execute_run,
-    execute_run_package, execute_run_source, execute_uninstall, execute_uninstall_binaries,
-    execute_uninstall_package, execute_wiki, install_package_artifact, osxcross_cargo_env_vars,
+    dockcross_image_for_triple, execute_add, execute_build, execute_check, execute_clean,
+    execute_compile, execute_compile_package, execute_compile_source, execute_dap, execute_doc,
+    execute_export, execute_fmt, execute_info, execute_init, execute_install,
+    execute_install_binaries, execute_install_package, execute_list, execute_lsp, execute_new,
+    execute_new_native, execute_new_package, execute_run, execute_run_package, execute_run_source,
+    execute_test, execute_uninstall, execute_uninstall_binaries, execute_uninstall_package,
+    execute_wiki, install_package_artifact, osxcross_cargo_env_vars,
     prepare_effective_cross_config, resolve_bin_store_dir, resolve_cargo_target_cache_dir,
     resolve_cmake_target_cache_dir, resolve_native_triples_for_test, select_cargo_strategy,
     verify_docker_daemon_active, write_zig_toolchain_file_for_test,
@@ -111,6 +113,16 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
         }
         Commands::Clean(args) => {
             execute_clean(args)?;
+            Ok(0)
+        }
+        Commands::Check(args) => execute_check(args),
+        Commands::Test(args) => execute_test(args),
+        Commands::Init(args) => {
+            execute_init(args)?;
+            Ok(0)
+        }
+        Commands::Add(args) => {
+            execute_add(args)?;
             Ok(0)
         }
     }

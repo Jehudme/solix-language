@@ -176,6 +176,17 @@ solix list --json
 
 ---
 
+## `solix init` & `solix add`
+
+Initialize a `manifest.yaml` (using `vars:` YAML anchors) inside an existing project directory or add a dependency:
+
+```bash
+solix init [path] [--name <name>] [--force]
+solix add <package>[@version] [--path <dir>] [--dep-profile <profile>] [--pkg-dir <dir>]
+```
+
+---
+
 ## Related Specifications
 * Formal Spec: [`docs/spec/tools/cli/new.md`](../../spec/tools/cli/new.md)
 * Formal Spec: [`docs/spec/tools/cli/install.md`](../../spec/tools/cli/install.md)

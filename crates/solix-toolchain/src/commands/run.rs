@@ -211,6 +211,32 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let effective_profile_arg = args.resolved_profile();
 
     if args.binaries.is_empty() {
+        let current_dir = std::env::current_dir()?;
+        let has_manifest = ["manifest.yaml", "manifest.yml", "manifest.toml"]
+            .iter()
+            .any(|name| current_dir.join(name).exists());
+        if has_manifest {
+            return execute_run_package(RunPackageArgs {
+                target: PathBuf::from("."),
+                entry: args.entry,
+                profile: args.profile,
+                debug: args.debug,
+                release: args.release,
+                test: args.test,
+                args: args.args,
+                heap_size: args.heap_size,
+                max_stack: args.max_stack,
+                cycle_collector: args.cycle_collector,
+                cycle_threshold: args.cycle_threshold,
+                cycle_budget_us: args.cycle_budget_us,
+                pkg_dir: args.pkg_dir,
+                safe: args.safe,
+                verbose: args.verbose,
+                metrics: args.metrics,
+                metrics_json: args.metrics_json,
+                no_verify: args.no_verify,
+            });
+        }
         bail!("No binary container or source files provided to execute");
     }
 

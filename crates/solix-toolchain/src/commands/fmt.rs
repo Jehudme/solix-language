@@ -18,10 +18,12 @@ pub fn execute_fmt(args: FmtArgs) -> anyhow::Result<i32> {
             files_to_format.push(target_path.clone());
         } else if target_path.is_dir() {
             collect_slx_files(target_path, &mut files_to_format)?;
+        } else {
+            anyhow::bail!("Path does not exist: '{}'", target_path.display());
         }
     }
 
-    if files_to_format.is_empty() {
+    if args.files.is_empty() && files_to_format.is_empty() {
         let current_working_directory = std::env::current_dir()?;
         collect_slx_files(&current_working_directory, &mut files_to_format)?;
     }

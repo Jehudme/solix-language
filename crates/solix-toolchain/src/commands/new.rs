@@ -153,7 +153,7 @@ pub fn execute_new_package(args: NewPackageArgs) -> Result<()> {
         );
     }
 
-    let include_native = !args.no_native;
+    let include_native = args.native.is_some() && !args.no_native;
     let native_lang = if include_native {
         Some(NativeLanguage::parse(
             args.native.as_deref().unwrap_or("rust"),
@@ -175,17 +175,19 @@ pub fn execute_new_package(args: NewPackageArgs) -> Result<()> {
     fs::create_dir_all(target_path.join("src"))?;
     fs::create_dir_all(target_path.join("tests"))?;
     fs::create_dir_all(target_path.join("resources"))?;
-    let bin_dir = target_path.join("bin");
-    for triple in &[
-        "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-pc-windows-msvc",
-        "x86_64-apple-darwin",
-        "aarch64-apple-darwin",
-    ] {
-        let triple_dir = bin_dir.join(triple);
-        fs::create_dir_all(&triple_dir)?;
-        fs::write(triple_dir.join(".gitkeep"), "")?;
+    if include_native {
+        let bin_dir = target_path.join("bin");
+        for triple in &[
+            "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-pc-windows-msvc",
+            "x86_64-apple-darwin",
+            "aarch64-apple-darwin",
+        ] {
+            let triple_dir = bin_dir.join(triple);
+            fs::create_dir_all(&triple_dir)?;
+            fs::write(triple_dir.join(".gitkeep"), "")?;
+        }
     }
     fs::write(
         target_path.join("resources").join("config.txt"),
@@ -378,6 +380,19 @@ struct ProjectManifestRenderSpec<'a> {
 fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String {
     let mut lines = Vec::new();
 
+    lines.push("vars:".to_string());
+    lines.push("  sources: &sources".to_string());
+    lines.push("    - src".to_string());
+    if !spec.dependencies.is_empty() {
+        lines.push("  dependencies: &dependencies".to_string());
+        for (dep_name, dep_ver) in spec.dependencies {
+            lines.push(format!("    {dep_name}:"));
+            lines.push(format!("      version: \"{}\"", dep_ver));
+            lines.push("      profile: release".to_string());
+        }
+    }
+    lines.push(String::new());
+
     lines.push("configuration:".to_string());
     lines.push(format!("  name: {}", spec.project_name));
     lines.push(format!("  version: \"{}\"", spec.version));
@@ -406,10 +421,13 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
         "    inline_threshold: 16".to_string(),
         "    debug_symbols: false".to_string(),
         "    static: true".to_string(),
-        "    sources:".to_string(),
-        "      - src".to_string(),
+        "    sources: *sources".to_string(),
         "    platforms:".to_string(),
-        "      - all".to_string(),
+        if spec.native_key.is_some() {
+            "      - host".to_string()
+        } else {
+            "      - all".to_string()
+        },
     ]);
     if let Some(key) = spec.native_key {
         lines.extend([
@@ -418,7 +436,9 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
             "        profile: release".to_string(),
         ]);
     }
-    append_dependencies_yaml(&mut lines, spec.dependencies);
+    if !spec.dependencies.is_empty() {
+        lines.push("    dependencies: *dependencies".to_string());
+    }
     lines.push(String::new());
 
     lines.push("  debug:".to_string());
@@ -430,8 +450,7 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
         "    inline_threshold: 8".to_string(),
         "    debug_symbols: true".to_string(),
         "    static: false".to_string(),
-        "    sources:".to_string(),
-        "      - src".to_string(),
+        "    sources: *sources".to_string(),
         "    platforms:".to_string(),
         "      - host".to_string(),
     ]);
@@ -442,7 +461,9 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
             "        profile: debug".to_string(),
         ]);
     }
-    append_dependencies_yaml(&mut lines, spec.dependencies);
+    if !spec.dependencies.is_empty() {
+        lines.push("    dependencies: *dependencies".to_string());
+    }
     lines.push(String::new());
 
     lines.push("  test:".to_string());
@@ -465,21 +486,11 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
             "        profile: debug".to_string(),
         ]);
     }
-    append_dependencies_yaml(&mut lines, spec.dependencies);
+    if !spec.dependencies.is_empty() {
+        lines.push("    dependencies: *dependencies".to_string());
+    }
     lines.push(String::new());
     lines.join("\n")
-}
-
-fn append_dependencies_yaml(lines: &mut Vec<String>, dependencies: &BTreeMap<String, String>) {
-    if dependencies.is_empty() {
-        return;
-    }
-    lines.push("    dependencies:".to_string());
-    for (dep_name, dep_ver) in dependencies {
-        lines.push(format!("      {dep_name}:"));
-        lines.push(format!("        version: \"{}\"", dep_ver));
-        lines.push("        profile: release".to_string());
-    }
 }
 
 fn yaml_quoted_scalar(value: &str) -> String {
@@ -544,11 +555,13 @@ public class {main_class_name}Api {{
         format!(
             r#"package {safe_snake_name};
 
+import solix.io.Console;
+
 public class Main {{
     public static int32 main() {{
-        int32 value_a = 15;
-        int32 value_b = 27;
-        return value_a + value_b;
+        // Entry point for the '{project_name}' Solix application.
+        Console::println("Hello from {project_name}!");
+        return 0;
     }}
 }}
 "#

@@ -36,7 +36,7 @@ pub struct PackageRecord {
     pub installed_at_unix_secs: u64,
     /// Human-readable ISO 8601 UTC timestamp string.
     pub installed_at_iso8601: String,
-    /// Optional filesystem path to the original source project directory for rebuilding via `solix reinstall`.
+    /// Optional filesystem path to the original source project directory for rebuilding.
     #[serde(default, alias = "source_project_dir")]
     pub source: Option<PathBuf>,
     /// Filesystem path to the installed package artifact in the store.

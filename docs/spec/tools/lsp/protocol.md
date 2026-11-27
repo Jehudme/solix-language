@@ -237,6 +237,7 @@ When discovering and analyzing project source files across workspace directories
 - **Lexical Formatter Brace Counting (`formatter.rs`)**: `count_code_braces` and `format_line_content` track string/char escape parity (`escape_active`), `//` line comments, and `/* ... */` block comments so braces inside comments, strings, or trailing escaped backslashes (`"C:\\\\"`) never corrupt indentation.
 - **Qualified Signature Help (`signature_help.rs`)**: Preserves AST receiver/class qualifiers and restricts fallback symbol lookup to in-scope or public symbols.
 - **Scoped RAII Inlay Hints & CodeLens (`inlay_hints.rs`, `code_lens.rs`, `diagnostics.rs`)**: Emits `~RAII` inlay hints only for blocks declaring locals whose class defines a destructor, traverses `Destructor`/`Operator`/`Try`/`Switch`, checks zero-parameter arity for `test*` CodeLens actions, counts references by `fully_qualified_name`, and reports `W0001` unreachable code inside `try`/`switch` and after exhaustive `if`/`else` returns.
+- **Safe Symbol Rename (`rename.rs`)**: Blocks renaming `main` and external/read-only symbols in `prepare_rename`, detects scope collisions in `rename_symbol_checked`, and surfaces descriptive JSON-RPC `InvalidParams` errors.
 
 
 
