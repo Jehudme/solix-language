@@ -1310,7 +1310,7 @@ fn test_new_package_decouples_bundled_solix_version_from_toolchain_version() {
     let manifest_text =
         fs::read_to_string(target_project_dir.join("manifest.yaml")).expect("read manifest.yaml");
     assert!(
-        manifest_text.contains("solix:\n        version: \"9.8.7\"\n        profile: release"),
+        manifest_text.contains("solix:\n      version: \"9.8.7\"\n      profile: release"),
         "Scaffolded manifest must pin bundled stdlib version 9.8.7 instead of toolchain version:\n{manifest_text}"
     );
 }
@@ -1355,7 +1355,7 @@ fn test_new_package_invalid_bundled_dir_falls_back_cleanly() {
     let fallback_manifest = fs::read_to_string(fallback_project_dir.join("manifest.yaml"))
         .expect("read fallback manifest.yaml");
     let expected_fallback = format!(
-        "solix:\n        version: \"{}\"\n        profile: release",
+        "solix:\n      version: \"{}\"\n      profile: release",
         solix_toolchain::assets::default_bundled_solix_version()
     );
     assert!(
