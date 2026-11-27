@@ -25,8 +25,19 @@ pub struct CachedPackageMeta {
     pub source_archive_sha256: String,
     /// File size in bytes of the source `.slxarc` archive file.
     pub source_archive_size_bytes: u64,
+    /// Last modification timestamp of the source `.slxarc` archive in nanoseconds since UNIX epoch.
+    #[serde(default)]
+    pub source_archive_mtime_ns: Option<u128>,
     /// Cryptographic SHA-256 digest of the cached `.slxb` primary binary.
     pub cached_binary_sha256: String,
+}
+
+fn file_mtime_ns(metadata: &fs::Metadata) -> Option<u128> {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
 }
 
 /// Resolves the default cache root directory for extracted packages (`~/.solix/cache/packages`).
@@ -271,28 +282,38 @@ impl PackageCache for FilesystemPackageCache {
             return Ok(None);
         }
 
-        // 3. Validate source archive cryptographic hash
-        let actual_archive_sha256 = match sha256_file(source_archive_path) {
-            Ok(digest) => digest,
-            Err(_) => return Ok(None),
-        };
+        // Fast-path: if both size and modification timestamp match, skip re-hashing
+        // multi-MB archives and cached binaries on every compile.
+        let current_mtime_ns = file_mtime_ns(&source_metadata);
+        let fast_path_hit = cached_meta.source_archive_mtime_ns.is_some()
+            && current_mtime_ns == cached_meta.source_archive_mtime_ns;
 
-        if actual_archive_sha256 != cached_meta.source_archive_sha256 {
-            let _ = fs::remove_dir_all(&entry_dir);
-            return Ok(None);
+        if !fast_path_hit {
+            // 3. Validate source archive cryptographic hash
+            let actual_archive_sha256 = match sha256_file(source_archive_path) {
+                Ok(digest) => digest,
+                Err(_) => return Ok(None),
+            };
+
+            if actual_archive_sha256 != cached_meta.source_archive_sha256 {
+                let _ = fs::remove_dir_all(&entry_dir);
+                return Ok(None);
+            }
         }
 
-        // 4. Read cached binary and verify its integrity against recorded hash
+        // 4. Read cached binary and verify its integrity when not on mtime fast-path
         let binary_bytes = match fs::read(&binary_file) {
             Ok(bytes) => bytes,
             Err(_) => return Ok(None),
         };
 
-        let actual_binary_sha256 = sha256_bytes(&binary_bytes);
-        let formatted_actual_sha256 = crate::hash::format_hex_digest(&actual_binary_sha256);
-        if formatted_actual_sha256 != cached_meta.cached_binary_sha256 {
-            let _ = fs::remove_dir_all(&entry_dir);
-            return Ok(None);
+        if !fast_path_hit {
+            let actual_binary_sha256 = sha256_bytes(&binary_bytes);
+            let formatted_actual_sha256 = crate::hash::format_hex_digest(&actual_binary_sha256);
+            if formatted_actual_sha256 != cached_meta.cached_binary_sha256 {
+                let _ = fs::remove_dir_all(&entry_dir);
+                return Ok(None);
+            }
         }
 
         // 5. Deserialize verified binary program
@@ -350,6 +371,7 @@ impl PackageCache for FilesystemPackageCache {
             package_version: version.to_string(),
             source_archive_sha256,
             source_archive_size_bytes: source_metadata.len(),
+            source_archive_mtime_ns: file_mtime_ns(&source_metadata),
             cached_binary_sha256,
         };
 

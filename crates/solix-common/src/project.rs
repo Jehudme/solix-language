@@ -362,6 +362,9 @@ pub struct ProfileConfig {
     /// Commands executed sequentially after archive packaging.
     #[serde(default)]
     pub post_compile: Vec<String>,
+    /// Whether runtime dependency SHA-256 hashes are computed and embedded in compiled binaries.
+    #[serde(default)]
+    pub embed_hashes: Option<bool>,
     /// Removed inheritance property retained for helpful diagnostic error reporting.
     #[serde(default, skip_serializing)]
     pub inherits: Option<serde_json::Value>,
@@ -400,6 +403,8 @@ pub struct ResolvedProfile {
     pub warnings_as_errors: bool,
     /// Verify cryptographic checksums.
     pub verify_checksum: bool,
+    /// Whether runtime dependency SHA-256 hashes are computed and embedded into compiled output.
+    pub embed_hashes: bool,
     /// Dynamic or static link mode string.
     pub link: String,
     /// Maximum virtual heap allocation limit in megabytes.
@@ -436,6 +441,7 @@ impl ResolvedProfile {
             emit_disassembly: false,
             warnings_as_errors: false,
             verify_checksum: false,
+            embed_hashes: false,
             link: "static".to_string(),
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
@@ -462,6 +468,7 @@ impl ResolvedProfile {
             emit_disassembly: false,
             warnings_as_errors: false,
             verify_checksum: false,
+            embed_hashes: false,
             link: "dynamic".to_string(),
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
@@ -488,6 +495,7 @@ impl ResolvedProfile {
             emit_disassembly: false,
             warnings_as_errors: false,
             verify_checksum: false,
+            embed_hashes: false,
             link: "dynamic".to_string(),
             memory_limit_mb: None,
             sources: vec!["src".to_string(), "tests".to_string()],
@@ -966,6 +974,11 @@ impl ProjectManifest {
             } else {
                 resolved.verify_checksum =
                     !resolved.is_static && target_profile != "debug" && target_profile != "test";
+            }
+            if let Some(embed_hashes) = user_config.embed_hashes {
+                resolved.embed_hashes = embed_hashes && !resolved.is_static;
+            } else {
+                resolved.embed_hashes = resolved.verify_checksum && !resolved.is_static;
             }
             if let Some(memory_limit_mb) = user_config.memory_limit_mb {
                 resolved.memory_limit_mb = Some(memory_limit_mb);
@@ -2991,6 +3004,38 @@ profiles:
         assert!(
             profile_explicit_debug.verify_checksum,
             "Explicit verify_checksum = true must be respected"
+        );
+        assert!(
+            !profile_static.embed_hashes,
+            "Static profile must default to embed_hashes = false"
+        );
+        assert!(
+            profile_dynamic.embed_hashes,
+            "Dynamic release profile must default to embed_hashes = true"
+        );
+        assert!(
+            !profile_debug.embed_hashes,
+            "Debug profile must default to embed_hashes = false"
+        );
+
+        let yaml_embed_override = r#"
+configuration:
+  name: test_pkg
+  version: "1.0.0"
+profiles:
+  release:
+    static: false
+    verify_checksum: true
+    embed_hashes: false
+"#;
+        let manifest_override =
+            ProjectManifest::from_yaml_str(yaml_embed_override).expect("valid yaml");
+        let resolved_override = manifest_override
+            .resolve_profile("release")
+            .expect("resolves");
+        assert!(
+            !resolved_override.embed_hashes,
+            "Explicit embed_hashes = false must be respected on dynamic release"
         );
     }
 
