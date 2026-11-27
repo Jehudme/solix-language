@@ -8,10 +8,12 @@
 use crate::CompilationContext::CompilationContext;
 use crate::CompilationDiagnostic;
 use crate::phases::phase::CompilationPhase;
+use rayon::prelude::*;
 use smallvec::{SmallVec, smallvec};
 use solix_common::bytecode::{CompiledFunction, Instruction, OpCode, SourceMapEntry};
 use solix_common::diagnostics::EmissionError;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Post-emission bytecode optimizer implementing [`CompilationPhase`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -39,28 +41,28 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             return Ok(());
         };
 
-        let class_descriptors = emission_artifacts.program.classes.clone();
-        let function_descriptors = emission_artifacts.program.functions.clone();
+        let program = &mut emission_artifacts.program;
+        let classes = &program.classes;
+        let functions = &mut program.functions;
+        let pool_ref = Some(&program.constant_pool);
         let allow_arith_inline = context.options.inline_threshold > 0;
-        let pool_ref = Some(&emission_artifacts.program.constant_pool);
+        let escape_summaries =
+            super::escape_analysis::EscapeFunctionSummaries::from_functions(functions);
 
-        // Optimize each compiled function individually first so leaf constructors and arithmetic
-        // leaf helpers shrink to minimal bodies.
-        for compiled_function in &mut emission_artifacts.program.functions {
-            optimize_function(
-                compiled_function,
-                &class_descriptors,
-                &function_descriptors,
-                pool_ref,
-            )
+        // Optimize each compiled function individually in parallel first so leaf constructors
+        // and arithmetic leaf helpers shrink to minimal bodies.
+        functions
+            .par_iter_mut()
+            .try_for_each(|compiled_function| {
+                optimize_function(compiled_function, classes, &escape_summaries, pool_ref)
+            })
             .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
-        }
 
         // Inline small leaf constructors and pure leaf arithmetic functions across callers
         // (multiple rounds handle inheritance chains), then re-converge caller passes.
         let mut has_call_direct = false;
         let mut has_inlinable_leaf = false;
-        for candidate in &emission_artifacts.program.functions {
+        for candidate in functions.iter() {
             if !has_call_direct
                 && candidate
                     .instructions
@@ -89,64 +91,57 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         }
         if has_call_direct && has_inlinable_leaf {
             for _inline_round in 0..3 {
-                let optimized_snapshot = emission_artifacts.program.functions.clone();
-                let mut round_changed = false;
-                for (func_idx, compiled_function) in
-                    emission_artifacts.program.functions.iter_mut().enumerate()
-                {
-                    if inline_leaf_functions(
-                        compiled_function,
-                        func_idx,
-                        &optimized_snapshot,
-                        allow_arith_inline,
-                    )
-                    .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?
-                    {
-                        round_changed = true;
-                        optimize_function(
-                            compiled_function,
-                            &class_descriptors,
-                            &optimized_snapshot,
-                            pool_ref,
-                        )
-                        .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
-                    }
-                }
-                if !round_changed {
+                let leaf_candidates =
+                    build_leaf_inline_candidates(functions, allow_arith_inline);
+                let round_changed = AtomicBool::new(false);
+                functions
+                    .par_iter_mut()
+                    .enumerate()
+                    .try_for_each(|(func_idx, compiled_function)| -> Result<(), EmissionError> {
+                        if inline_leaf_functions(compiled_function, func_idx, &leaf_candidates)? {
+                            round_changed.store(true, Ordering::Relaxed);
+                            optimize_function(
+                                compiled_function,
+                                classes,
+                                &escape_summaries,
+                                pool_ref,
+                            )?;
+                        }
+                        Ok(())
+                    })
+                    .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+                if !round_changed.load(Ordering::Relaxed) {
                     break;
                 }
             }
         }
 
-        for (func_idx, compiled_function) in
-            emission_artifacts.program.functions.iter_mut().enumerate()
-        {
-            rotate_bottom_tested_loops(compiled_function)
-                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
-            optimize_peephole_passes(compiled_function, true, pool_ref)
-                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
-            hoist_loop_invariant_constants(compiled_function)
-                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
-            eliminate_common_subexpressions(compiled_function);
-            elide_borrowed_local_arc_ops(compiled_function);
-            optimize_peephole_passes(compiled_function, true, pool_ref)
-                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
-            fuse_post_licm_add_load_band(compiled_function);
-            propagate_entry_constants(compiled_function, true);
-            transform_binary_additive_self_recursion(compiled_function, func_idx);
-        }
+        functions
+            .par_iter_mut()
+            .enumerate()
+            .try_for_each(|(func_idx, compiled_function)| -> Result<(), EmissionError> {
+                rotate_bottom_tested_loops(compiled_function)?;
+                optimize_peephole_passes(compiled_function, true, pool_ref)?;
+                hoist_loop_invariant_constants(compiled_function)?;
+                eliminate_common_subexpressions(compiled_function);
+                elide_borrowed_local_arc_ops(compiled_function);
+                optimize_peephole_passes(compiled_function, true, pool_ref)?;
+                fuse_post_licm_add_load_band(compiled_function);
+                propagate_entry_constants(compiled_function, true);
+                transform_binary_additive_self_recursion(compiled_function, func_idx);
+                Ok(())
+            })
+            .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
 
-        let func_has_refs: Vec<bool> = emission_artifacts
-            .program
-            .functions
+        let func_has_refs: Vec<bool> = functions
             .iter()
             .map(|func| !func.reference_registers.is_empty())
             .collect();
-        for compiled_function in &mut emission_artifacts.program.functions {
+        functions.par_iter_mut().for_each(|compiled_function| {
             mark_array_fill_loops(compiled_function);
             lower_tail_calls(compiled_function, &func_has_refs);
             specialize_primitive_field_accesses(compiled_function);
-        }
+        });
 
         // Keep functions_by_source synchronized with optimized functions when emitting build artifacts
         if context.options.emit_export_metadata {
@@ -278,10 +273,10 @@ fn is_unsigned_comparison_opcode(raw_opcode_value: u8) -> bool {
 fn optimize_function(
     function: &mut CompiledFunction,
     classes: &[solix_common::bytecode::CompiledClass],
-    all_functions: &[CompiledFunction],
+    function_summaries: &super::escape_analysis::EscapeFunctionSummaries,
     constant_pool: Option<&solix_common::bytecode::ConstantPool>,
 ) -> Result<(), EmissionError> {
-    super::escape_analysis::apply_scalar_replacement(function, classes, all_functions);
+    super::escape_analysis::apply_scalar_replacement(function, classes, function_summaries);
     super::escape_analysis::apply_arc_elision(function);
     elide_redundant_arc_ops(function);
     optimize_peephole_passes(function, false, constant_pool)?;
@@ -2044,92 +2039,120 @@ fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> 
 
 /// Inlines empty/pure field-initializing leaf constructors and small pure arithmetic leaf helpers
 /// at `CallDirect` call sites.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LeafKind {
+    Constructor,
+    PureArith,
+}
+
+/// Lightweight snapshot of an eligible `<= 8`-instruction leaf candidate for parallel inlining.
+struct LeafInlineCandidate {
+    kind: LeafKind,
+    param_count: u16,
+    num_registers: u16,
+    instructions: Vec<Instruction>,
+}
+
+fn build_leaf_inline_candidates(
+    all_functions: &[CompiledFunction],
+    allow_arith_inline: bool,
+) -> Vec<Option<LeafInlineCandidate>> {
+    all_functions
+        .par_iter()
+        .map(|candidate| {
+            if !candidate.exception_handlers.is_empty()
+                || candidate.param_count == 0
+                || candidate.instructions.is_empty()
+                || candidate.instructions.len() > 8
+            {
+                return None;
+            }
+            if candidate.symbol.contains("::constructor") {
+                let body_ok = candidate
+                    .instructions
+                    .iter()
+                    .enumerate()
+                    .all(|(idx, inst)| {
+                        let raw = inst.raw_opcode();
+                        if idx + 1 == candidate.instructions.len() {
+                            return raw == OpCode::Return as u8;
+                        }
+                        if raw == OpCode::Nop as u8 || raw == OpCode::Mov as u8 {
+                            return true;
+                        }
+                        if raw == OpCode::LoadI32 as u8
+                            || raw == OpCode::LoadI64 as u8
+                            || raw == OpCode::LoadF64 as u8
+                            || raw == OpCode::LoadBool as u8
+                            || raw == OpCode::LoadNull as u8
+                            || raw == OpCode::LoadConst as u8
+                        {
+                            return true;
+                        }
+                        (raw == OpCode::SetField as u8
+                            || raw == OpCode::SetFieldI32 as u8
+                            || raw == OpCode::SetFieldF64 as u8)
+                            && inst.src1() == 0
+                    });
+                if body_ok {
+                    return Some(LeafInlineCandidate {
+                        kind: LeafKind::Constructor,
+                        param_count: candidate.param_count,
+                        num_registers: candidate.num_registers,
+                        instructions: candidate.instructions.clone(),
+                    });
+                }
+            } else if allow_arith_inline
+                && candidate.reference_registers.is_empty()
+                && !candidate.symbol.starts_with('@')
+                && candidate.symbol != "main"
+                && !candidate.symbol.ends_with("::main")
+            {
+                let body_ok = candidate
+                    .instructions
+                    .iter()
+                    .enumerate()
+                    .all(|(idx, inst)| {
+                        if idx + 1 == candidate.instructions.len() {
+                            let raw = inst.raw_opcode();
+                            return raw == OpCode::Return as u8 || raw == OpCode::ReturnValue as u8;
+                        }
+                        is_pure_leaf_arith_inst(*inst, candidate.param_count)
+                    })
+                    && candidate.instructions.iter().all(|inst| {
+                        (inst.raw_opcode() != OpCode::AddBandI32 as u8
+                            && inst.raw_opcode() != OpCode::MulAddF64 as u8)
+                            || candidate.num_registers <= 200
+                    });
+                if body_ok {
+                    return Some(LeafInlineCandidate {
+                        kind: LeafKind::PureArith,
+                        param_count: candidate.param_count,
+                        num_registers: candidate.num_registers,
+                        instructions: candidate.instructions.clone(),
+                    });
+                }
+            }
+            None
+        })
+        .collect()
+}
+
 fn inline_leaf_functions(
     caller: &mut CompiledFunction,
     caller_index: usize,
-    all_functions: &[CompiledFunction],
-    allow_arith_inline: bool,
+    leaf_candidates: &[Option<LeafInlineCandidate>],
 ) -> Result<bool, EmissionError> {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum LeafKind {
-        None,
-        Constructor,
-        PureArith,
-    }
-
-    let mut leaf_kinds = vec![LeafKind::None; all_functions.len()];
-    for (func_idx, candidate) in all_functions.iter().enumerate() {
-        if func_idx == caller_index
-            || !candidate.exception_handlers.is_empty()
-            || candidate.param_count == 0
-            || candidate.instructions.is_empty()
-            || candidate.instructions.len() > 8
-        {
-            continue;
-        }
-        if candidate.symbol.contains("::constructor") {
-            let body_ok = candidate
-                .instructions
-                .iter()
-                .enumerate()
-                .all(|(idx, inst)| {
-                    let raw = inst.raw_opcode();
-                    if idx + 1 == candidate.instructions.len() {
-                        return raw == OpCode::Return as u8;
-                    }
-                    if raw == OpCode::Nop as u8 || raw == OpCode::Mov as u8 {
-                        return true;
-                    }
-                    if raw == OpCode::LoadI32 as u8
-                        || raw == OpCode::LoadI64 as u8
-                        || raw == OpCode::LoadF64 as u8
-                        || raw == OpCode::LoadBool as u8
-                        || raw == OpCode::LoadNull as u8
-                        || raw == OpCode::LoadConst as u8
-                    {
-                        return true;
-                    }
-                    (raw == OpCode::SetField as u8
-                        || raw == OpCode::SetFieldI32 as u8
-                        || raw == OpCode::SetFieldF64 as u8)
-                        && inst.src1() == 0
-                });
-            if body_ok {
-                leaf_kinds[func_idx] = LeafKind::Constructor;
-            }
-        } else if allow_arith_inline
-            && candidate.reference_registers.is_empty()
-            && !candidate.symbol.starts_with('@')
-            && candidate.symbol != "main"
-            && !candidate.symbol.ends_with("::main")
-        {
-            let body_ok = candidate
-                .instructions
-                .iter()
-                .enumerate()
-                .all(|(idx, inst)| {
-                    if idx + 1 == candidate.instructions.len() {
-                        let raw = inst.raw_opcode();
-                        return raw == OpCode::Return as u8 || raw == OpCode::ReturnValue as u8;
-                    }
-                    is_pure_leaf_arith_inst(*inst, candidate.param_count)
-                })
-                && candidate.instructions.iter().all(|inst| {
-                    (inst.raw_opcode() != OpCode::AddBandI32 as u8
-                        && inst.raw_opcode() != OpCode::MulAddF64 as u8)
-                        || candidate.num_registers <= 200
-                });
-            if body_ok {
-                leaf_kinds[func_idx] = LeafKind::PureArith;
-            }
-        }
-    }
-
     let inst_count = caller.instructions.len();
     let has_candidate = caller.instructions.iter().any(|inst| {
-        inst.raw_opcode() == OpCode::CallDirect as u8
-            && (inst.call_target() as usize) < leaf_kinds.len()
-            && leaf_kinds[inst.call_target() as usize] != LeafKind::None
+        if inst.raw_opcode() != OpCode::CallDirect as u8 {
+            return false;
+        }
+        let target_idx = inst.call_target() as usize;
+        target_idx != caller_index
+            && leaf_candidates
+                .get(target_idx)
+                .is_some_and(Option::is_some)
     });
     if !has_candidate {
         return Ok(false);
@@ -2164,12 +2187,15 @@ fn inline_leaf_functions(
             let arg_base = inst.arg_base();
             let arg_count = inst.arg_count() as u16;
             let call_dst = inst.call_dst();
-            let leaf_kind = leaf_kinds
-                .get(target_idx)
-                .copied()
-                .unwrap_or(LeafKind::None);
-            if leaf_kind != LeafKind::None && arg_count == all_functions[target_idx].param_count {
-                let callee = &all_functions[target_idx];
+            let leaf_candidate = if target_idx != caller_index {
+                leaf_candidates.get(target_idx).and_then(|entry| entry.as_ref())
+            } else {
+                None
+            };
+            if let Some(callee) = leaf_candidate
+                && arg_count == callee.param_count
+            {
+                let leaf_kind = callee.kind;
                 let scratch_needed = callee.num_registers.saturating_sub(arg_count);
                 let limit_regs = if callee.instructions.iter().any(|callee_inst| {
                     let raw = callee_inst.raw_opcode();
