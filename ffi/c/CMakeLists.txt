@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(solix_ffi VERSION 3.1.0 LANGUAGES C CXX)
+project(solix_ffi VERSION 3.1.1 LANGUAGES C CXX)
 
 add_library(solix_ffi INTERFACE)
 add_library(solix::ffi ALIAS solix_ffi)
