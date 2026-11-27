@@ -86,8 +86,8 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 - **Input**: `CompiledProgram` and manifest configuration (`manifest.yaml`).
 - **Output**: Binary file on disk (`.slxb` or `.slxp`).
 - **Responsibilities**:
-  - Serializes magic headers (`SLXB` / `SLXC`), schema versions, and dependency manifests.
-  - Bundles compiled bytecode, metadata symbol exports, and native bridge declarations.
+  - Serializes magic headers (`SLXB` / `SLXC`), schema versions, and dependency manifests, and provides `BinaryProgram::from_bytes_manifest_only` to decode Sections 6/7 without allocating Sections 2–5.
+  - Bundles compiled bytecode, metadata symbol exports, and native bridge declarations, skipping redundant SHA-256 dependency hashing when `embed_hashes` is disabled or `LinkMode::Static` embeds dependencies directly.
 
 ### 2.7. Runtime Engine Execution (`solix-vm`)
 - **Input**: Serialized bytecode buffer.

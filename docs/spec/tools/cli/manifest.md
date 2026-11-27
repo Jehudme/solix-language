@@ -129,6 +129,7 @@ Profiles govern compiler optimization, AST function inlining, debug symbol emiss
 | `emit_disassembly` | Boolean | `false` | Emits human-readable register VM disassembly files during compilation. |
 | `warnings_as_errors` | Boolean | `false` | Treats compiler warnings as fatal errors. |
 | `verify_checksum` | Boolean | `false` (static, `debug`, `test`) / `true` (dynamic `release`) | Validates dependency cryptographic SHA-256 hashes against pinned manifests (bypassed on static, debug, and test profiles for speed). |
+| `embed_hashes` | Boolean | `false` (static) / `verify_checksum` (dynamic) | Controls whether the compiler computes and embeds dependency SHA-256 hashes into compiled output for runtime verification (always skipped for statically embedded dependencies). |
 | `memory_limit_mb` | Integer | `None` | Maximum virtual heap allocation limit in megabytes. |
 | `sources` | List of Strings | `["src"]` (`["src", "tests"]` for `test`) | Recursive directory paths to discover `.slx` source files. |
 | `platforms` | List of Strings | `["all"]` (`release`) / `["host"]` (`debug`/`test`) | OS names or architecture targets (see Platform Expansion below). |
