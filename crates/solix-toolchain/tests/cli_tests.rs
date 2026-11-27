@@ -2165,10 +2165,12 @@ fn test_new_package_clean_manifest_with_default_solix_dependency() {
 
     let manifest_content = std::fs::read_to_string(&manifest_path).expect("read manifest");
 
-    // Must NOT contain vars: block or anchor aliases
+    // Must use clean vars: YAML anchors for shared sources & dependencies (#301)
     assert!(
-        !manifest_content.contains("vars:"),
-        "Manifest must not contain legacy vars: block"
+        manifest_content.contains("vars:")
+            && manifest_content.contains("&sources")
+            && manifest_content.contains("&dependencies"),
+        "Manifest must contain vars: YAML anchors for sources and dependencies"
     );
     assert!(
         !manifest_content.contains("*proj_version"),
@@ -2191,7 +2193,7 @@ fn test_new_package_clean_manifest_with_default_solix_dependency() {
 
     // Must contain default solix dependency matching active bundled stdlib version
     let expected_solix_dep = format!(
-        "solix:\n        version: \"{}\"\n        profile: release",
+        "solix:\n      version: \"{}\"\n      profile: release",
         solix_toolchain::assets::default_bundled_solix_version()
     );
     assert!(
