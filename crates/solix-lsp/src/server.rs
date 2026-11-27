@@ -17,7 +17,7 @@ use crate::navigation::{
     document_highlights, document_links, find_definition, find_implementations, find_references,
     find_type_definition,
 };
-use crate::rename::{prepare_rename, rename_symbol};
+use crate::rename::{prepare_rename, rename_symbol_checked};
 use crate::selection_range::selection_ranges;
 use crate::semantic_tokens::{semantic_tokens_full, semantic_tokens_legend, semantic_tokens_range};
 use crate::signature_help::signature_help;
@@ -617,12 +617,9 @@ impl LanguageServer for SolixLanguageServer {
             None => return Ok(None),
         };
 
-        Ok(rename_symbol(
-            &self.workspace,
-            &snapshot,
-            position,
-            new_name,
-        ))
+        rename_symbol_checked(&self.workspace, &snapshot, position, new_name)
+            .map(Some)
+            .map_err(tower_lsp::jsonrpc::Error::invalid_params)
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {

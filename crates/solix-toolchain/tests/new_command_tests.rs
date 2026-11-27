@@ -87,11 +87,11 @@ fn test_solix_new_default_application() {
         .expect("debug profile");
     assert_eq!(debug_profile.platforms, vec!["host"]);
 
+    let main_slx = fs::read_to_string(target_project_directory.join("src").join("main.slx"))
+        .expect("read src/main.slx");
     assert!(
-        target_project_directory
-            .join("src")
-            .join("main.slx")
-            .exists()
+        main_slx.contains("Console::println"),
+        "Default starter src/main.slx should use Console::println"
     );
     assert!(
         target_project_directory
@@ -99,31 +99,70 @@ fn test_solix_new_default_application() {
             .join("test_main.slx")
             .exists()
     );
-    let bridge_dir = target_project_directory
-        .join("natives")
-        .join("sample_application_bridge");
-    assert!(bridge_dir.join("Cargo.toml").exists());
-    assert!(bridge_dir.join("src").join("lib.rs").exists());
-
-    for triple in &[
-        "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-pc-windows-msvc",
-        "x86_64-apple-darwin",
-        "aarch64-apple-darwin",
-    ] {
-        assert!(
-            target_project_directory
-                .join("bin")
-                .join(triple)
-                .join(".gitkeep")
-                .exists(),
-            "Pre-populated bin/{triple}/.gitkeep must exist"
-        );
-    }
+    let raw_manifest = fs::read_to_string(target_project_directory.join("manifest.yaml"))
+        .expect("read manifest.yaml");
+    assert!(
+        raw_manifest.contains("vars:")
+            && raw_manifest.contains("&sources")
+            && raw_manifest.contains("&dependencies"),
+        "manifest.yaml must use vars: YAML anchors"
+    );
+    assert!(
+        !target_project_directory
+            .join("natives")
+            .join("sample_application_bridge")
+            .exists(),
+        "Pure Solix default project must not scaffold a native bridge subproject without --native"
+    );
+    assert!(
+        !target_project_directory.join("bin").exists(),
+        "Pure Solix default project must not scaffold empty bin/ directories without --native"
+    );
     assert!(
         !target_project_directory.join("lib").exists(),
         "Legacy lib/ directory must not be created"
+    );
+
+    // Verify solix check and solix test work cleanly on a freestanding project (always runs)
+    let freestanding_dir = temporary_directory.path().join("freestanding_check");
+    solix_toolchain::execute_new(NewArgs {
+        subcommand: None,
+        path: Some(freestanding_dir.clone()),
+        name: None,
+        version: "0.1.0".to_string(),
+        description: "Freestanding".to_string(),
+        license: "Apache-2.0".to_string(),
+        authors: Vec::new(),
+        main: "Main::main".to_string(),
+        test: "TestRunner::test".to_string(),
+        lib: false,
+        native: None,
+        no_native: false,
+        no_std: true,
+        deps: Vec::new(),
+        force: false,
+    })
+    .expect("scaffold freestanding");
+    assert_eq!(
+        solix_toolchain::execute_check(solix_toolchain::CheckArgs {
+            path: freestanding_dir.clone(),
+            profile: "debug".to_string(),
+            pkg_dir: None,
+            no_verify: true,
+        })
+        .expect("execute_check on freestanding project"),
+        0
+    );
+    assert_eq!(
+        solix_toolchain::execute_test(solix_toolchain::TestArgs {
+            path: freestanding_dir,
+            profile: "test".to_string(),
+            filter: None,
+            pkg_dir: None,
+            no_verify: true,
+        })
+        .expect("execute_test on freestanding project"),
+        0
     );
 
     // Build debug profile via pure-Rust builder when Docker/cross containerization is available
@@ -165,7 +204,7 @@ fn test_solix_new_default_application() {
     let run_cli =
         Cli::try_parse_from(["solix", "run", output_archive.to_str().expect("valid path")])
             .expect("parse run cli");
-    assert_eq!(run(run_cli).expect("run debug archive"), 42);
+    assert_eq!(run(run_cli).expect("run debug archive"), 0);
 }
 
 #[test]
@@ -607,4 +646,77 @@ fn is_cross_container_available() -> bool {
         let cargo_bin = std::path::PathBuf::from(home).join(".cargo").join("bin");
         solix_toolchain::find_executable_in_search_paths("cross", cargo_bin.as_os_str()).is_some()
     })
+}
+
+#[test]
+fn test_fmt_missing_path_errors_and_clean_dry_run_preserves_build() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let missing_file = temp_dir.path().join("does_not_exist.slx");
+    let fmt_res = solix_toolchain::execute_fmt(solix_toolchain::FmtArgs {
+        files: vec![missing_file],
+        check: false,
+    });
+    assert!(
+        fmt_res.is_err(),
+        "solix fmt must return an error on missing path instead of formatting cwd"
+    );
+
+    let build_dir = temp_dir.path().join("build");
+    fs::create_dir_all(&build_dir).expect("create build dir");
+    let dummy_file = build_dir.join("sample.slxp");
+    fs::write(&dummy_file, "artifact").expect("write dummy");
+
+    solix_toolchain::execute_clean(solix_toolchain::CleanArgs {
+        path: temp_dir.path().to_path_buf(),
+        cache_only: false,
+        dry_run: true,
+    })
+    .expect("clean --dry-run");
+    assert!(
+        dummy_file.exists(),
+        "clean --dry-run must preserve build artifacts"
+    );
+}
+
+#[test]
+fn test_solix_init_and_add_dependency() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let src_dir = temp_dir.path().join("src");
+    fs::create_dir_all(&src_dir).expect("create src");
+    let main_file = src_dir.join("main.slx");
+    fs::write(
+        &main_file,
+        "public class Main { public static int32 main() { return 0; } }\n",
+    )
+    .expect("write existing main.slx");
+
+    solix_toolchain::execute_init(solix_toolchain::InitArgs {
+        path: temp_dir.path().to_path_buf(),
+        name: Some("existing_app".to_string()),
+        force: false,
+    })
+    .expect("execute_init");
+    assert!(temp_dir.path().join("manifest.yaml").exists());
+    assert!(
+        fs::read_to_string(&main_file)
+            .expect("read main.slx")
+            .contains("return 0;"),
+        "solix init must not overwrite existing source files"
+    );
+
+    solix_toolchain::execute_add(solix_toolchain::AddArgs {
+        package: "raylib@5.5.0".to_string(),
+        path: temp_dir.path().to_path_buf(),
+        dep_profile: "release".to_string(),
+        pkg_dir: None,
+    })
+    .expect("execute_add");
+    let manifest =
+        solix_common::project::ProjectManifest::from_file(temp_dir.path().join("manifest.yaml"))
+            .expect("parse updated manifest");
+    let release = manifest.resolve_profile("release").expect("release");
+    assert!(
+        release.dependencies.contains_key("raylib"),
+        "solix add must add raylib dependency to manifest.yaml"
+    );
 }

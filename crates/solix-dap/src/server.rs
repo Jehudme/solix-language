@@ -85,6 +85,7 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
     let mut stop_on_entry_flag = false;
     let mut execution_launched = false;
     let mut launch_project_root: Option<PathBuf> = None;
+    let mut _session_temp_dir: Option<tempfile::TempDir> = None;
 
     while let Some(request) = server.poll_request()? {
         match request.command {
@@ -124,17 +125,18 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                         launch_project_root = find_enclosing_project_root(&target_path);
                     }
 
-                    let runtime_options = match setup_runtime_for_target(
+                    let (runtime_options, extracted_temp_dir) = match setup_runtime_for_target(
                         &target_path,
                         pending_console_outputs.clone(),
                         is_tcp_terminal_mode,
                     ) {
-                        Ok(options) => options,
+                        Ok(result) => result,
                         Err(setup_error) => {
                             server.respond(request.error(&setup_error.to_string()))?;
                             continue;
                         }
                     };
+                    _session_temp_dir = extracted_temp_dir;
 
                     let runtime_context = match RuntimeContext::new(runtime_options) {
                         Ok(context) => context,
@@ -1174,7 +1176,7 @@ fn setup_runtime_for_target(
     target_path: &Path,
     pending_console_outputs: Arc<Mutex<Vec<String>>>,
     is_tcp_terminal_mode: bool,
-) -> anyhow::Result<RuntimeOptions> {
+) -> anyhow::Result<(RuntimeOptions, Option<tempfile::TempDir>)> {
     let store_directory = resolve_package_store_dir(None);
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
 
@@ -1206,6 +1208,7 @@ fn setup_runtime_for_target(
         .and_then(|ext| ext.to_str())
         .unwrap_or("");
 
+    let mut session_temp_dir: Option<tempfile::TempDir> = None;
     if extension.eq_ignore_ascii_case("slx") {
         let source_content = fs::read_to_string(target_path)?;
         let file_stem = target_path
@@ -1261,8 +1264,9 @@ fn setup_runtime_for_target(
             .ok_or_else(|| anyhow::anyhow!("Bytecode emission phase produced no artifacts"))?;
         runtime_options = runtime_options.with_binary(artifacts.program);
     } else if extension.eq_ignore_ascii_case("slxarc") {
-        let temp_dir = std::env::temp_dir();
-        let loaded_archive = SlxarcArchive::extract_and_load(target_path, &temp_dir)?;
+        let scoped_temp = tempfile::Builder::new().prefix("solix_dap_").tempdir()?;
+        let loaded_archive = SlxarcArchive::extract_and_load(target_path, scoped_temp.path())?;
+        session_temp_dir = Some(scoped_temp);
         for native_lib in loaded_archive.native_libraries {
             runtime_options = runtime_options.with_native_library(native_lib);
         }
@@ -1278,7 +1282,7 @@ fn setup_runtime_for_target(
         runtime_options = runtime_options.with_binary(program);
     }
 
-    Ok(runtime_options)
+    Ok((runtime_options, session_temp_dir))
 }
 
 /// Snaps a requested source coordinate to the nearest enclosing compiled function, instruction PC, and line.

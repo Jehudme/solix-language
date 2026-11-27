@@ -84,6 +84,15 @@ pub fn execute_clean(args: CleanArgs) -> Result<()> {
     }
 
     let (file_count, total_bytes) = count_files_and_bytes(&target_directory);
+    let human_size = format_human_size(total_bytes);
+    if args.dry_run {
+        println!(
+            "[dry-run] Would clean '{}': {human_size} across {file_count} file(s).",
+            target_directory.display()
+        );
+        return Ok(());
+    }
+
     fs::remove_dir_all(&target_directory).with_context(|| {
         format!(
             "Failed to remove build directory at '{}'",
@@ -91,7 +100,6 @@ pub fn execute_clean(args: CleanArgs) -> Result<()> {
         )
     })?;
 
-    let human_size = format_human_size(total_bytes);
     println!(
         "Cleaned '{}': Reclaimed {human_size} across {file_count} file(s).",
         target_directory.display()

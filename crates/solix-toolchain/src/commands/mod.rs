@@ -15,6 +15,7 @@ pub mod new;
 pub mod pkg;
 pub mod run;
 pub mod wiki;
+pub mod workflow;
 
 pub use build::{
     APPLE_DARWIN_CROSS_IMAGE, CargoBuildStrategy, cross_image_for_triple,
@@ -39,3 +40,4 @@ pub use pkg::{
 };
 pub use run::{execute_run, execute_run_package, execute_run_source};
 pub use wiki::execute_wiki;
+pub use workflow::{execute_add, execute_check, execute_init, execute_test};

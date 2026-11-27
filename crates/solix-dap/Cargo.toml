@@ -22,6 +22,6 @@ anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 dap = "0.4.1-alpha1"
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true

@@ -25,6 +25,7 @@ solix clean [path] [options]
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
 | `--cache-only` | | Flag | `false` | Removes only intermediate cache artifacts in `build/.cache/`, preserving compiled package archives in `build/<profile>/`. |
+| `--dry-run` | | Flag | `false` | Previews files and reclaimed byte count without deleting anything. |
 
 ---
 

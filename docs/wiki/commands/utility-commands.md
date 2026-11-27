@@ -15,6 +15,18 @@ solix clean [path] [options]
 ### Key Options & Flags
 * `[path]`: Target project directory [default: `.`].
 * `--cache-only`: Deletes only `build/.cache/` intermediate CMake/Cargo incremental caches while keeping compiled `.slxp` archives in `build/<profile>/`.
+* `--dry-run`: Previews files and reclaimed byte size without removing any files.
+
+---
+
+## 1b. `solix check` & `solix test`
+
+Type-check a project without emitting bytecode (`solix check`) or compile and execute all zero-argument `test_*` functions (`solix test`):
+
+```bash
+solix check [path] [--profile <name>]
+solix test [path] [--profile <name>] [--filter <pattern>]
+```
 
 ---
 

@@ -1948,3 +1948,38 @@ fn test_dead_code_if_else_exhaustive_and_try_block() {
         "Expected W0001 unreachable code diagnostic after exhaustive if/else return"
     );
 }
+
+#[test]
+fn test_rename_symbol_checked_rejects_keywords_and_scope_collisions() {
+    let (workspace, test_uri) = create_test_workspace();
+    let source = concat!(
+        "public class Main {\n",
+        "    public static int32 main() {\n",
+        "        int32 first_value = 1;\n",
+        "        int32 second_value = 2;\n",
+        "        return first_value + second_value;\n",
+        "    }\n",
+        "}\n"
+    );
+    let snapshot = workspace.did_open(test_uri, 1, source.to_string());
+
+    // Keyword rejection must return descriptive Err
+    let keyword_err = solix_lsp::rename::rename_symbol_checked(
+        &workspace,
+        &snapshot,
+        Position::new(2, 16),
+        "return".to_string(),
+    )
+    .expect_err("Renaming to keyword must fail with error");
+    assert!(keyword_err.contains("reserved keyword"));
+
+    // Scope collision rejection must return descriptive Err
+    let collision_err = solix_lsp::rename::rename_symbol_checked(
+        &workspace,
+        &snapshot,
+        Position::new(2, 16),
+        "second_value".to_string(),
+    )
+    .expect_err("Renaming to existing local in same scope must fail");
+    assert!(collision_err.contains("already exists"));
+}

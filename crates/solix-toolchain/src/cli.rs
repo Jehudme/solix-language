@@ -67,6 +67,18 @@ pub enum Commands {
 
     /// Removes project build artifacts and intermediate caches
     Clean(CleanArgs),
+
+    /// Type-checks a Solix project without emitting bytecode
+    Check(CheckArgs),
+
+    /// Compiles and runs discovered `test_*` functions in a Solix project
+    Test(TestArgs),
+
+    /// Initializes a manifest.yaml in an existing directory without overwriting sources
+    Init(InitArgs),
+
+    /// Adds a package dependency to the project's manifest.yaml
+    Add(AddArgs),
 }
 
 /// Arguments for `solix dap`.
@@ -1320,4 +1332,87 @@ pub struct CleanArgs {
     /// Clean only intermediate build caches (build/.cache/) keeping final distribution archives
     #[arg(long)]
     pub cache_only: bool,
+
+    /// Preview files and reclaimed size without deleting anything
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// Arguments for `solix check`.
+#[derive(Debug, Args, Clone)]
+pub struct CheckArgs {
+    /// Project root directory containing manifest.yaml [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Target build profile (e.g. "release", "debug", "test") [default: "debug"]
+    #[arg(short, long, default_value = "debug")]
+    pub profile: String,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
+
+    /// Bypass dependency cryptographic SHA-256 checksum verification
+    #[arg(long, visible_alias = "ignore-checksum", alias = "yolo")]
+    pub no_verify: bool,
+}
+
+/// Arguments for `solix test`.
+#[derive(Debug, Args, Clone)]
+pub struct TestArgs {
+    /// Project root directory containing manifest.yaml [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Target build profile [default: "test"]
+    #[arg(short, long, default_value = "test")]
+    pub profile: String,
+
+    /// Optional substring filter for test function names
+    #[arg(long)]
+    pub filter: Option<String>,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
+
+    /// Bypass dependency cryptographic SHA-256 checksum verification
+    #[arg(long, visible_alias = "ignore-checksum", alias = "yolo")]
+    pub no_verify: bool,
+}
+
+/// Arguments for `solix init`.
+#[derive(Debug, Args, Clone)]
+pub struct InitArgs {
+    /// Target directory to initialize [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Project name [default: directory name]
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Overwrite existing manifest.yaml if present
+    #[arg(long)]
+    pub force: bool,
+}
+
+/// Arguments for `solix add`.
+#[derive(Debug, Args, Clone)]
+pub struct AddArgs {
+    /// Package specification (e.g. "raylib" or "raylib@5.5.0")
+    pub package: String,
+
+    /// Project root directory containing manifest.yaml [default: current directory]
+    #[arg(long, default_value = ".")]
+    pub path: PathBuf,
+
+    /// Dependency build profile to link against [default: "release"]
+    #[arg(long = "dep-profile", default_value = "release")]
+    pub dep_profile: String,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
 }

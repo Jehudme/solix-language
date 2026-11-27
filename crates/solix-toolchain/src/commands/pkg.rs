@@ -1,4 +1,4 @@
-//! Package manager command implementations (`install`, `reinstall`, `sync`, `uninstall`, `list`).
+//! Package manager command implementations (`install`, `uninstall`, `list`).
 
 #![forbid(unsafe_code)]
 
