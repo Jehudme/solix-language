@@ -672,15 +672,114 @@ impl VirtualMachine {
         self.arc_cycle_collector_runs += 1;
 
         let candidate_roots = std::mem::take(&mut self.purple_buffer);
-        let (reclaimed_count, deferred_roots) =
-            crate::memory::cycle_collector::run_cycle_collection(
-                &mut self.heap,
-                &self.context,
-                &candidate_roots,
-                self.cycle_budget_us,
-            )?;
+        let batch = crate::memory::cycle_collector::collect_cycles_deferred(
+            &mut self.heap,
+            &self.context,
+            &candidate_roots,
+            self.cycle_budget_us,
+            Some(&self.active_destructors),
+        )?;
 
-        self.purple_buffer = deferred_roots;
+        self.purple_buffer.extend(batch.deferred_roots);
+        if batch.reclaimed_addresses.is_empty() {
+            self.arc_cycle_collector_time_micros += run_start_time.elapsed().as_micros() as u64;
+            return Ok(0);
+        }
+
+        let mut destructors_to_run = Vec::new();
+        for &block_addr in &batch.reclaimed_addresses {
+            if let Ok(header) = self.heap.read_header(block_addr)
+                && header.tag == BlockTag::Object
+            {
+                let vtable_id = self.heap.read_u32(block_addr).unwrap_or(0);
+                if let Some(dtor_id) = self
+                    .context
+                    .get_class_by_vtable_id(vtable_id)
+                    .and_then(|class_item| class_item.destructor_id)
+                {
+                    destructors_to_run.push((block_addr, dtor_id));
+                }
+            }
+        }
+
+        let reclaimed_count = batch.reclaimed_addresses.len() as u64;
+        if destructors_to_run.is_empty() {
+            for block_addr in batch.reclaimed_addresses {
+                self.heap.force_deallocate(block_addr)?;
+            }
+            self.arc_cycles_collected += reclaimed_count;
+            self.arc_cycle_collector_time_micros += run_start_time.elapsed().as_micros() as u64;
+            return Ok(reclaimed_count);
+        }
+
+        // At least one reclaimed cyclic object defines a destructor. Shield all blocks in the
+        // cycle batch via active_destructors + ref_count=1 and temporarily restore trial-decremented
+        // edges to surviving external objects so destructors can safely inspect/mutate fields.
+        let reclaimed_set: std::collections::HashSet<u32> =
+            batch.reclaimed_addresses.iter().copied().collect();
+        for ((parent_addr, child_addr), decremented_count) in &batch.trial_decrements {
+            if reclaimed_set.contains(parent_addr)
+                && !reclaimed_set.contains(child_addr)
+                && let Ok(mut child_header) = self.heap.read_header(*child_addr)
+                && child_header.ref_count != crate::memory::layout::MAX_REF_COUNT
+            {
+                child_header.ref_count = child_header
+                    .ref_count
+                    .saturating_add(*decremented_count)
+                    .min(crate::memory::layout::MAX_REF_COUNT.saturating_sub(1));
+                let _ = self.heap.write_header(*child_addr, child_header);
+            }
+        }
+
+        for &block_addr in &batch.reclaimed_addresses {
+            if let Ok(mut block_header) = self.heap.read_header(block_addr) {
+                block_header.color = crate::memory::layout::GcColor::Black;
+                if block_header.ref_count == 0 {
+                    block_header.ref_count = 1;
+                }
+                self.heap.write_header(block_addr, block_header)?;
+            }
+            self.active_destructors.insert(block_addr);
+        }
+
+        for (block_addr, dtor_id) in destructors_to_run {
+            let destructor_result = (|| -> Result<(), RuntimeError> {
+                self.push_frame(dtor_id, 0, &[Value::Ref(block_addr)])?;
+                let target_depth = self.call_frames.len() - 1;
+                self.run_loop(target_depth)?;
+                Ok(())
+            })();
+            if let Err(destructor_error) = destructor_result {
+                for cleanup_addr in &batch.reclaimed_addresses {
+                    self.active_destructors.remove(cleanup_addr);
+                }
+                return Err(destructor_error);
+            }
+        }
+
+        let mut external_children = Vec::new();
+        for &block_addr in &batch.reclaimed_addresses {
+            for child_addr in crate::memory::cycle_collector::get_outgoing_references(
+                &self.heap,
+                &self.context,
+                block_addr,
+            ) {
+                if child_addr > 0 && !reclaimed_set.contains(&child_addr) {
+                    external_children.push(child_addr);
+                }
+            }
+        }
+        for external_addr in external_children {
+            self.release_reference(external_addr)?;
+        }
+
+        for &block_addr in &batch.reclaimed_addresses {
+            self.active_destructors.remove(&block_addr);
+        }
+        for block_addr in batch.reclaimed_addresses {
+            self.heap.force_deallocate(block_addr)?;
+        }
+
         self.arc_cycles_collected += reclaimed_count;
         self.arc_cycle_collector_time_micros += run_start_time.elapsed().as_micros() as u64;
 

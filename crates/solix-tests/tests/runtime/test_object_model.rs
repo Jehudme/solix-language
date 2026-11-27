@@ -222,3 +222,106 @@ fn test_cast_check_failure_throws_runtime_error() {
     let res = vm.run();
     assert!(matches!(res, Err(RuntimeError::InvalidCast { .. })));
 }
+
+#[test]
+fn test_weak_reference_nullifies_after_target_dropped_and_slot_reused() {
+    // Regression test (#300.1): reading a weak field after its target is freed and its exact heap
+    // slot is reused by another object must return Value::Null (zero UAF / type confusion).
+    let mut binary = BinaryProgram::new();
+    let mut holder_class = CompiledClass::new("Holder", 1, None, 24);
+    holder_class.weak_field_offsets.push(8);
+    let target_class = CompiledClass::new("Target", 2, None, 24);
+    let impostor_class = CompiledClass::new("Impostor", 3, None, 24);
+    binary.classes.push(holder_class);
+    binary.classes.push(target_class);
+    binary.classes.push(impostor_class);
+
+    let mut func = CompiledFunction::new("main", 0, 0, 8);
+    // r[0] = Holder (24B, vtable 1)
+    func.instructions
+        .push(Instruction::format_a(OpCode::AllocObject, 0, 0, 1, 24));
+    // r[1] = Target (24B, vtable 2)
+    func.instructions
+        .push(Instruction::format_a(OpCode::AllocObject, 0, 1, 2, 24));
+    // holder.weak_target = target (FLAG_WEAK)
+    func.instructions
+        .push(Instruction::format_a(OpCode::SetField, FLAG_WEAK, 1, 0, 8));
+    // r[2] = GetField(holder, FLAG_WEAK | (12 << 1)) while target is alive -> Target addr
+    let weak_ref_flags = (12 << 1) | FLAG_WEAK;
+    func.instructions.push(Instruction::format_a(
+        OpCode::GetField,
+        weak_ref_flags,
+        2,
+        0,
+        8,
+    ));
+    // Drop Target strong ref -> freed to 24B quick-list
+    func.instructions
+        .push(Instruction::format_a(OpCode::DecRef, 0, 1, 0, 0));
+    // r[3] = Impostor (24B, vtable 3) -> pops and reuses Target's exact virtual address
+    func.instructions
+        .push(Instruction::format_a(OpCode::AllocObject, 0, 3, 3, 24));
+    // r[4] = GetField(holder, weak_ref_flags) -> MUST validate generation and return Null!
+    func.instructions.push(Instruction::format_a(
+        OpCode::GetField,
+        weak_ref_flags,
+        4,
+        0,
+        8,
+    ));
+    // Also attach weak ref to Impostor inside r[5] = another field (+16) to verify address reuse
+    // with a fresh generation token still keeps holder.weak_target invalidated!
+    func.instructions
+        .push(Instruction::format_a(OpCode::SetField, FLAG_WEAK, 3, 0, 16));
+    func.instructions.push(Instruction::format_a(
+        OpCode::GetField,
+        weak_ref_flags,
+        5,
+        0,
+        8,
+    ));
+    // Return r[4] (Wait: return tuple/check all via EqRef against Null + non-Null initial read!)
+    // Store r[2] != Null && r[4] == Null && r[5] == Null:
+    func.instructions
+        .push(Instruction::format_b(OpCode::LoadNull, 0, 6, 0));
+    // Check r[4] == Null && r[5] == Null; verify r[2] == r[3] proves exact address reuse!
+    func.instructions
+        .push(Instruction::format_a(OpCode::EqRef, 0, 7, 2, 3)); // old target addr == reused impostor addr
+    // Pack boolean check: only succeed if r[4] is Null, r[5] is Null, and address was reused
+    func.instructions
+        .push(Instruction::format_a(OpCode::NeqRef, 0, 2, 4, 6)); // r[4] != null -> error (jumps)
+    func.instructions
+        .push(Instruction::format_c(OpCode::JumpIfTrue, 0, 2, 3));
+    func.instructions
+        .push(Instruction::format_a(OpCode::NeqRef, 0, 2, 5, 6)); // r[5] != null -> error
+    func.instructions
+        .push(Instruction::format_c(OpCode::JumpIfFalse, 0, 2, 3));
+    // Failure return: false
+    func.instructions
+        .push(Instruction::format_b(OpCode::LoadBool, 0, 7, 0));
+    func.instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 7, 0, 0));
+
+    // Drop Impostor and Holder for clean memory verification
+    func.instructions
+        .push(Instruction::format_a(OpCode::DecRef, 0, 3, 0, 0));
+    func.instructions
+        .push(Instruction::format_a(OpCode::DecRef, 0, 0, 0, 0));
+    func.instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 7, 0, 0));
+
+    binary.functions.push(func);
+    binary.entry_point_id = Some(0);
+
+    let options = RuntimeOptions::new().with_binary(binary);
+    let context = RuntimeContext::new(options).unwrap();
+    let mut vm = VirtualMachine::new(context);
+
+    let res = vm.run().expect("Execution failed");
+    assert_eq!(
+        res,
+        Value::Bool(true),
+        "Expected stale weak ref to return Value::Null even after exact heap slot reuse"
+    );
+    assert!(vm.verify_clean_memory().is_ok());
+}

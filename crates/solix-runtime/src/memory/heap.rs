@@ -62,6 +62,16 @@ pub struct VirtualHeap {
     pub bump_cursor: usize,
     /// O(1) intrusive quick-lists for size classes 8B..256B in 8-byte increments.
     pub quick_lists: [u32; 32],
+    /// Lazily allocated weak-reference generation tracker; stays `None` until first weak write.
+    weak_tracker: Option<Box<WeakTracker>>,
+}
+
+#[derive(Debug, Clone)]
+struct WeakTracker {
+    next_generation: u64,
+    live_targets: std::collections::HashMap<u32, u64>,
+    slot_generations: std::collections::HashMap<u32, (u32, u64)>,
+    slots_by_owner: std::collections::HashMap<u32, Vec<u32>>,
 }
 
 /// Initial heap buffer allocation committed upfront before growing on demand up to `dynamic_capacity`.
@@ -89,6 +99,93 @@ impl VirtualHeap {
             active_live_objects: 0,
             bump_cursor: 0,
             quick_lists: [0u32; 32],
+            weak_tracker: None,
+        }
+    }
+
+    /// Registers or clears generation-validated weak tracking for a weak field slot.
+    #[cold]
+    #[inline(never)]
+    pub fn record_weak_slot(&mut self, owner_addr: u32, slot_addr: u32, target_addr: u32) {
+        if target_addr == 0 {
+            if let Some(tracker) = self.weak_tracker.as_deref_mut() {
+                tracker.slot_generations.remove(&slot_addr);
+            }
+            return;
+        }
+        let target_is_live = self
+            .read_header(target_addr)
+            .is_ok_and(|header| header.tag != BlockTag::Raw && header.ref_count > 0);
+        let tracker = self.weak_tracker.get_or_insert_with(|| {
+            Box::new(WeakTracker {
+                next_generation: 1,
+                live_targets: std::collections::HashMap::new(),
+                slot_generations: std::collections::HashMap::new(),
+                slots_by_owner: std::collections::HashMap::new(),
+            })
+        });
+        let owner_slots = tracker.slots_by_owner.entry(owner_addr).or_default();
+        if !owner_slots.contains(&slot_addr) {
+            owner_slots.push(slot_addr);
+        }
+        if target_is_live {
+            let target_generation = *tracker.live_targets.entry(target_addr).or_insert_with(|| {
+                let assigned = tracker.next_generation;
+                tracker.next_generation = tracker.next_generation.wrapping_add(1).max(1);
+                assigned
+            });
+            tracker
+                .slot_generations
+                .insert(slot_addr, (target_addr, target_generation));
+        } else {
+            // Target is already dead; bind an invalid generation token so reads yield null.
+            tracker.slot_generations.insert(slot_addr, (target_addr, 0));
+        }
+    }
+
+    /// Returns `true` if `slot_addr` points to a still-live weak target with matching generation.
+    /// Returns `false` and clears stale slot tracking if the target was freed or its address reused.
+    #[cold]
+    #[inline(never)]
+    pub fn validate_weak_slot(&mut self, slot_addr: u32, raw_target_addr: u32) -> bool {
+        let Some((recorded_target, recorded_gen)) = self
+            .weak_tracker
+            .as_deref()
+            .and_then(|tracker| tracker.slot_generations.get(&slot_addr).copied())
+        else {
+            return false;
+        };
+        if recorded_target != raw_target_addr || recorded_gen == 0 {
+            if let Some(tracker) = self.weak_tracker.as_deref_mut() {
+                tracker.slot_generations.remove(&slot_addr);
+            }
+            return false;
+        }
+        let matching_gen = self
+            .weak_tracker
+            .as_deref()
+            .and_then(|tracker| tracker.live_targets.get(&raw_target_addr).copied())
+            == Some(recorded_gen);
+        let is_live = matching_gen
+            && self
+                .read_header(raw_target_addr)
+                .is_ok_and(|header| header.tag != BlockTag::Raw && header.ref_count > 0);
+        if !is_live && let Some(tracker) = self.weak_tracker.as_deref_mut() {
+            tracker.slot_generations.remove(&slot_addr);
+        }
+        is_live
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn invalidate_weak_on_free_cold(&mut self, freed_addr: u32) {
+        if let Some(tracker) = self.weak_tracker.as_deref_mut() {
+            tracker.live_targets.remove(&freed_addr);
+            if let Some(owned_slots) = tracker.slots_by_owner.remove(&freed_addr) {
+                for slot_addr in owned_slots {
+                    tracker.slot_generations.remove(&slot_addr);
+                }
+            }
         }
     }
 
@@ -277,6 +374,10 @@ impl VirtualHeap {
             return Err(Self::null_reference_error());
         }
 
+        if self.weak_tracker.is_some() {
+            self.invalidate_weak_on_free_cold(payload_addr);
+        }
+
         // Clear payload and mark header dead
         let dead_header = BlockHeader::new(header.size, BlockTag::Raw, 0);
         let dead_bytes = dead_header.to_bytes();
@@ -319,6 +420,9 @@ impl VirtualHeap {
         let header = self.read_header(payload_addr)?;
         if header.tag == BlockTag::Raw {
             return Ok(());
+        }
+        if self.weak_tracker.is_some() {
+            self.invalidate_weak_on_free_cold(payload_addr);
         }
         let total_block_size = HEADER_SIZE + align_up(header.size as usize).max(ALIGNMENT);
         let block_abs_addr = addr - HEADER_SIZE;
@@ -364,6 +468,10 @@ impl VirtualHeap {
         let addr_usize = payload_addr as usize;
         if addr_usize < self.static_size + HEADER_SIZE || addr_usize > self.buffer.len() {
             return Err(RuntimeError::NullReferenceAccess);
+        }
+
+        if self.weak_tracker.is_some() {
+            self.invalidate_weak_on_free_cold(payload_addr);
         }
 
         let total_block_size = HEADER_SIZE + align_up(size as usize).max(ALIGNMENT);

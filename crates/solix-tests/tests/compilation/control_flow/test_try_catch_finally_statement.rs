@@ -235,3 +235,101 @@ fn test_catch_variable_reassignment_rejected() {
     "#;
     assert_compile_error(source_code, "E0210");
 }
+
+#[test]
+fn test_try_return_local_preserved_when_finally_mutates_or_nullifies() {
+    // Regression test (#300.3): returning a local object or primitive from `try` must snapshot
+    // (and retain reference-typed values) before `finally` runs so mutating/nulling in `finally`
+    // does not cause UAF, premature destruction, or corrupt primitive returns.
+    let source_code = r#"
+        class Token {
+            public static int32 destroyed = 0;
+            public int32 payload;
+
+            public Token(int32 payload) {
+                this.payload = payload;
+            }
+
+            ~Token() {
+                Token::destroyed = Token::destroyed + 1;
+            }
+        }
+
+        class Main {
+            public static Token build_and_clear() {
+                Token owned = new Token(88);
+                try {
+                    return owned;
+                } finally {
+                    owned = null;
+                }
+            }
+
+            public static int32 primitive_snapshot() {
+                int32 local_val = 77;
+                try {
+                    return local_val;
+                } finally {
+                    local_val = 999;
+                }
+            }
+
+            public static int32 main() {
+                Token::destroyed = 0;
+                Token returned_tok = Main::build_and_clear();
+                int32 destroyed_while_live = Token::destroyed;
+                int32 read_payload = returned_tok.payload;
+                returned_tok = null;
+                int32 destroyed_after_drop = Token::destroyed;
+                int32 prim_val = Main::primitive_snapshot();
+
+                if (destroyed_while_live != 0 || destroyed_after_drop != 1) {
+                    return 1;
+                }
+                if (read_payload != 88 || prim_val != 77) {
+                    return 2;
+                }
+                return 0;
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+}
+
+#[test]
+fn test_nested_finally_early_return_still_runs_outer_finally() {
+    // Regression test (#300.3): early return inside an inner `finally` block must still execute
+    // enclosing outer `finally` blocks instead of skipping them due to stack truncation.
+    let source_code = r#"
+        class Main {
+            public static int32 outer_runs = 0;
+            public static int32 inner_runs = 0;
+
+            public static int32 compute() {
+                try {
+                    try {
+                        return 10;
+                    } finally {
+                        Main::inner_runs = Main::inner_runs + 1;
+                        return 25;
+                    }
+                } finally {
+                    Main::outer_runs = Main::outer_runs + 1;
+                }
+            }
+
+            public static int32 main() {
+                Main::outer_runs = 0;
+                Main::inner_runs = 0;
+                int32 val = Main::compute();
+                if (val == 25 && Main::inner_runs == 1 && Main::outer_runs == 1) {
+                    return 0;
+                }
+                return (val * 100) + (Main::inner_runs * 10) + Main::outer_runs;
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+}

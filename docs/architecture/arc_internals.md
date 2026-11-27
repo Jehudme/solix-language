@@ -123,9 +123,9 @@ public class TreeNode {
 ```
 
 ### 4.1. Weak Reference Mechanics
-1. Storing an object address into a `weak` field copies the address without invoking `IncRef`.
-2. The runtime registers the weak field slot in the object's weak reference table.
-3. When the owning object is deallocated at `ref_count == 0`, all registered weak references pointing to it are automatically nullified (`null`), preventing dangling pointer hazards.
+1. Both `SetField` and `GetField` targeting a `weak` field encode `FLAG_WEAK` (`0x01`), bypassing reference-count increments/decrements and fast-path unchecked reads/writes (while `escape_analysis` preserves heap identity for any class with `weak_field_offsets`).
+2. `VirtualHeap` lazily allocates an optional boxed `WeakTracker` (`weak_tracker`) containing monotonic per-target generation tokens (`live_targets`) and weak slot records `(target_addr, generation)` (`slot_generations`, indexed per owning object in `slots_by_owner`) — keeping zero memory/pointer overhead when weak fields are unused.
+3. When any object or POD block is deallocated (`deallocate`, `force_deallocate`, or `deallocate_pod_fast`), its generation token is invalidated; any subsequent `GetField` (`FLAG_WEAK`) fails generation validation, zeroes the stale heap slot to `null`, and returns `null`, eliminating dangling-pointer use-after-free and type confusion across heap address reuse.
 
 ### 4.2. Collection Destructors & Intrusive Lifecycle
 1. Bidirectional data structures (such as `LinkedList` doubly-linked nodes and `TreeMap` parent/child nodes) define explicit destructors (`~LinkedList()`, `~TreeMap()`, `~TreeSet()`).
@@ -138,8 +138,9 @@ public class TreeNode {
 
 To reclaim residual reference cycles alongside deterministic ARC for acyclic graphs, the VM integrates a synchronous four-color cycle collector (`Black`, `Gray`, `White`, `Purple`):
 
-1. **Trial Deletion (`MarkGray`) & Confirmation (`Scan`):** Buffers decremented non-zero candidates (`Purple`), performs trial subtraction along outgoing child pointers (`Gray`), restores externally reachable subgraphs (`Black`), and collects confirmed unreachable cycles (`White`).
-2. **CLI & Guest Controls:**
+1. **Trial Deletion (`MarkGray`) & Symmetric Restoration (`Scan` / `ScanBlack`):** Buffers decremented non-zero candidates (`Purple`), performs trial subtraction along outgoing child pointers (`Gray`), records exact per-edge trial decrements so `ScanBlack` restores strictly decremented counts (preventing `0 -> 1` inflation or `MAX_REF_COUNT - 1` latching), and sweeps confirmed unreachable cycles (`White`).
+2. **Cycle Destructor Invocation:** Before `force_deallocate` reclaims confirmed garbage cycles containing `destructor_id`, `VirtualMachine::collect_cycles` temporarily restores surviving external child counts, guards all cyclic blocks with `active_destructors` + `ref_count >= 1`, invokes each class destructor deterministically, releases any external references still held, and then reclaims every cyclic block.
+3. **CLI & Guest Controls:**
    - `--cycle-collector <on|off>`: Enables or disables purple root buffering (pure ARC zero-overhead opt-out).
    - `--cycle-threshold <count>`: Candidate buffer size triggering automatic collection (default `1024`; `0` triggers `[E0341]`).
    - `--cycle-budget-us <microseconds>`: Bounded per-collection time budget (`[W0340]` when exceeded).

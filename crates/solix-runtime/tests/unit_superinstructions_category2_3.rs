@@ -356,3 +356,70 @@ fn test_superinstruction_call_virtual_direct_monomorphic_cache_and_polymorphic_m
     // Iteration 2 (obj_b): sum = 10 + 50 = 60
     assert_eq!(execution_result, Value::I32(60));
 }
+
+#[test]
+fn test_call_virtual_skips_direct_quickening_when_func_id_exceeds_u16_max() {
+    // Regression test (#292.2): CallVirtual -> CallVirtualDirect stores global_func_id in u16;
+    // when global_func_id > u16::MAX it must NOT truncate high bits or misroute to func_id & 0xFFFF.
+    let mut binary = BinaryProgram::new();
+
+    // Function 0: wrong alias target if bits > 16 were masked off (func_id 0 == 65536 & 0xFFFF).
+    let mut wrong_func = CompiledFunction::new("WrongTarget", 0, 1, 2);
+    wrong_func
+        .instructions
+        .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 999));
+    wrong_func
+        .instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 1, 0, 0));
+    binary.functions.push(wrong_func);
+
+    // Pad dummy functions up to index 65535 so target resides at global_func_id = 65536.
+    for filler_idx in 1..=u16::MAX as usize {
+        let mut filler = CompiledFunction::new(format!("Filler::{filler_idx}"), 0, 0, 1);
+        filler
+            .instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+        binary.functions.push(filler);
+    }
+
+    let expected_target_id = binary.functions.len() as u32;
+    assert_eq!(expected_target_id, 65_536);
+    let mut target_func = CompiledFunction::new("HighIdClass::method", 0, 1, 2);
+    target_func
+        .instructions
+        .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 777));
+    target_func
+        .instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 1, 0, 0));
+    binary.functions.push(target_func);
+
+    let main_id = binary.functions.len() as u32;
+    let mut main_function = CompiledFunction::new("main", 0, 0, 6);
+    main_function
+        .instructions
+        .push(Instruction::format_a(OpCode::AllocObject, 0, 0, 0, 16));
+    // Two repeated CallVirtual calls: first resolves vtable slot 0; second checks whether
+    // anything got corrupted/quickened on repeated invocation.
+    main_function
+        .instructions
+        .push(Instruction::format_call(OpCode::CallVirtual, 1, 0, 0, 1));
+    main_function
+        .instructions
+        .push(Instruction::format_call(OpCode::CallVirtual, 2, 0, 0, 1));
+    main_function
+        .instructions
+        .push(Instruction::format_a(OpCode::AddI32, 0, 3, 1, 2));
+    main_function
+        .instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 3, 0, 0));
+    binary.functions.push(main_function);
+    binary.entry_point_id = Some(main_id);
+
+    let options = RuntimeOptions::new().with_binary(binary);
+    let mut context = RuntimeContext::new(options).expect("initialize context");
+    context.flat_vtables = vec![vec![expected_target_id].into_boxed_slice()];
+    let mut virtual_machine = VirtualMachine::new(context);
+
+    let execution_result = virtual_machine.run().expect("execute virtual machine");
+    assert_eq!(execution_result, Value::I32(777 + 777));
+}

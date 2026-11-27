@@ -29,10 +29,12 @@ impl VmTrap {
     #[cold]
     #[inline(never)]
     pub(crate) fn null_reference() -> Self {
-        eprintln!(
-            "TRAP null_reference:\n{}",
-            std::backtrace::Backtrace::force_capture()
-        );
+        if std::env::var_os("SOLIX_TRACE_TRAPS").is_some() {
+            eprintln!(
+                "TRAP null_reference:\n{}",
+                std::backtrace::Backtrace::force_capture()
+            );
+        }
         Self(Box::new(RuntimeError::NullReferenceAccess))
     }
 
@@ -234,7 +236,7 @@ fn grow_register_stack(register_stack: &mut Vec<Value>, required: usize) {
 #[inline(never)]
 fn read_i32_slow(val_ref: &Value) -> Result<i32, VmTrap> {
     if let Value::I64(num_val) = *val_ref {
-        Ok(num_val as i32)
+        i32::try_from(num_val).map_err(|_| VmTrap::type_mismatch("int32", val_ref))
     } else {
         Err(VmTrap::type_mismatch("int32", val_ref))
     }
@@ -1202,12 +1204,15 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                     if TRACK_METRICS {
                         steps += (body_len as u64) + 1;
                     }
-                    let next_idx = regs[idx_reg].wrapping_add(1);
+                    let cur_idx = regs[idx_reg];
+                    let next_idx = cur_idx.wrapping_add(1);
                     regs[idx_reg] = next_idx;
                     let keep_going = if is_lte {
-                        next_idx <= bound
+                        cur_idx < bound
                     } else {
-                        next_idx < bound
+                        cur_idx
+                            .checked_add(1)
+                            .is_some_and(|next_val| next_val < bound)
                     };
                     if !keep_going {
                         break;
@@ -1361,15 +1366,18 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                         }
                     }
 
-                    let next_idx = regs[idx_reg].wrapping_add(1);
+                    let cur_idx = regs[idx_reg];
+                    let next_idx = cur_idx.wrapping_add(1);
                     regs[idx_reg] = next_idx;
                     if TRACK_METRICS {
                         steps += 1;
                     }
                     let keep_going = if is_lte {
-                        next_idx <= bound
+                        cur_idx < bound
                     } else {
-                        next_idx < bound
+                        cur_idx
+                            .checked_add(1)
+                            .is_some_and(|next_val| next_val < bound)
                     };
                     if !keep_going {
                         break;
@@ -1716,7 +1724,8 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
             }
         }
 
-        cur_idx = cur_idx.wrapping_add(1);
+        let prev_idx = cur_idx;
+        cur_idx = prev_idx.wrapping_add(1);
         unsafe {
             *reg_base.add(idx_reg) = Value::I32(cur_idx);
         }
@@ -1724,9 +1733,11 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
             steps += 1;
         }
         let keep_going = if is_lte {
-            cur_idx <= bound
+            prev_idx < bound
         } else {
-            cur_idx < bound
+            prev_idx
+                .checked_add(1)
+                .is_some_and(|next_val| next_val < bound)
         };
         if !keep_going {
             break;
@@ -1926,7 +1937,8 @@ fn rem_u64_cold(val_a: u64, val_b: u64) -> Result<u64, VmTrap> {
 fn read_u32_fast(operand: &Value) -> Result<u32, VmTrap> {
     match *operand {
         Value::I32(raw_integer) => Ok(raw_integer as u32),
-        Value::I64(raw_integer) => Ok(raw_integer as u32),
+        Value::I64(raw_integer) => u32::try_from(raw_integer)
+            .map_err(|_| VmTrap::type_mismatch("u32 integer value", operand)),
         _ => Err(VmTrap::type_mismatch("u32 integer value", operand)),
     }
 }
@@ -2354,12 +2366,13 @@ impl VirtualMachine {
     #[cold]
     #[inline(never)]
     fn execute_get_field_slow(
-        &self,
+        &mut self,
         obj_addr: u32,
         offset: usize,
         raw_flags: u8,
     ) -> Result<Value, VmTrap> {
         let field_addr = obj_addr + offset as u32;
+        let is_weak_flag = (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0;
         let field_type_tag = if raw_flags > 1 {
             Some(raw_flags >> 1)
         } else {
@@ -2416,6 +2429,21 @@ impl VirtualMachine {
                 }
             }
         };
+
+        if let Value::Ref(target_addr) = val {
+            let is_weak_field = is_weak_flag || {
+                let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                self.context
+                    .get_class_by_vtable_id(vtable_id)
+                    .is_some_and(|cls| cls.weak_field_offsets.contains(&offset))
+            };
+            if is_weak_field
+                && (target_addr == 0 || !self.heap.validate_weak_slot(field_addr, target_addr))
+            {
+                let _ = self.heap.write_u64(field_addr, Value::TAG_NULL);
+                return Ok(Value::Null);
+            }
+        }
         Ok(val)
     }
 
@@ -2473,6 +2501,11 @@ impl VirtualMachine {
                 let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
                 let old_val = Value::from_raw_u64(old_raw);
                 self.heap.write_u64(field_addr, val.to_raw_u64())?;
+                if is_weak {
+                    let target_addr = if let Value::Ref(addr) = val { addr } else { 0 };
+                    self.heap
+                        .record_weak_slot(obj_addr, field_addr, target_addr);
+                }
                 if let Value::Ref(child_addr) = val
                     && !is_weak
                     && !is_move
@@ -4723,7 +4756,9 @@ impl VirtualMachine {
                                 return Err(self.resolve_virtual_slot_error(vtable_id, slot));
                             }
                         };
-                        if !is_polymorphic {
+                        if !is_polymorphic
+                            && let Ok(target_func_u16) = u16::try_from(global_func_id)
+                        {
                             let caller_func_id =
                                 self.call_frames.last().map(|frame| frame.function_id);
                             if let Some(func_id) = caller_func_id {
@@ -4739,7 +4774,7 @@ impl VirtualMachine {
                                 let quickened = Instruction::format_call(
                                     OpCode::CallVirtualDirect,
                                     inst.call_dst(),
-                                    (global_func_id & 0xFFFF) as u16,
+                                    target_func_u16,
                                     inst.arg_base(),
                                     inst.arg_count(),
                                 );
@@ -4909,54 +4944,47 @@ impl VirtualMachine {
                         let field_addr = obj_addr + offset as u32;
                         let raw_flags = inst.flags();
                         let dst_idx = inst.dst() as usize;
-                        if raw_flags > 1 {
-                            match raw_flags >> 1 {
-                                5 | 6 => unsafe {
-                                    *reg_base.add(dst_idx) = Value::I32(read_heap_u32_or_zero(
-                                        &self.heap.buffer,
-                                        field_addr,
-                                    )
-                                        as i32);
-                                },
-                                7 | 8 => unsafe {
-                                    *reg_base.add(dst_idx) = Value::I64(read_heap_u64_or_zero(
-                                        &self.heap.buffer,
-                                        field_addr,
-                                    )
-                                        as i64);
-                                },
-                                10 => unsafe {
-                                    *reg_base.add(dst_idx) = Value::F64(f64::from_bits(
-                                        read_heap_u64_or_zero(&self.heap.buffer, field_addr),
-                                    ));
-                                },
-                                12 => {
-                                    let raw = read_heap_u64_or_zero(&self.heap.buffer, field_addr);
-                                    unsafe {
-                                        if raw == 0 || raw == Value::TAG_NULL {
-                                            *reg_base.add(dst_idx) = Value::Null;
-                                        } else if (raw & Value::TAG_MASK) == Value::TAG_REF {
-                                            *reg_base.add(dst_idx) = Value::Ref(raw as u32);
-                                        } else if (raw & Value::TAG_MASK) == 0 {
-                                            *reg_base.add(dst_idx) =
-                                                Value::Ref((raw & 0xFFFF_FFFF) as u32);
-                                        } else {
-                                            *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    let val =
-                                        self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
-                                    unsafe {
-                                        *reg_base.add(dst_idx) = val;
+                        // Encode `field_tag << 1` matches: odd (`FLAG_WEAK` = 1) & untagged (0) fall
+                        // cleanly into the cold path in a single jump-table match with zero extra branch.
+                        match raw_flags {
+                            10 | 12 => unsafe {
+                                *reg_base.add(dst_idx) =
+                                    Value::I32(
+                                        read_heap_u32_or_zero(&self.heap.buffer, field_addr) as i32,
+                                    );
+                            },
+                            14 | 16 => unsafe {
+                                *reg_base.add(dst_idx) =
+                                    Value::I64(
+                                        read_heap_u64_or_zero(&self.heap.buffer, field_addr) as i64,
+                                    );
+                            },
+                            20 => unsafe {
+                                *reg_base.add(dst_idx) = Value::F64(f64::from_bits(
+                                    read_heap_u64_or_zero(&self.heap.buffer, field_addr),
+                                ));
+                            },
+                            24 => {
+                                let raw = read_heap_u64_or_zero(&self.heap.buffer, field_addr);
+                                unsafe {
+                                    if raw == 0 || raw == Value::TAG_NULL {
+                                        *reg_base.add(dst_idx) = Value::Null;
+                                    } else if (raw & Value::TAG_MASK) == Value::TAG_REF {
+                                        *reg_base.add(dst_idx) = Value::Ref(raw as u32);
+                                    } else if (raw & Value::TAG_MASK) == 0 {
+                                        *reg_base.add(dst_idx) =
+                                            Value::Ref((raw & 0xFFFF_FFFF) as u32);
+                                    } else {
+                                        *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
                                     }
                                 }
                             }
-                        } else {
-                            let val = self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
-                            unsafe {
-                                *reg_base.add(dst_idx) = val;
+                            _ => {
+                                let val =
+                                    self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
+                                unsafe {
+                                    *reg_base.add(dst_idx) = val;
+                                }
                             }
                         }
                     }
@@ -5746,21 +5774,24 @@ impl VirtualMachine {
                         } else {
                             read_i32_fast(unsafe { &*reg_base.add((flags & 0x1F) as usize) })?
                         };
-                        let next_idx = if let Value::I32(cur) = *idx_slot {
-                            cur.wrapping_add(step)
+                        let cur_idx = if let Value::I32(cur) = *idx_slot {
+                            cur
                         } else {
-                            read_i32_fast(idx_slot)?.wrapping_add(step)
+                            read_i32_fast(idx_slot)?
                         };
+                        let next_idx = cur_idx.wrapping_add(step);
                         *idx_slot = Value::I32(next_idx);
                         let bound = if let Value::I32(bound_val) = *bound_ref {
                             bound_val
                         } else {
                             read_i32_fast(bound_ref)?
                         };
+                        let next_i64 = i64::from(cur_idx) + i64::from(step);
+                        let bound_i64 = i64::from(bound);
                         let keep_going = if (flags & 0x40) == 0 {
-                            next_idx < bound
+                            next_i64 < bound_i64
                         } else {
-                            next_idx <= bound
+                            next_i64 <= bound_i64
                         };
                         if keep_going {
                             if !SINGLE_STEP

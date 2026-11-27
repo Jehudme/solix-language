@@ -106,3 +106,47 @@ fn test_switch_continue_inside_loop() {
     let (execution_result, _) = compile_and_run(source_code);
     assert_eq!(execution_result, Value::I32(9));
 }
+
+#[test]
+fn test_grouped_empty_case_labels_fallthrough_and_definite_return() {
+    // Regression test (#300.4): grouped empty case labels (`case 1: case 2: ...` and
+    // `case 3: default: ...`) must execute the shared body directly and satisfy definite return
+    // and definite assignment checks.
+    let source_code = r#"
+        int32 classify(int32 code) {
+            switch (code) {
+                case 1:
+                case 2:
+                    return 5;
+                case 3:
+                case 4:
+                default:
+                    return 9;
+            }
+        }
+
+        int32 assign_grouped(int32 code) {
+            int32 bucket;
+            switch (code) {
+                case 10:
+                case 20:
+                    bucket = 77;
+                    break;
+                default:
+                    bucket = 88;
+                    break;
+            }
+            return bucket;
+        }
+
+        int32 main() {
+            if (classify(1) != 5 || classify(2) != 5) return 1;
+            if (classify(3) != 9 || classify(4) != 9 || classify(99) != 9) return 2;
+            if (assign_grouped(10) != 77 || assign_grouped(20) != 77) return 3;
+            if (assign_grouped(99) != 88) return 4;
+            return 0;
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+}

@@ -594,3 +594,52 @@ class Main {
     let (execution_value, _virtual_machine) = compile_and_run(source_code);
     assert_eq!(execution_value, Value::I32(1));
 }
+
+#[test]
+fn test_weak_field_returns_null_after_target_dropped_and_heap_reused() {
+    // Regression test (#300.1): compiled Solix weak fields must emit FLAG_WEAK on GetField and
+    // return null (never stale/impostor object) after the target drops and its heap slot is reused.
+    let source_code = r#"
+class OwnerNode {
+    public int32 marker;
+    public OwnerNode(int32 marker) {
+        this.marker = marker;
+    }
+}
+
+class ImpostorNode {
+    public int32 decoy;
+    public ImpostorNode(int32 decoy) {
+        this.decoy = decoy;
+    }
+}
+
+class ObserverNode {
+    public weak OwnerNode parent;
+    public ObserverNode(OwnerNode parent) {
+        this.parent = parent;
+    }
+}
+
+class Main {
+    public static int32 main() {
+        OwnerNode owner = new OwnerNode(42);
+        ObserverNode observer = new ObserverNode(owner);
+        int32 live_check = 0;
+        if (observer.parent != null && observer.parent.marker == 42) {
+            live_check = 1;
+        }
+        // Drop strong reference to OwnerNode and allocate same-sized ImpostorNode
+        owner = null;
+        ImpostorNode impostor = new ImpostorNode(999);
+        int32 nullified_check = 0;
+        if (observer.parent == null) {
+            nullified_check = 1;
+        }
+        return (live_check * 10) + nullified_check + (impostor.decoy * 0);
+    }
+}
+"#;
+    let (execution_value, _virtual_machine) = compile_and_run(source_code);
+    assert_eq!(execution_value, Value::I32(11));
+}

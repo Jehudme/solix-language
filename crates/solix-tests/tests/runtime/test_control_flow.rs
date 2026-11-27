@@ -197,3 +197,142 @@ fn test_nested_loops_multiplication_table() {
     let res = run_single_function(func).expect("Execution failed");
     assert_eq!(res, Value::I32(60));
 }
+
+#[test]
+fn test_for_loop_i32_lte_i32_max_terminates_without_wrap() {
+    // Regression test (#300.6): inclusive (<=) ForLoopI32 ending at i32::MAX must not wrap to
+    // i32::MIN and loop forever — both on the scalar-quickened unit-stride path and on main dispatch.
+    fn build_max_loop(step_value: i32, start_offset_from_max: i32) -> (RuntimeContext, Value) {
+        let mut func = CompiledFunction::new("main", 0, 0, 8);
+        // PC 0: r[1] = 1
+        func.instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 1));
+        // PC 1: r[3] = i32::MAX (bound)
+        func.instructions.push(Instruction::format_b_signed(
+            OpCode::LoadI32,
+            0,
+            3,
+            i32::MAX,
+        ));
+        // PC 2: r[0] = i32::MAX - start_offset_from_max (idx)
+        func.instructions.push(Instruction::format_b_signed(
+            OpCode::LoadI32,
+            0,
+            0,
+            i32::MAX - start_offset_from_max,
+        ));
+        // PC 3: r[5] = 0 (iteration counter)
+        func.instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 5, 0));
+        // PC 4: r[6] = step_value
+        func.instructions.push(Instruction::format_b_signed(
+            OpCode::LoadI32,
+            0,
+            6,
+            step_value,
+        ));
+        // PC 5: body (r[5] += 1)
+        func.instructions
+            .push(Instruction::format_a(OpCode::AddI32, 0, 5, 5, 1));
+        // PC 6: ForLoopI32(dst=0, src1=bound r[3], offset=-1 -> PC 5)
+        let loop_flags = if step_value == 1 {
+            0x40
+        } else {
+            0x80 | 0x40 | 6
+        };
+        func.instructions.push(Instruction::format_a(
+            OpCode::ForLoopI32,
+            loop_flags,
+            0,
+            3,
+            (-1_i16) as u16,
+        ));
+        // PC 7: ReturnValue(r[5])
+        func.instructions
+            .push(Instruction::format_a(OpCode::ReturnValue, 0, 5, 0, 0));
+
+        let mut binary = BinaryProgram::new();
+        binary.functions.push(func);
+        binary.entry_point_id = Some(0);
+        let context = RuntimeContext::new(RuntimeOptions::new().with_binary(binary))
+            .expect("create runtime context");
+        let mut vm = VirtualMachine::new(context.clone());
+        let value = vm.run().expect("loop at i32::MAX must terminate");
+        (context, value)
+    }
+
+    // Unit-stride (step=1): iterations MAX-3, MAX-2, MAX-1, MAX => 4 iterations, tagged 0x10.
+    let (ctx_unit, val_unit) = build_max_loop(1, 3);
+    assert_eq!(val_unit, Value::I32(4));
+    assert_ne!(
+        ctx_unit.get_function(0).unwrap().instructions[6].flags() & 0x10,
+        0,
+        "Pure i32 unit-stride loop should carry scalar quick-tag 0x10"
+    );
+
+    // Custom stride (step=2): iterations MAX-4, MAX-2, MAX => 3 iterations.
+    let (_ctx_step, val_step) = build_max_loop(2, 4);
+    assert_eq!(val_step, Value::I32(3));
+}
+
+#[test]
+fn test_mark_scalar_for_loops_skips_f64_and_i64_compare_jumps() {
+    // Regression test (#292.4): loops containing JumpIfLtF64 or JumpIfLtI64 must NOT be tagged
+    // with scalar-i32 bit 0x10 in RuntimeContext::mark_scalar_for_loops.
+    let mut binary = BinaryProgram::new();
+    let small_f64 = binary.constant_pool.add_f64(1.0).expect("add f64");
+    let big_f64 = binary.constant_pool.add_f64(2.0).expect("add f64");
+
+    let mut func = CompiledFunction::new("main", 0, 0, 8);
+    // r[0] = 0 (idx), r[1] = 2 (bound), r[2] = 0 (count), r[3] = 1.0, r[4] = 2.0, r[5] = 1
+    func.instructions
+        .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 0, 0));
+    func.instructions
+        .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 2));
+    func.instructions
+        .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 2, 0));
+    func.instructions.push(Instruction::format_b(
+        OpCode::LoadF64,
+        0,
+        3,
+        small_f64 as u32,
+    ));
+    func.instructions
+        .push(Instruction::format_b(OpCode::LoadF64, 0, 4, big_f64 as u32));
+    func.instructions
+        .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 5, 1));
+    // PC 6 (loop start): if r[3] < r[4] (1.0 < 2.0, true!) jump +2 -> PC 8
+    func.instructions
+        .push(Instruction::format_a(OpCode::JumpIfLtF64, 0, 3, 4, 2));
+    // PC 7: skipped
+    func.instructions
+        .push(Instruction::format_a(OpCode::AddI32, 0, 2, 2, 5));
+    // PC 8: r[2] += 1
+    func.instructions
+        .push(Instruction::format_a(OpCode::AddI32, 0, 2, 2, 5));
+    // PC 9: ForLoopI32 dst=0, bound=1, offset=-3 -> PC 6 ((10 - 1) - 3 = 6)
+    func.instructions.push(Instruction::format_a(
+        OpCode::ForLoopI32,
+        0,
+        0,
+        1,
+        (-3_i16) as u16,
+    ));
+    // PC 10: ReturnValue(r[2])
+    func.instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 2, 0, 0));
+
+    binary.functions.push(func);
+    binary.entry_point_id = Some(0);
+
+    let context = RuntimeContext::new(RuntimeOptions::new().with_binary(binary))
+        .expect("create runtime context");
+    assert_eq!(
+        context.get_function(0).unwrap().instructions[9].flags() & 0x10,
+        0,
+        "JumpIfLtF64 loop must not receive i32 scalar fast-path bit 0x10"
+    );
+
+    let mut vm = VirtualMachine::new(context);
+    assert_eq!(vm.run().expect("run f64 branch loop"), Value::I32(2));
+}

@@ -106,20 +106,27 @@ impl<'ctx> Emitter<'ctx> {
             return Ok(());
         }
 
-        let blocks_to_emit: Vec<_> = self.finally_stack[target_depth..current_depth].to_vec();
-        self.finally_stack.truncate(target_depth);
-
-        for block_statement in blocks_to_emit.iter().rev() {
-            let mut inner_loop_stack = Vec::new();
-            if let Err(emission_error) =
-                self.emit_block_statement(block_statement, &mut inner_loop_stack)
-            {
-                self.finally_stack.extend(blocks_to_emit);
-                return Err(emission_error);
+        // Pop one block at a time so early control flow (`return`/`break`/`continue`) inside an
+        // inner `finally` block still unwinds enclosing outer `finally` blocks on the stack.
+        let mut popped_blocks = Vec::with_capacity(current_depth - target_depth);
+        while self.finally_stack.len() > target_depth {
+            if let Some(block_statement) = self.finally_stack.pop() {
+                let mut inner_loop_stack = Vec::new();
+                let emit_result =
+                    self.emit_block_statement(&block_statement, &mut inner_loop_stack);
+                popped_blocks.push(block_statement);
+                if let Err(emission_error) = emit_result {
+                    while let Some(saved_block) = popped_blocks.pop() {
+                        self.finally_stack.push(saved_block);
+                    }
+                    return Err(emission_error);
+                }
             }
         }
 
-        self.finally_stack.extend(blocks_to_emit);
+        while let Some(saved_block) = popped_blocks.pop() {
+            self.finally_stack.push(saved_block);
+        }
         Ok(())
     }
 
@@ -773,7 +780,12 @@ impl<'ctx> Emitter<'ctx> {
                 }
                 let offset = self.resolve_field_offset(object.span(), &member_name);
                 let field_tag = self.resolve_field_type_tag(object.span(), &member_name);
-                let flags = field_tag << 1;
+                let weak_flag = if self.is_weak_field(object.span(), &member_name) {
+                    solix_common::bytecode::instruction::FLAG_WEAK
+                } else {
+                    0
+                };
+                let flags = (field_tag << 1) | weak_flag;
                 let r_obj = self.emit_expression(object, None)?;
                 let dst = self.resolve_dst(target_reg)?;
                 self.emit_instruction(
@@ -2670,6 +2682,53 @@ impl<'ctx> Emitter<'ctx> {
                 self.allocator.free_temp(r_op);
             }
             TokenKind::OperatorMinus => {
+                let negated_literal_int = match operand {
+                    Expression::Literal {
+                        value: LiteralValue::Int(literal_int),
+                        ..
+                    } => Some(*literal_int as i128),
+                    Expression::Literal {
+                        value: LiteralValue::UInt(literal_uint),
+                        ..
+                    } => Some(*literal_uint as i128),
+                    _ => None,
+                };
+                if let Some(raw_magnitude) = negated_literal_int {
+                    let negated_i128 = -raw_magnitude;
+                    let target_type = self.query_type(span).unwrap_alias().clone();
+                    if matches!(
+                        target_type,
+                        Type::Primitive(PrimitiveKind::Float32 | PrimitiveKind::Float64)
+                    ) {
+                        let const_idx = self.pool.add_f64(negated_i128 as f64)?;
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadF64, 0, dst, const_idx as u32),
+                            Some(span),
+                        );
+                        return Ok(());
+                    } else if matches!(
+                        target_type,
+                        Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+                    ) {
+                        let const_idx = self.pool.add_i64(negated_i128 as i64)?;
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadConst, 0, dst, const_idx as u32),
+                            Some(span),
+                        );
+                        return Ok(());
+                    } else if negated_i128 >= i32::MIN as i128 && negated_i128 <= i32::MAX as i128 {
+                        self.emit_instruction(
+                            Instruction::format_b_signed(
+                                OpCode::LoadI32,
+                                0,
+                                dst,
+                                negated_i128 as i32,
+                            ),
+                            Some(span),
+                        );
+                        return Ok(());
+                    }
+                }
                 let r_op = self.emit_expression(operand, None)?;
                 let operand_type = self.query_type(operand.span());
                 let op = if operand_type.is_floating_point() {
@@ -2913,10 +2972,15 @@ impl<'ctx> Emitter<'ctx> {
                         0
                     };
                     let cur_val = self.allocator.alloc_temp()?;
+                    let weak_flag = if is_weak {
+                        solix_common::bytecode::instruction::FLAG_WEAK
+                    } else {
+                        0
+                    };
                     self.emit_instruction(
                         Instruction::format_a(
                             OpCode::GetField,
-                            field_tag << 1,
+                            (field_tag << 1) | weak_flag,
                             cur_val,
                             r_obj,
                             offset,
@@ -3448,8 +3512,19 @@ impl<'ctx> Emitter<'ctx> {
 
             if !matches!(operator, TokenKind::OperatorAssign) {
                 let r_cur = self.allocator.alloc_temp()?;
+                let weak_flag = if is_weak {
+                    solix_common::bytecode::instruction::FLAG_WEAK
+                } else {
+                    0
+                };
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::GetField, field_tag << 1, r_cur, r_obj, offset),
+                    Instruction::format_a(
+                        OpCode::GetField,
+                        (field_tag << 1) | weak_flag,
+                        r_cur,
+                        r_obj,
+                        offset,
+                    ),
                     Some(*mem_span),
                 );
                 let operand_type = self.query_type(target.span());

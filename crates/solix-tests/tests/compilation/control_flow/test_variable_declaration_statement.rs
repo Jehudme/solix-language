@@ -178,3 +178,80 @@ fn test_case_4_8_solitary_variable_declaration_in_while_without_braces() {
     "#;
     assert_compile_error(code, "solitary");
 }
+
+#[test]
+fn test_uninitialized_local_read_emits_e0272() {
+    // Regression test (#300.5): reading an uninitialized local variable must emit E0272.
+    let direct_read = r#"
+        int32 test() {
+            int32 uninit;
+            int32 copy = uninit;
+            return copy;
+        }
+    "#;
+    assert_compile_error(direct_read, "E0272");
+
+    let one_branch = r#"
+        int32 test(bool flag) {
+            int32 value;
+            if (flag) {
+                value = 1;
+            }
+            return value;
+        }
+    "#;
+    assert_compile_error(one_branch, "E0272");
+
+    let loop_body_only = r#"
+        int32 test(bool cond) {
+            int32 acc;
+            while (cond) {
+                acc = 5;
+            }
+            return acc;
+        }
+    "#;
+    assert_compile_error(loop_body_only, "E0272");
+
+    let compound_inc = r#"
+        int32 test() {
+            int32 counter;
+            counter++;
+            return counter;
+        }
+    "#;
+    assert_compile_error(compound_inc, "E0272");
+}
+
+#[test]
+fn test_definite_assignment_across_branches_succeeds() {
+    let source_code = r#"
+        int32 resolve(bool flag) {
+            int32 value;
+            if (flag) {
+                value = 10;
+            } else {
+                value = 20;
+            }
+            return value;
+        }
+
+        int32 resolve_early_return(bool flag) {
+            int32 value;
+            if (flag) {
+                value = 30;
+            } else {
+                return 40;
+            }
+            return value;
+        }
+
+        int32 main() {
+            if (resolve(true) != 10 || resolve(false) != 20) return 1;
+            if (resolve_early_return(true) != 30 || resolve_early_return(false) != 40) return 2;
+            return 0;
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+}

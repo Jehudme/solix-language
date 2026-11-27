@@ -388,14 +388,8 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
             {
                 continue;
             }
-            let class_name = &layout.class_name;
-            let simple = extract_simple_class_name(class_name);
-            let dtor_sym = format!("{class_name}::~destructor");
-            let dtor_sym_simple = format!("{simple}::~destructor");
-            let dtor_id = function_ids
-                .get(&dtor_sym)
-                .or_else(|| function_ids.get(&dtor_sym_simple))
-                .copied();
+            let dtor_id =
+                resolve_inherited_destructor_id(layout, &artifacts.layouts, &function_ids);
             compiled_classes.push(compile_class_layout(
                 layout,
                 &sym_to_func,
@@ -2527,6 +2521,44 @@ fn compile_default_constructor(
     Ok(func)
 }
 
+fn resolve_destructor_id_by_name<'layout, KeyType>(
+    class_layouts: &'layout HashMap<KeyType, ClassLayout>,
+    start_layout: &'layout ClassLayout,
+    function_ids: &HashMap<String, u32>,
+) -> Option<u32> {
+    let mut visited_vtables = std::collections::HashSet::new();
+    let mut current_opt = Some(start_layout);
+    while let Some(current) = current_opt {
+        if !visited_vtables.insert(current.vtable_id) {
+            break;
+        }
+        let class_name = &current.class_name;
+        let simple = extract_simple_class_name(class_name);
+        let dtor_sym = format!("{class_name}::~destructor");
+        let dtor_sym_simple = format!("{simple}::~destructor");
+        if let Some(&dtor_id) = function_ids
+            .get(&dtor_sym)
+            .or_else(|| function_ids.get(&dtor_sym_simple))
+        {
+            return Some(dtor_id);
+        }
+        current_opt = current.base_vtable_id.and_then(|base_vtable_id| {
+            class_layouts
+                .values()
+                .find(|candidate| candidate.vtable_id == base_vtable_id)
+        });
+    }
+    None
+}
+
+fn resolve_inherited_destructor_id(
+    layout: &ClassLayout,
+    class_layouts: &HashMap<crate::phases::binder::symbols::SymbolId, ClassLayout>,
+    function_ids: &HashMap<String, u32>,
+) -> Option<u32> {
+    resolve_destructor_id_by_name(class_layouts, layout, function_ids)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_destructor(
     symbol: &str,
@@ -2577,34 +2609,27 @@ fn compile_destructor(
             && let Some(base_cls) = class_layouts
                 .values()
                 .find(|layout| layout.vtable_id == base_vtable_id)
+            && let Some(super_func_id) =
+                resolve_destructor_id_by_name(class_layouts, base_cls, function_ids)
         {
-            let base_name = &base_cls.class_name;
-            let simple_base = extract_simple_class_name(base_name);
-            let super_dtor = format!("{base_name}::~destructor");
-            let super_dtor_simple = format!("{simple_base}::~destructor");
-            if let Some(&super_func_id) = function_ids
-                .get(&super_dtor)
-                .or_else(|| function_ids.get(&super_dtor_simple))
-            {
-                let arg_base = emitter.allocator.alloc_window(1)?;
-                emitter.emit_instruction(
-                    Instruction::format_a(OpCode::Mov, 0, arg_base, 0, 0),
-                    Some(dtor.span),
-                );
-                let dummy = emitter.allocator.alloc_temp()?;
-                emitter.emit_instruction(
-                    Instruction::format_call(
-                        OpCode::CallDirect,
-                        dummy,
-                        super_func_id as u16,
-                        arg_base,
-                        1,
-                    ),
-                    Some(dtor.span),
-                );
-                emitter.allocator.free_temp(dummy);
-                emitter.allocator.free_window(arg_base, 1);
-            }
+            let arg_base = emitter.allocator.alloc_window(1)?;
+            emitter.emit_instruction(
+                Instruction::format_a(OpCode::Mov, 0, arg_base, 0, 0),
+                Some(dtor.span),
+            );
+            let dummy = emitter.allocator.alloc_temp()?;
+            emitter.emit_instruction(
+                Instruction::format_call(
+                    OpCode::CallDirect,
+                    dummy,
+                    super_func_id as u16,
+                    arg_base,
+                    1,
+                ),
+                Some(dtor.span),
+            );
+            emitter.allocator.free_temp(dummy);
+            emitter.allocator.free_window(arg_base, 1);
         }
 
         let has_return = emitter

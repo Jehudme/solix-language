@@ -413,3 +413,62 @@ fn test_case_4_6_destructor_declared_with_forbidden_modifiers() {
     "#;
     assert_compile_error(code, "E0130");
 }
+
+#[test]
+fn test_inherited_destructor_runs_when_subclass_omits_explicit_dtor() {
+    // Regression test (#300.2): subclasses omitting their own destructor must inherit and run
+    // the nearest ancestor destructor, and explicit leaf destructors must chain to ancestors.
+    let code = r#"
+        class BaseResource {
+            public static int32 base_drops = 0;
+            public static int32 child_drops = 0;
+            public int32 id;
+
+            public BaseResource(int32 id) {
+                this.id = id;
+            }
+
+            ~BaseResource() {
+                BaseResource::base_drops = BaseResource::base_drops + 1;
+            }
+        }
+
+        class MiddleWithoutDtor extends BaseResource {
+            public int32 extra;
+            public MiddleWithoutDtor(int32 id, int32 extra) : super(id) {
+                this.extra = extra;
+            }
+        }
+
+        class LeafWithoutDtor extends MiddleWithoutDtor {
+            public LeafWithoutDtor(int32 id) : super(id, 10) {}
+        }
+
+        class LeafWithExplicitDtor extends MiddleWithoutDtor {
+            public LeafWithExplicitDtor(int32 id) : super(id, 20) {}
+
+            ~LeafWithExplicitDtor() {
+                BaseResource::child_drops = BaseResource::child_drops + 1;
+            }
+        }
+
+        class Main {
+            public static int32 main() {
+                BaseResource::base_drops = 0;
+                BaseResource::child_drops = 0;
+                MiddleWithoutDtor middle_obj = new MiddleWithoutDtor(1, 2);
+                LeafWithoutDtor leaf_obj = new LeafWithoutDtor(3);
+                LeafWithExplicitDtor explicit_leaf = new LeafWithExplicitDtor(4);
+
+                middle_obj = null;
+                leaf_obj = null;
+                explicit_leaf = null;
+
+                return (BaseResource::base_drops * 10) + BaseResource::child_drops;
+            }
+        }
+    "#;
+    let (res, _) = compile_and_run(code);
+    // All 3 instances ran ~BaseResource() (base_drops == 3), and 1 ran ~LeafWithExplicitDtor().
+    assert_eq!(res, Value::I32(31));
+}

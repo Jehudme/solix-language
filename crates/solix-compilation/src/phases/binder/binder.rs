@@ -135,6 +135,9 @@ pub fn bind_context(
                 lambda_stack: Vec::new(),
                 next_vtable_id: &mut next_vtable_id,
                 source_texts: &context.sources,
+                tracked_locals: std::collections::HashSet::new(),
+                initialized_locals: std::collections::HashSet::new(),
+                suppress_uninit_ident_check: None,
             };
 
             visitor.visit_program(program_ast);

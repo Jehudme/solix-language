@@ -53,6 +53,7 @@ VariableDeclarationStatement
 - **Type Consistency**: The initializer expression must evaluate to a type that is implicitly convertible or identical to the declared variable type.
 - **Scope**: The variable is accessible from the point of its declaration until the end of its enclosing block.
 - **No Type Inference**: Solix requires explicit types on all variable declarations.
+- **Definite Assignment (`E0272`)**: Declaring a local variable without an initializer (`int32 count;`) leaves it uninitialized; Pass 3 (`TypeCheckingVisitor`) tracks definite assignment across conditionals, switches, loops, and `try`/`catch`/`finally` paths, rejecting any read (or compound mutation such as `count += 1` / `count++`) before definite initialization with `E0272` (`BindingError::UninitializedVariableUsed`).
 
 ---
 
@@ -66,3 +67,4 @@ Reference variables are registered in the frame's reference bitmask so that runt
 
 - **E0202 (Duplicate Variable)**: Attempting to declare multiple variables with the identical name in the same scope.
 - **E0203 (Type Mismatch)**: Attempting to assign an incompatible type without an explicit cast.
+- **E0272 (Uninitialized Variable Used)**: Reading a local variable before it has been initialized along all reachable control-flow paths.
