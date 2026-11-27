@@ -668,7 +668,7 @@ fn scan_raw_source_imports(
         let segments: Vec<&str> = normalized
             .split('.')
             .map(str::trim)
-            .filter(|s| !s.is_empty())
+            .filter(|segment| !segment.is_empty())
             .collect();
         if segments.first().copied() != Some(package_name) {
             continue;
