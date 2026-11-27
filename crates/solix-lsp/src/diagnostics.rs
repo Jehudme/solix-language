@@ -302,7 +302,55 @@ fn inspect_statement_for_dead_code(
         Statement::For(for_statement) => {
             inspect_statement_for_dead_code(source_text, &for_statement.body, diagnostics);
         }
+        Statement::Try(try_statement) => {
+            inspect_block_for_dead_code(
+                source_text,
+                &try_statement.try_block.statements,
+                diagnostics,
+            );
+            for catch_clause in &try_statement.catch_clauses {
+                inspect_block_for_dead_code(
+                    source_text,
+                    &catch_clause.block.statements,
+                    diagnostics,
+                );
+            }
+            if let Some(finally_block) = &try_statement.finally_block {
+                inspect_block_for_dead_code(source_text, &finally_block.statements, diagnostics);
+            }
+        }
+        Statement::Switch(switch_statement) => {
+            for case_clause in &switch_statement.cases {
+                inspect_block_for_dead_code(source_text, &case_clause.statements, diagnostics);
+            }
+            if let Some(default_statements) = &switch_statement.default_case {
+                inspect_block_for_dead_code(source_text, default_statements, diagnostics);
+            }
+        }
         _ => {}
+    }
+}
+
+fn statement_always_terminates(statement: &Statement) -> bool {
+    match statement {
+        Statement::Return(_)
+        | Statement::Break(_)
+        | Statement::Continue(_)
+        | Statement::Throw(_)
+        | Statement::Exit(_) => true,
+        Statement::Block(inner_block) => inner_block
+            .statements
+            .iter()
+            .any(statement_always_terminates),
+        Statement::If(if_statement) => {
+            if let Some(else_branch) = &if_statement.else_branch {
+                statement_always_terminates(&if_statement.then_branch)
+                    && statement_always_terminates(else_branch)
+            } else {
+                false
+            }
+        }
+        _ => false,
     }
 }
 
@@ -331,17 +379,11 @@ fn inspect_block_for_dead_code(
             continue;
         }
 
-        match statement {
-            Statement::Return(_)
-            | Statement::Break(_)
-            | Statement::Continue(_)
-            | Statement::Throw(_)
-            | Statement::Exit(_) => {
-                terminated = true;
-            }
-            _ => {
-                inspect_statement_for_dead_code(source_text, statement, diagnostics);
-            }
+        if statement_always_terminates(statement) {
+            inspect_statement_for_dead_code(source_text, statement, diagnostics);
+            terminated = true;
+        } else {
+            inspect_statement_for_dead_code(source_text, statement, diagnostics);
         }
     }
 }

@@ -154,30 +154,41 @@ impl VirtualMachine {
 
         for (byte_offset, field_name, field_type_name) in &compiled_class.field_names {
             let field_address = object_address + *byte_offset as u32;
-            let field_value = match field_type_name.as_str() {
-                "int8" => Value::I32(i32::from(self.heap.read_u8(field_address)? as i8)),
-                "uint8" => Value::I32(i32::from(self.heap.read_u8(field_address)?)),
-                "int16" => Value::I32(i32::from(self.heap.read_u16(field_address)? as i16)),
-                "uint16" => Value::I32(i32::from(self.heap.read_u16(field_address)?)),
-                "int32" => Value::I32(self.heap.read_u32(field_address)? as i32),
-                "uint32" => Value::I64(i64::from(self.heap.read_u32(field_address)?)),
-                "int64" => Value::I64(self.heap.read_u64(field_address)? as i64),
-                "uint64" => Value::I64(self.heap.read_u64(field_address)? as i64),
-                "f32" => Value::F64(f64::from(f32::from_bits(
-                    self.heap.read_u32(field_address)?,
-                ))),
-                "f64" => Value::F64(f64::from_bits(self.heap.read_u64(field_address)?)),
-                "bool" => Value::Bool(self.heap.read_u8(field_address)? != 0),
-                "char" => Value::I32(self.heap.read_u32(field_address)? as i32),
-                "string" | "object" => {
-                    let heap_ref = self.heap.read_u32(field_address)?;
-                    if heap_ref == 0 {
-                        Value::Null
-                    } else {
-                        Value::Ref(heap_ref)
-                    }
+            let field_value = if compiled_class.reference_field_offsets.contains(byte_offset) {
+                let heap_ref = self.heap.read_u32(field_address)?;
+                if heap_ref == 0 {
+                    Value::Null
+                } else {
+                    Value::Ref(heap_ref)
                 }
-                _ => Value::I32(self.heap.read_u32(field_address)? as i32),
+            } else {
+                match field_type_name.as_str() {
+                    "int8" => Value::I32(i32::from(self.heap.read_u8(field_address)? as i8)),
+                    "uint8" => Value::I32(i32::from(self.heap.read_u8(field_address)?)),
+                    "int16" => Value::I32(i32::from(self.heap.read_u16(field_address)? as i16)),
+                    "uint16" => Value::I32(i32::from(self.heap.read_u16(field_address)?)),
+                    "int32" => Value::I32(self.heap.read_u32(field_address)? as i32),
+                    "uint32" => Value::I64(i64::from(self.heap.read_u32(field_address)?)),
+                    "int64" => Value::I64(self.heap.read_u64(field_address)? as i64),
+                    "uint64" => Value::I64(self.heap.read_u64(field_address)? as i64),
+                    "f32" | "float32" => Value::F64(f64::from(f32::from_bits(
+                        self.heap.read_u32(field_address)?,
+                    ))),
+                    "f64" | "float64" => {
+                        Value::F64(f64::from_bits(self.heap.read_u64(field_address)?))
+                    }
+                    "bool" => Value::Bool(self.heap.read_u8(field_address)? != 0),
+                    "char" => Value::I32(self.heap.read_u32(field_address)? as i32),
+                    "string" | "object" => {
+                        let heap_ref = self.heap.read_u32(field_address)?;
+                        if heap_ref == 0 {
+                            Value::Null
+                        } else {
+                            Value::Ref(heap_ref)
+                        }
+                    }
+                    _ => Value::I32(self.heap.read_u32(field_address)? as i32),
+                }
             };
 
             field_results.push((field_name.clone(), field_type_name.clone(), field_value));

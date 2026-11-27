@@ -233,5 +233,11 @@ When discovering and analyzing project source files across workspace directories
 - **`E0206` / `E0265` / `E0306` / `E0271` / `W0001` / `E0101` / `E0112` / `E0153` / `E0192`**: Generates missing method stubs, inserts `default` switch arms, removes unreachable statements, inserts/removes semicolons, removes duplicate `package` statements, and converts multi-character `'...'` literals to `"..."` strings.
 - **Documentation Links**: `make_code_description` and phase-specific diagnostic builders route `E00*` to `lexer-errors.md`, `E01*` to `parser-errors.md`, `E02*` and binder `E0301`-`E0316` to `binder-errors.md`, and `E03*` runtime diagnostics to `runtime-errors.md`.
 
+### 7.12 Formatter Lexical Brace Tracking, Qualified Signature Help, and Scoped Inlay Hints / CodeLens
+- **Lexical Formatter Brace Counting (`formatter.rs`)**: `count_code_braces` and `format_line_content` track string/char escape parity (`escape_active`), `//` line comments, and `/* ... */` block comments so braces inside comments, strings, or trailing escaped backslashes (`"C:\\\\"`) never corrupt indentation.
+- **Qualified Signature Help (`signature_help.rs`)**: Preserves AST receiver/class qualifiers and restricts fallback symbol lookup to in-scope or public symbols.
+- **Scoped RAII Inlay Hints & CodeLens (`inlay_hints.rs`, `code_lens.rs`, `diagnostics.rs`)**: Emits `~RAII` inlay hints only for blocks declaring locals whose class defines a destructor, traverses `Destructor`/`Operator`/`Try`/`Switch`, checks zero-parameter arity for `test*` CodeLens actions, counts references by `fully_qualified_name`, and reports `W0001` unreachable code inside `try`/`switch` and after exhaustive `if`/`else` returns.
+
+
 
 

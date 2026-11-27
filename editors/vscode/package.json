@@ -115,7 +115,7 @@
             },
             {
                 "command": "solix.syncPackages",
-                "title": "Reinstall Packages (solix reinstall --all)",
+                "title": "Build & Sync Packages (solix build)",
                 "category": "Solix"
             },
             {
@@ -264,14 +264,19 @@
                     ],
                     "description": "Arguments passed when launching the Solix language server binary."
                 },
+                "solix.toolchain.path": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Custom absolute path or executable name for the Solix toolchain CLI (solix). If blank, automatically discovered from ~/.local/bin, ~/.cargo/bin, ~/.solix/bin, or PATH."
+                },
                 "solix.toolchain.compatibleMajor": {
                     "type": "number",
-                    "default": 2,
+                    "default": 3,
                     "description": "Expected major version of the Solix toolchain."
                 },
                 "solix.toolchain.minVersion": {
                     "type": "string",
-                    "default": "1.9.0",
+                    "default": "3.0.0",
                     "description": "Minimum required SemVer version for the Solix toolchain."
                 },
                 "solix.trace.server": {

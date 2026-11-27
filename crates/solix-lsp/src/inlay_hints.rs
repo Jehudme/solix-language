@@ -66,6 +66,22 @@ fn collect_inlay_hints_in_ast(
                             end_offset,
                             hints,
                         );
+                    } else if let ClassMember::Destructor(destructor_decl) = member {
+                        collect_inlay_hints_in_statements(
+                            snapshot,
+                            &destructor_decl.body.statements,
+                            start_offset,
+                            end_offset,
+                            hints,
+                        );
+                    } else if let ClassMember::Operator(operator_decl) = member {
+                        collect_inlay_hints_in_statements(
+                            snapshot,
+                            &operator_decl.body.statements,
+                            start_offset,
+                            end_offset,
+                            hints,
+                        );
                     }
                 }
             }
@@ -84,7 +100,9 @@ fn collect_inlay_hints_in_statements(
     for statement in statements {
         collect_inlay_hints_in_statement(snapshot, statement, start_offset, end_offset, hints);
 
-        if let Statement::Block(block) = statement {
+        if let Statement::Block(block) = statement
+            && block_owns_raii_locals(snapshot, block)
+        {
             let block_end = block.span.end as usize;
             if start_offset <= block_end && block_end <= end_offset {
                 let position =
@@ -104,6 +122,46 @@ fn collect_inlay_hints_in_statements(
             }
         }
     }
+}
+
+fn block_owns_raii_locals(
+    snapshot: &AnalysisSnapshot,
+    block: &solix_compilation::phases::parser::statements::BlockStatement,
+) -> bool {
+    let Some(semantic) = &snapshot.last_good_semantic else {
+        return false;
+    };
+
+    for stmt in &block.statements {
+        if let Statement::VariableDeclaration(var_decl) = stmt {
+            let var_name = get_span_text(&snapshot.source_text, var_decl.name_span);
+            if let Some(sym) = semantic
+                .symbol_table
+                .symbols
+                .iter()
+                .find(|entry| entry.source_id == snapshot.source_id && entry.name == var_name)
+                && let solix_common::types::Type::Class { symbol_name, .. } = &sym.symbol_type
+            {
+                let has_dtor = semantic.symbol_table.symbols.iter().any(|candidate| {
+                    candidate.name.starts_with('~')
+                        && candidate.parent_symbol.is_some_and(|parent_id| {
+                            semantic
+                                .symbol_table
+                                .get_symbol(parent_id)
+                                .is_some_and(|parent_sym| {
+                                    parent_sym.name == *symbol_name
+                                        || parent_sym.fully_qualified_name == *symbol_name
+                                })
+                        })
+                });
+                if has_dtor {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn collect_inlay_hints_in_statement(

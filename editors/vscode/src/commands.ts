@@ -3,46 +3,47 @@ import * as childProcess from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as util from 'util';
 import { LanguageClient } from 'vscode-languageclient/node';
+import {
+    buildProfileCommandArgs,
+    collectSolixSourcesRecursive,
+    findProjectRoot,
+    ManifestProfileEntry,
+    parseManifestProfiles,
+    resolveArtifactPath,
+    resolveManifestFile,
+} from './manifest';
 
-let activeBuildProfile: 'debug' | 'release' | 'test' = 'debug';
+const execFileAsync = util.promisify(childProcess.execFile);
+
+let activeBuildProfile = 'debug';
 let profileStatusBarItem: vscode.StatusBarItem | undefined;
 
-const MANIFEST_FILENAMES = ['manifest.yaml', 'manifest.yml', 'manifest.toml'];
-
-function resolveManifestFile(directory: string): string | undefined {
-    for (const filename of MANIFEST_FILENAMES) {
-        const candidate = path.join(directory, filename);
-        if (fs.existsSync(candidate)) {
-            return candidate;
-        }
-    }
-    return undefined;
+export function getActiveBuildProfile(): string {
+    return activeBuildProfile;
 }
 
-/**
- * Searches parent directory tree starting from target path for a manifest.yaml (or manifest.toml) file.
- */
-function findProjectRoot(initialFilePath: string): string | undefined {
-    try {
-        let currentDirectory = fs.statSync(initialFilePath).isDirectory()
-            ? initialFilePath
-            : path.dirname(initialFilePath);
-
-        for (let depthIndex = 0; depthIndex < 10; depthIndex += 1) {
-            if (resolveManifestFile(currentDirectory)) {
-                return currentDirectory;
+function loadActiveProjectProfiles(): ManifestProfileEntry[] {
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const searchStart = activeUri?.fsPath || workspaceRoot;
+    if (searchStart) {
+        const projectRoot = findProjectRoot(searchStart);
+        if (projectRoot) {
+            const manifestPath = resolveManifestFile(projectRoot);
+            if (manifestPath && fs.existsSync(manifestPath)) {
+                try {
+                    const content = fs.readFileSync(manifestPath, 'utf8');
+                    const isYaml = manifestPath.endsWith('.yaml') || manifestPath.endsWith('.yml');
+                    return parseManifestProfiles(content, isYaml);
+                } catch {
+                    // Fall back to defaults below
+                }
             }
-            const parentDirectory = path.dirname(currentDirectory);
-            if (parentDirectory === currentDirectory) {
-                break;
-            }
-            currentDirectory = parentDirectory;
         }
-    } catch {
-        return undefined;
     }
-    return undefined;
+    return parseManifestProfiles('', true);
 }
 
 /**
@@ -198,7 +199,7 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
         private readonly solixBinaryPath: string
     ) {}
 
-    public provideTextDocumentContent(documentUri: vscode.Uri): string {
+    public async provideTextDocumentContent(documentUri: vscode.Uri): Promise<string> {
         let sourceFilePath = documentUri.fsPath;
         if (sourceFilePath.endsWith('.slxdasm')) {
             sourceFilePath = sourceFilePath.slice(0, -'.slxdasm'.length);
@@ -206,15 +207,15 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
             sourceFilePath = sourceFilePath.slice(0, -'.api.slx'.length);
         }
 
-        // If the target is a Solix source file (.slx), compile it to a temporary binary container first
+        // If the target is a Solix source file (.slx), compile it to an isolated temp binary container first
         let inspectionTarget = sourceFilePath;
+        let temporaryDirectory: string | undefined;
         let temporaryBinaryPath: string | undefined;
 
         try {
             if (sourceFilePath.endsWith('.slx')) {
-                const temporaryDirectory = os.tmpdir();
-                const randomSuffix = Math.floor(Math.random() * 1000000);
-                temporaryBinaryPath = path.join(temporaryDirectory, `solix_inspect_${randomSuffix}.slxb`);
+                temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'solix_inspect_'));
+                temporaryBinaryPath = path.join(temporaryDirectory, 'inspect.slxb');
 
                 try {
                     const projectRoot = findProjectRoot(sourceFilePath);
@@ -241,17 +242,13 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
                         }
 
                         const sourceDirectory = path.join(projectRoot, 'src');
-                        if (fs.existsSync(sourceDirectory)) {
-                            const discoveredFiles = fs.readdirSync(sourceDirectory)
-                                .filter((fileName) => fileName.endsWith('.slx'))
-                                .map((fileName) => path.join(sourceDirectory, fileName));
-                            if (discoveredFiles.length > 0) {
-                                compilationSources = discoveredFiles;
-                            }
+                        const discoveredFiles = collectSolixSourcesRecursive(sourceDirectory);
+                        if (discoveredFiles.length > 0) {
+                            compilationSources = discoveredFiles;
                         }
                     }
 
-                    childProcess.execFileSync(
+                    await execFileAsync(
                         this.solixBinaryPath,
                         ['compile', ...compilationSources, ...extraArguments, '-o', temporaryBinaryPath],
                         { encoding: 'utf8', timeout: 15000 }
@@ -264,9 +261,9 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
                     if (projectRoot) {
                         const packageName = readPackageName(projectRoot);
                         const candidatePaths = [
-                            path.join(projectRoot, 'build', activeBuildProfile, `${packageName}.slxarc`),
-                            path.join(projectRoot, 'build', 'release', `${packageName}.slxarc`),
-                            path.join(projectRoot, 'build', 'debug', `${packageName}.slxarc`),
+                            resolveArtifactPath(projectRoot, activeBuildProfile, packageName),
+                            resolveArtifactPath(projectRoot, 'release', packageName),
+                            resolveArtifactPath(projectRoot, 'debug', packageName),
                             path.join(projectRoot, 'build', '.cache', 'stage', activeBuildProfile, 'bin', `${packageName}.slxb`),
                             path.join(projectRoot, 'build', '.cache', 'stage', 'release', 'bin', `${packageName}.slxb`),
                             path.join(projectRoot, 'build', '.cache', 'stage', 'debug', 'bin', `${packageName}.slxb`),
@@ -285,7 +282,7 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
                 }
             }
 
-            const executionOutput = childProcess.execFileSync(
+            const { stdout: executionOutput } = await execFileAsync(
                 this.solixBinaryPath,
                 ['info', this.commandFlag, inspectionTarget],
                 { encoding: 'utf8', timeout: 15000 }
@@ -294,9 +291,9 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
         } catch (executionError) {
             return `// Failed to inspect ${this.commandFlag} for ${sourceFilePath}:\n// ${String(executionError)}`;
         } finally {
-            if (temporaryBinaryPath && fs.existsSync(temporaryBinaryPath)) {
+            if (temporaryDirectory && fs.existsSync(temporaryDirectory)) {
                 try {
-                    fs.unlinkSync(temporaryBinaryPath);
+                    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
                 } catch {
                     // Suppress temporary cleanup failure
                 }
@@ -339,12 +336,17 @@ export function registerSolixCommands(
                 const projectRoot = findProjectRoot(targetFilePath);
                 if (projectRoot) {
                     const packageName = readPackageName(projectRoot);
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" build --release && "${solixBinaryPath}" run "build/release/${packageName}.slxarc"`);
+                    const artifactPath = resolveArtifactPath(projectRoot, activeBuildProfile, packageName);
+                    const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
+                    const runArgs = buildProfileCommandArgs('run', activeBuildProfile, `"${artifactPath}"`).join(' ');
+                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs} && "${solixBinaryPath}" ${runArgs}`);
                 } else {
-                    terminal.sendText(`"${solixBinaryPath}" run "${targetFilePath}"`);
+                    const runArgs = buildProfileCommandArgs('run', activeBuildProfile, `"${targetFilePath}"`).join(' ');
+                    terminal.sendText(`"${solixBinaryPath}" ${runArgs}`);
                 }
             } else {
-                terminal.sendText(`"${solixBinaryPath}" run`);
+                const runArgs = buildProfileCommandArgs('run', activeBuildProfile).join(' ');
+                terminal.sendText(`"${solixBinaryPath}" ${runArgs}`);
             }
         })
     );
@@ -360,6 +362,7 @@ export function registerSolixCommands(
                 name: 'Debug Solix Main',
                 request: 'launch',
                 program: targetPath,
+                profile: activeBuildProfile,
                 stopOnEntry: false,
                 testMode: false
             });
@@ -379,12 +382,17 @@ export function registerSolixCommands(
                 const projectRoot = findProjectRoot(targetFilePath);
                 if (projectRoot) {
                     const packageName = readPackageName(projectRoot);
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" build --test && "${solixBinaryPath}" run --profile test "build/test/${packageName}.slxarc"`);
+                    const artifactPath = resolveArtifactPath(projectRoot, activeBuildProfile, packageName);
+                    const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
+                    const testArgs = buildProfileCommandArgs('test', activeBuildProfile, `"${artifactPath}"`).join(' ');
+                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs} && "${solixBinaryPath}" ${testArgs}`);
                 } else {
-                    terminal.sendText(`"${solixBinaryPath}" run --profile test "${targetFilePath}"`);
+                    const testArgs = buildProfileCommandArgs('test', activeBuildProfile, `"${targetFilePath}"`).join(' ');
+                    terminal.sendText(`"${solixBinaryPath}" ${testArgs}`);
                 }
             } else {
-                terminal.sendText(`"${solixBinaryPath}" run --profile test`);
+                const testArgs = buildProfileCommandArgs('test', activeBuildProfile).join(' ');
+                terminal.sendText(`"${solixBinaryPath}" ${testArgs}`);
             }
         })
     );
@@ -400,6 +408,7 @@ export function registerSolixCommands(
                 name: 'Debug Solix Test',
                 request: 'launch',
                 program: targetPath,
+                profile: activeBuildProfile,
                 stopOnEntry: false,
                 testMode: true
             });
@@ -413,15 +422,16 @@ export function registerSolixCommands(
             const terminal = getOrCreateTerminal('Solix Build');
             terminal.show();
 
+            const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
             const activeUri = vscode.window.activeTextEditor?.document.uri;
             if (activeUri && activeUri.fsPath) {
                 const projectRoot = findProjectRoot(activeUri.fsPath);
                 if (projectRoot) {
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" build --${activeBuildProfile}`);
+                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs}`);
                     return;
                 }
             }
-            terminal.sendText(`"${solixBinaryPath}" build --${activeBuildProfile}`);
+            terminal.sendText(`"${solixBinaryPath}" ${buildArgs}`);
         })
     );
 
@@ -432,15 +442,16 @@ export function registerSolixCommands(
             const terminal = getOrCreateTerminal('Solix Sync');
             terminal.show();
 
+            const buildArgs = buildProfileCommandArgs('build', activeBuildProfile).join(' ');
             const activeUri = vscode.window.activeTextEditor?.document.uri;
             if (activeUri && activeUri.fsPath) {
                 const projectRoot = findProjectRoot(activeUri.fsPath);
                 if (projectRoot) {
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" reinstall --all`);
+                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" ${buildArgs}`);
                     return;
                 }
             }
-            terminal.sendText(`"${solixBinaryPath}" reinstall --all`);
+            terminal.sendText(`"${solixBinaryPath}" ${buildArgs}`);
         })
     );
 
@@ -456,27 +467,46 @@ export function registerSolixCommands(
     const buildStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     buildStatusBarItem.command = 'solix.buildProject';
     buildStatusBarItem.text = '$(gear) Build';
-    buildStatusBarItem.tooltip = `Build Solix Project (solix build --${activeBuildProfile})`;
+    buildStatusBarItem.tooltip = `Build Solix Project (solix build --profile ${activeBuildProfile})`;
     buildStatusBarItem.show();
     extensionContext.subscriptions.push(buildStatusBarItem);
 
+    const refreshProfileWatcher = vscode.workspace.createFileSystemWatcher('**/manifest.{yaml,yml,toml}');
+    const syncSelectedProfileFromManifest = () => {
+        const availableProfiles = loadActiveProjectProfiles();
+        if (
+            availableProfiles.length > 0 &&
+            !availableProfiles.some((entry) => entry.label === activeBuildProfile)
+        ) {
+            activeBuildProfile = availableProfiles[0].label;
+            if (profileStatusBarItem) {
+                profileStatusBarItem.text = `$(tools) Solix: ${activeBuildProfile}`;
+            }
+            buildStatusBarItem.tooltip = `Build Solix Project (solix build --profile ${activeBuildProfile})`;
+        }
+    };
+    if (typeof refreshProfileWatcher.onDidChange === 'function') {
+        refreshProfileWatcher.onDidChange(syncSelectedProfileFromManifest);
+    }
+    if (typeof refreshProfileWatcher.onDidCreate === 'function') {
+        refreshProfileWatcher.onDidCreate(syncSelectedProfileFromManifest);
+    }
+    extensionContext.subscriptions.push(refreshProfileWatcher);
+
     extensionContext.subscriptions.push(
         vscode.commands.registerCommand('solix.selectProfile', async () => {
+            const manifestProfiles = loadActiveProjectProfiles();
             const profileSelection = await vscode.window.showQuickPick(
-                [
-                    { label: 'debug', description: 'Development build profile with full debugging symbols' },
-                    { label: 'release', description: 'Optimized build profile with bytecode inlining' },
-                    { label: 'test', description: 'Test build profile with unit testing harnesses enabled' }
-                ],
+                manifestProfiles,
                 { placeHolder: 'Select active Solix build profile' }
             );
 
             if (profileSelection) {
-                activeBuildProfile = profileSelection.label as 'debug' | 'release' | 'test';
+                activeBuildProfile = profileSelection.label;
                 if (profileStatusBarItem) {
                     profileStatusBarItem.text = `$(tools) Solix: ${activeBuildProfile}`;
                 }
-                buildStatusBarItem.tooltip = `Build Solix Project (solix build --${activeBuildProfile})`;
+                buildStatusBarItem.tooltip = `Build Solix Project (solix build --profile ${activeBuildProfile})`;
                 vscode.window.showInformationMessage(`Active Solix build profile set to: ${activeBuildProfile}`);
             }
         })

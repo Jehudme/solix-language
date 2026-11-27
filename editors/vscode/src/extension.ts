@@ -125,6 +125,15 @@ function isLspCapableToolchain(binaryPath: string): boolean {
     }
 }
 
+function getBinaryCandidates(homeDirectory: string): string[] {
+    const exeName = process.platform === 'win32' ? 'solix.exe' : 'solix';
+    return [
+        path.join(homeDirectory, '.local', 'bin', exeName),
+        path.join(homeDirectory, '.cargo', 'bin', exeName),
+        path.join(homeDirectory, '.solix', 'bin', exeName),
+    ];
+}
+
 /**
  * Searches filesystem and environment specifically for the Solix toolchain binary (`solix`).
  */
@@ -137,19 +146,14 @@ function findToolchainBinary(serverLogChannel: vscode.OutputChannel): string {
     }
 
     const homeDirectory = os.homedir();
-    const localBinSolix = path.join(homeDirectory, '.local', 'bin', 'solix');
-    if (fs.existsSync(localBinSolix)) {
-        serverLogChannel.appendLine(`Found ~/.local/bin Solix toolchain: ${localBinSolix}`);
-        return localBinSolix;
+    for (const candidatePath of getBinaryCandidates(homeDirectory)) {
+        if (fs.existsSync(candidatePath)) {
+            serverLogChannel.appendLine(`Found Solix toolchain: ${candidatePath}`);
+            return candidatePath;
+        }
     }
 
-    const cargoBinSolix = path.join(homeDirectory, '.cargo', 'bin', 'solix');
-    if (fs.existsSync(cargoBinSolix)) {
-        serverLogChannel.appendLine(`Found ~/.cargo/bin Solix toolchain: ${cargoBinSolix}`);
-        return cargoBinSolix;
-    }
-
-    return 'solix';
+    return process.platform === 'win32' ? 'solix.exe' : 'solix';
 }
 
 /**
@@ -162,7 +166,7 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
     const configuredLspPath = vscode.workspace.getConfiguration('solix').get<string>('lsp.path');
     if (configuredLspPath && configuredLspPath.trim().length > 0) {
         const trimmedPath = configuredLspPath.trim();
-        const isToolchain = !trimmedPath.endsWith('solix-lsp');
+        const isToolchain = !trimmedPath.endsWith('solix-lsp') && !trimmedPath.endsWith('solix-lsp.exe');
         serverLogChannel.appendLine(`Using user-configured Solix LSP binary: ${trimmedPath} (toolchain: ${isToolchain})`);
         return { lspBinaryPath: trimmedPath, isToolchain, toolchainBinaryPath };
     }
@@ -177,24 +181,19 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
         }
     }
 
-    // 3. User local bin (~/.local/bin)
+    // 3. Standard user binary locations (~/.local/bin, ~/.cargo/bin, ~/.solix/bin)
     const homeDirectory = os.homedir();
-    const localBinSolix = path.join(homeDirectory, '.local', 'bin', 'solix');
-    if (fs.existsSync(localBinSolix) && isLspCapableToolchain(localBinSolix)) {
-        serverLogChannel.appendLine(`Found verified ~/.local/bin Solix toolchain: ${localBinSolix}`);
-        return { lspBinaryPath: localBinSolix, isToolchain: true, toolchainBinaryPath: localBinSolix };
+    for (const candidatePath of getBinaryCandidates(homeDirectory)) {
+        if (fs.existsSync(candidatePath) && isLspCapableToolchain(candidatePath)) {
+            serverLogChannel.appendLine(`Found verified Solix toolchain: ${candidatePath}`);
+            return { lspBinaryPath: candidatePath, isToolchain: true, toolchainBinaryPath: candidatePath };
+        }
     }
 
-    // 4. User home cargo bin (~/.cargo/bin)
-    const cargoBinSolix = path.join(homeDirectory, '.cargo', 'bin', 'solix');
-    if (fs.existsSync(cargoBinSolix) && isLspCapableToolchain(cargoBinSolix)) {
-        serverLogChannel.appendLine(`Found verified ~/.cargo/bin Solix toolchain: ${cargoBinSolix}`);
-        return { lspBinaryPath: cargoBinSolix, isToolchain: true, toolchainBinaryPath: cargoBinSolix };
-    }
-
-    // 5. Default system PATH fallback
-    serverLogChannel.appendLine('Falling back to default system PATH resolution for "solix"');
-    return { lspBinaryPath: 'solix', isToolchain: true, toolchainBinaryPath: 'solix' };
+    // 4. Default system PATH fallback
+    const defaultExe = process.platform === 'win32' ? 'solix.exe' : 'solix';
+    serverLogChannel.appendLine(`Falling back to default system PATH resolution for "${defaultExe}"`);
+    return { lspBinaryPath: defaultExe, isToolchain: true, toolchainBinaryPath: defaultExe };
 }
 
 /**
@@ -209,9 +208,9 @@ export async function activate(extensionContext: vscode.ExtensionContext): Promi
 
     // Verify toolchain semantic version compatibility
     const expectedMajorVersion =
-        vscode.workspace.getConfiguration('solix').get<number>('toolchain.compatibleMajor') ?? 2;
+        vscode.workspace.getConfiguration('solix').get<number>('toolchain.compatibleMajor') ?? 3;
     const minimumVersionString =
-        vscode.workspace.getConfiguration('solix').get<string>('toolchain.minVersion') ?? '1.9.0';
+        vscode.workspace.getConfiguration('solix').get<string>('toolchain.minVersion') ?? '3.0.0';
 
     try {
         const versionProcessResult = childProcess.spawnSync(toolchainBinaryPath, ['--version'], {
@@ -219,7 +218,22 @@ export async function activate(extensionContext: vscode.ExtensionContext): Promi
             timeout: 3000,
         });
 
-        if (versionProcessResult.status === 0 && versionProcessResult.stdout) {
+        if (versionProcessResult.error && (versionProcessResult.error as NodeJS.ErrnoException).code === 'ENOENT') {
+            outputChannel.appendLine(`[Toolchain Discovery] Binary not found: ${toolchainBinaryPath}`);
+            void vscode.window
+                .showWarningMessage(
+                    `Solix toolchain binary ('${toolchainBinaryPath}') was not found on PATH or standard install directories. Configure 'solix.toolchain.path' or install Solix.`,
+                    'View Installation Guide',
+                    'Dismiss'
+                )
+                .then((userSelection) => {
+                    if (userSelection === 'View Installation Guide') {
+                        void vscode.env.openExternal(
+                            vscode.Uri.parse('https://github.com/Jehudme/solix-language#installation')
+                        );
+                    }
+                });
+        } else if (versionProcessResult.status === 0 && versionProcessResult.stdout) {
             const compatibilityStatus = checkToolchainCompatibility(
                 versionProcessResult.stdout,
                 expectedMajorVersion,

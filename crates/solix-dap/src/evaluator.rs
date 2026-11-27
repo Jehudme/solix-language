@@ -106,102 +106,59 @@ pub fn evaluate_expression_in_frame(
         return Ok(Value::F64(float_value));
     }
 
-    // Check logical disjunction (||) at depth zero
+    // Check logical disjunction (||) at depth zero with short-circuiting
     if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "||", false) {
         let left_operand_text = &trimmed_expression[..operator_position];
         let right_operand_text = &trimmed_expression[operator_position + 2..];
         let left_evaluated_value =
             evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
-        let right_evaluated_value =
-            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
-
-        return match (left_evaluated_value, right_evaluated_value) {
-            (Value::Bool(left_boolean), Value::Bool(right_boolean)) => {
-                Ok(Value::Bool(left_boolean || right_boolean))
+        return match left_evaluated_value {
+            Value::Bool(true) => Ok(Value::Bool(true)),
+            Value::Bool(false) => {
+                let right_evaluated_value =
+                    evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
+                match right_evaluated_value {
+                    Value::Bool(right_boolean) => Ok(Value::Bool(right_boolean)),
+                    right_value => Err(format!(
+                        "Logical operator '||' requires boolean operands, found 'bool' and '{}'",
+                        right_value.type_name()
+                    )),
+                }
             }
-            (left_value, right_value) => Err(format!(
-                "Logical operator '||' requires boolean operands, found '{}' and '{}'",
-                left_value.type_name(),
-                right_value.type_name()
+            left_value => Err(format!(
+                "Logical operator '||' requires boolean operands, found '{}'",
+                left_value.type_name()
             )),
         };
     }
 
-    // Check logical conjunction (&&) at depth zero
+    // Check logical conjunction (&&) at depth zero with short-circuiting
     if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "&&", false) {
         let left_operand_text = &trimmed_expression[..operator_position];
         let right_operand_text = &trimmed_expression[operator_position + 2..];
         let left_evaluated_value =
             evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
-        let right_evaluated_value =
-            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
-
-        return match (left_evaluated_value, right_evaluated_value) {
-            (Value::Bool(left_boolean), Value::Bool(right_boolean)) => {
-                Ok(Value::Bool(left_boolean && right_boolean))
+        return match left_evaluated_value {
+            Value::Bool(false) => Ok(Value::Bool(false)),
+            Value::Bool(true) => {
+                let right_evaluated_value =
+                    evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
+                match right_evaluated_value {
+                    Value::Bool(right_boolean) => Ok(Value::Bool(right_boolean)),
+                    right_value => Err(format!(
+                        "Logical operator '&&' requires boolean operands, found 'bool' and '{}'",
+                        right_value.type_name()
+                    )),
+                }
             }
-            (left_value, right_value) => Err(format!(
-                "Logical operator '&&' requires boolean operands, found '{}' and '{}'",
-                left_value.type_name(),
-                right_value.type_name()
+            left_value => Err(format!(
+                "Logical operator '&&' requires boolean operands, found '{}'",
+                left_value.type_name()
             )),
         };
     }
 
-    // Check unary logical negation (!)
-    if let Some(stripped_not) = trimmed_expression.strip_prefix('!') {
-        let operand_value =
-            evaluate_expression_in_frame(stripped_not, virtual_machine, frame_index)?;
-        return match operand_value {
-            Value::Bool(boolean_value) => Ok(Value::Bool(!boolean_value)),
-            other_value => Err(format!(
-                "Unary operator '!' requires boolean operand, found '{}'",
-                other_value.type_name()
-            )),
-        };
-    }
-
-    // Check logical OR (||) at depth zero
-    if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "||", false) {
-        let left_operand_text = &trimmed_expression[..operator_position];
-        let right_operand_text = &trimmed_expression[operator_position + 2..];
-        let left_evaluated_value =
-            evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
-        let right_evaluated_value =
-            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
-        return match (left_evaluated_value, right_evaluated_value) {
-            (Value::Bool(left_bool), Value::Bool(right_bool)) => {
-                Ok(Value::Bool(left_bool || right_bool))
-            }
-            (first_operand, second_operand) => Err(format!(
-                "Operator '||' requires boolean operands, found '{}' and '{}'",
-                first_operand.type_name(),
-                second_operand.type_name()
-            )),
-        };
-    }
-
-    // Check logical AND (&&) at depth zero
-    if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "&&", false) {
-        let left_operand_text = &trimmed_expression[..operator_position];
-        let right_operand_text = &trimmed_expression[operator_position + 2..];
-        let left_evaluated_value =
-            evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
-        let right_evaluated_value =
-            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
-        return match (left_evaluated_value, right_evaluated_value) {
-            (Value::Bool(left_bool), Value::Bool(right_bool)) => {
-                Ok(Value::Bool(left_bool && right_bool))
-            }
-            (first_operand, second_operand) => Err(format!(
-                "Operator '&&' requires boolean operands, found '{}' and '{}'",
-                first_operand.type_name(),
-                second_operand.type_name()
-            )),
-        };
-    }
-
-    // Check binary comparison operators (==, !=, <=, >=, <, >) at depth zero
+    // Check binary comparison operators (==, !=, <=, >=, <, >) at depth zero BEFORE unary ! / -
     for comparison_operator in &["==", "!=", "<=", ">=", "<", ">"] {
         if let Some(operator_position) =
             find_operator_at_zero_depth(trimmed_expression, comparison_operator, false)
@@ -272,8 +229,35 @@ pub fn evaluate_expression_in_frame(
         }
     }
 
-    // Check member access (e.g. `origin_point.coordinate_x` or `this.field`) at depth zero
-    if let Some(dot_position) = find_operator_at_zero_depth(trimmed_expression, ".", false) {
+    // Check unary logical negation (!) and unary arithmetic negation (-)
+    if let Some(stripped_not) = trimmed_expression.strip_prefix('!') {
+        let operand_value =
+            evaluate_expression_in_frame(stripped_not, virtual_machine, frame_index)?;
+        return match operand_value {
+            Value::Bool(boolean_value) => Ok(Value::Bool(!boolean_value)),
+            other_value => Err(format!(
+                "Unary operator '!' requires boolean operand, found '{}'",
+                other_value.type_name()
+            )),
+        };
+    }
+
+    if let Some(stripped_neg) = trimmed_expression.strip_prefix('-') {
+        let operand_value =
+            evaluate_expression_in_frame(stripped_neg, virtual_machine, frame_index)?;
+        return match operand_value {
+            Value::I32(int_val) => Ok(Value::I32(-int_val)),
+            Value::I64(long_val) => Ok(Value::I64(-long_val)),
+            Value::F64(float_val) => Ok(Value::F64(-float_val)),
+            other_value => Err(format!(
+                "Unary operator '-' requires numeric operand, found '{}'",
+                other_value.type_name()
+            )),
+        };
+    }
+
+    // Check member access (e.g. `player.position.x` or `this.field`) right-to-left for chaining
+    if let Some(dot_position) = find_operator_at_zero_depth(trimmed_expression, ".", true) {
         let object_expression = &trimmed_expression[..dot_position];
         let field_identifier = trimmed_expression[dot_position + 1..].trim();
         let target_object_value =

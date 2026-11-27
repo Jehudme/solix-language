@@ -59,7 +59,7 @@ pub fn code_lenses(workspace: &WorkspaceManager, snapshot: &AnalysisSnapshot) ->
                 };
 
                 let is_main = matches_entrypoint(name, qualifier, &configured_main);
-                let is_test = name.starts_with("test")
+                let is_test = (name.starts_with("test") && method_decl.parameters.is_empty())
                     || matches_entrypoint(name, qualifier, &configured_test);
 
                 if is_main {
@@ -109,7 +109,7 @@ pub fn code_lenses(workspace: &WorkspaceManager, snapshot: &AnalysisSnapshot) ->
                 }
 
                 // Reference count lens
-                let ref_count = count_references(workspace, name);
+                let ref_count = count_references(workspace, snapshot, method_decl.span, name);
                 lenses.push(CodeLens {
                     range,
                     command: Some(Command {
@@ -131,7 +131,7 @@ pub fn code_lenses(workspace: &WorkspaceManager, snapshot: &AnalysisSnapshot) ->
                 let range = span_to_range(&snapshot.source_text, class_decl.span);
 
                 // Reference count lens on class
-                let ref_count = count_references(workspace, name);
+                let ref_count = count_references(workspace, snapshot, class_decl.span, name);
                 lenses.push(CodeLens {
                     range,
                     command: Some(Command {
@@ -165,7 +165,8 @@ pub fn code_lenses(workspace: &WorkspaceManager, snapshot: &AnalysisSnapshot) ->
                             Some(&class_qualifier),
                             &configured_main,
                         ) && method_decl.modifiers.contains(&Modifier::Static);
-                        let is_test = (method_name.starts_with("test")
+                        let is_test = ((method_name.starts_with("test")
+                            && method_decl.parameters.is_empty())
                             || matches_entrypoint(
                                 method_name,
                                 Some(&class_qualifier),
@@ -248,15 +249,43 @@ fn matches_entrypoint(candidate_name: &str, qualifier: Option<&str>, target_symb
     false
 }
 
-fn count_references(workspace: &WorkspaceManager, symbol_name: &str) -> usize {
+fn count_references(
+    workspace: &WorkspaceManager,
+    target_snapshot: &AnalysisSnapshot,
+    declaration_span: Span,
+    symbol_name: &str,
+) -> usize {
+    let target_fqn: Option<String> =
+        target_snapshot
+            .last_good_semantic
+            .as_ref()
+            .and_then(|semantic| {
+                semantic
+                    .symbol_table
+                    .symbols
+                    .iter()
+                    .find(|sym| {
+                        sym.source_id == target_snapshot.source_id
+                            && sym.name == symbol_name
+                            && (sym.span == declaration_span
+                                || (sym.span.start >= declaration_span.start
+                                    && sym.span.end <= declaration_span.end))
+                    })
+                    .map(|sym| sym.fully_qualified_name.clone())
+            });
+
     let mut count = 0;
     for snapshot in workspace.all_snapshots() {
         if let Some(semantic) = &snapshot.last_good_semantic {
             for symbol_id in semantic.resolved_symbols.values() {
-                if let Some(symbol) = semantic.symbol_table.get_symbol(*symbol_id)
-                    && symbol.name == symbol_name
-                {
-                    count += 1;
+                if let Some(symbol) = semantic.symbol_table.get_symbol(*symbol_id) {
+                    let matches = match &target_fqn {
+                        Some(fqn) => symbol.fully_qualified_name == *fqn,
+                        None => symbol.name == symbol_name,
+                    };
+                    if matches {
+                        count += 1;
+                    }
                 }
             }
         }

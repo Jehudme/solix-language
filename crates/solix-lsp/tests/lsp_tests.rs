@@ -1845,3 +1845,106 @@ fn test_quick_fix_e0212_missing_return_and_override_and_wiki_routing() {
         e0306_desc.href
     );
 }
+
+#[test]
+fn test_formatter_ignores_braces_in_comments_strings_and_escaped_backslashes() {
+    let messy = concat!(
+        "class Sample {\n",
+        "    public void run() {\n",
+        "        // TODO: { unclosed brace in comment\n",
+        "        string brace_text = \"}\";\n",
+        "        string escaped_dir = \"C:\\\\\\\\\"; // trailing\n",
+        "        int32 count = 1;\n",
+        "    }\n",
+        "}\n"
+    );
+    let formatted = format_source(messy);
+    assert!(
+        formatted.contains("        int32 count = 1;"),
+        "Indentation after comment/string braces and escaped backslash must remain 8 spaces, got:\n{formatted}"
+    );
+}
+
+#[test]
+fn test_inlay_hints_suppresses_raii_on_primitive_blocks_and_codelens_checks_test_arity() {
+    let (workspace, test_uri) = create_test_workspace();
+    let source = concat!(
+        "public class Alpha {\n",
+        "    public static void update() {}\n",
+        "}\n",
+        "public class Beta {\n",
+        "    public static void update() {}\n",
+        "    public static void test_helper(int32 sample_value) {}\n",
+        "    public static void test_real_case() {}\n",
+        "    public static int32 main() {\n",
+        "        if (true) {\n",
+        "            int32 local_val = 1;\n",
+        "        }\n",
+        "        Alpha::update();\n",
+        "        return 0;\n",
+        "    }\n",
+        "}\n"
+    );
+    let snapshot = workspace.did_open(test_uri, 1, source.to_string());
+
+    // 1. No ~RAII hint on primitive-only block
+    let hints = inlay_hints(
+        &snapshot,
+        Range::new(Position::new(0, 0), Position::new(14, 1)),
+    );
+    let has_raii = hints.iter().any(|hint| match &hint.label {
+        InlayHintLabel::String(label_text) => label_text.contains("~RAII"),
+        _ => false,
+    });
+    assert!(!has_raii, "Primitive-only block must not emit ~RAII hint");
+
+    // 2. CodeLens must mark test_real_case() as ▶ Run Test, NOT test_helper(int32 sample_value)
+    let lenses = code_lenses(&workspace, &snapshot);
+    let run_test_args: Vec<String> = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref())
+        .filter(|cmd| cmd.command == "solix.runTest")
+        .filter_map(|cmd| cmd.arguments.as_ref()?.get(1)?.as_str().map(str::to_string))
+        .collect();
+    assert!(
+        run_test_args.iter().any(|name| name == "test_real_case"),
+        "Expected test_real_case to have Run Test lens"
+    );
+    assert!(
+        !run_test_args.iter().any(|name| name == "test_helper"),
+        "test_helper(int32) must NOT be marked as Run Test"
+    );
+}
+
+#[test]
+fn test_dead_code_if_else_exhaustive_and_try_block() {
+    let (workspace, test_uri) = create_test_workspace();
+    let source = concat!(
+        "public class Main {\n",
+        "    public static int32 check(bool flag) {\n",
+        "        if (flag) {\n",
+        "            return 1;\n",
+        "        } else {\n",
+        "            return 2;\n",
+        "        }\n",
+        "        int32 dead_after_if = 3;\n",
+        "        return dead_after_if;\n",
+        "    }\n",
+        "}\n"
+    );
+    let snapshot = workspace.did_open(test_uri, 1, source.to_string());
+    let w0001_count = snapshot
+        .diagnostics
+        .iter()
+        .filter(|diag| {
+            matches!(
+                &diag.code,
+                Some(NumberOrString::String(code_str)) if code_str == "W0001"
+            )
+        })
+        .count();
+    assert!(
+        w0001_count >= 1,
+        "Expected W0001 unreachable code diagnostic after exhaustive if/else return"
+    );
+}

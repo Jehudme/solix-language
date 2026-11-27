@@ -14,7 +14,8 @@ The official Visual Studio Code extension for the **Solix** programming language
   - Inlay hints for parameter names and RAII destructor invocations.
   - Semantic tokens highlighting.
   - CodeLens buttons for `▶ Run Main` and `▶ Run Test`.
-  - Code actions and Quick Fixes for error codes (`E0226`, `E0201`, `E0284`).
+  - Code actions and Quick Fixes for error codes (`E0201`, `E0212`, `E0226`, `E0227`, `E0265`, `E0282`, `E0306`).
+  - Dynamic build profile selection (`Solix: Select Active Build Profile`) parsed from `manifest.yaml` / `manifest.yml` / `manifest.toml` (including `vars:` YAML anchors), routing Build, Run, Debug, and Test through `--profile <selected>` and `.slxp` artifacts.
   - Symbol rename and 4-space code formatting preserving comments.
 - **Syntax Highlighting**: Complete Solix v3 TextMate grammar with scope resolution and destructor highlighting.
 - **Bytecode Disassembly Preview**: Inspect 64-bit Register VM bytecode side-by-side (`Solix: Inspect 64-Bit Register VM Disassembly`).
@@ -23,12 +24,13 @@ The official Visual Studio Code extension for the **Solix** programming language
 
 ## Requirements
 
-The extension requires the Solix toolchain (`solix` or `solix-lsp`) installed and available via user settings (`solix.lsp.path`, `solix.toolchain.path`), `~/.local/bin`, `~/.cargo/bin`, or system `PATH`. Workspace build artifacts (`target/`) are never automatically executed as language servers; developers testing local builds can explicitly set `"solix.lsp.path": "${workspaceFolder}/target/release/solix"`.
+The extension requires the Solix toolchain (`solix` or `solix-lsp`) installed and available via user settings (`solix.lsp.path`, `solix.toolchain.path`), `~/.local/bin`, `~/.cargo/bin`, `~/.solix/bin`, or system `PATH` (with `.exe` discovery on Windows). Workspace build artifacts (`target/`) are never automatically executed as language servers; developers testing local builds can explicitly set `"solix.lsp.path": "${workspaceFolder}/target/release/solix"`.
 
 ## Extension Settings
 
 * `solix.lsp.path`: Custom path to the `solix` or `solix-lsp` executable.
 * `solix.lsp.arguments`: Arguments passed to the server [default: `["lsp", "--stdio"]`].
-* `solix.toolchain.compatibleMajor`: Target major version of the Solix toolchain [default: `2`].
-* `solix.toolchain.minVersion`: Minimum required SemVer version for the Solix toolchain [default: `"1.9.0"`].
+* `solix.toolchain.path`: Custom path to the `solix` toolchain CLI executable.
+* `solix.toolchain.compatibleMajor`: Target major version of the Solix toolchain [default: `3`].
+* `solix.toolchain.minVersion`: Minimum required SemVer version for the Solix toolchain [default: `"3.0.0"`].
 * `solix.trace.server`: Traces JSON-RPC communication between VS Code and the Solix Language Server.
