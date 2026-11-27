@@ -1,7 +1,7 @@
 //! Compression and decompression native bridge using flate2.
 
 use crate::{
-    alloc_solix_bytes, alloc_solix_chars, read_solix_bytes, register_symbol_variants,
+    alloc_solix_bytes, read_solix_bytes, register_symbol_variants, set_native_error,
     NativeCFunctionPtr, RegisterNativeCallback, SolixCValue,
 };
 use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
@@ -55,16 +55,11 @@ pub unsafe extern "C" fn gzip_native_decompress(
             SolixCValue::ref_val(allocated_address)
         }
         Err(read_error) => {
-            if !out_error.is_null() {
-                let error_message = format!(
-                    "[E0334] Failed to decompress buffer using algorithm 'gzip': {}",
-                    read_error
-                );
-                let allocated_error = unsafe { alloc_solix_chars(vm_context, &error_message) };
-                unsafe {
-                    *out_error = SolixCValue::ref_val(allocated_error);
-                }
-            }
+            let error_message = format!(
+                "[E0334] Failed to decompress buffer using algorithm 'gzip': {}",
+                read_error
+            );
+            unsafe { set_native_error(vm_context, out_error, &error_message) };
             SolixCValue::null()
         }
     }
@@ -115,16 +110,11 @@ pub unsafe extern "C" fn zlib_native_decompress(
             SolixCValue::ref_val(allocated_address)
         }
         Err(read_error) => {
-            if !out_error.is_null() {
-                let error_message = format!(
-                    "[E0334] Failed to decompress buffer using algorithm 'zlib': {}",
-                    read_error
-                );
-                let allocated_error = unsafe { alloc_solix_chars(vm_context, &error_message) };
-                unsafe {
-                    *out_error = SolixCValue::ref_val(allocated_error);
-                }
-            }
+            let error_message = format!(
+                "[E0334] Failed to decompress buffer using algorithm 'zlib': {}",
+                read_error
+            );
+            unsafe { set_native_error(vm_context, out_error, &error_message) };
             SolixCValue::null()
         }
     }
@@ -175,25 +165,17 @@ pub unsafe extern "C" fn deflate_native_decompress(
             SolixCValue::ref_val(allocated_address)
         }
         Err(read_error) => {
-            if !out_error.is_null() {
-                let error_message = format!(
-                    "[E0334] Failed to decompress buffer using algorithm 'deflate': {}",
-                    read_error
-                );
-                let allocated_error = unsafe { alloc_solix_chars(vm_context, &error_message) };
-                unsafe {
-                    *out_error = SolixCValue::ref_val(allocated_error);
-                }
-            }
+            let error_message = format!(
+                "[E0334] Failed to decompress buffer using algorithm 'deflate': {}",
+                read_error
+            );
+            unsafe { set_native_error(vm_context, out_error, &error_message) };
             SolixCValue::null()
         }
     }
 }
 
-pub unsafe fn register_compress_natives(
-    collector: *mut c_void,
-    callback: RegisterNativeCallback,
-) {
+pub unsafe fn register_compress_natives(collector: *mut c_void, callback: RegisterNativeCallback) {
     let mappings: &[(&[&str], NativeCFunctionPtr)] = &[
         (
             &[

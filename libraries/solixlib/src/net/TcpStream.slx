@@ -25,6 +25,36 @@ public class TcpStream {
         return new TcpStream(handle);
     }
 
+    public static TcpStream connect_timeout(string host_port, int32 timeout_ms) {
+        String wrapped = (host_port != null) ? new String(host_port) : new String("");
+        return TcpStream::connect_timeout(wrapped, timeout_ms);
+    }
+
+    public static TcpStream connect_timeout(String host_port, int32 timeout_ms) {
+        if (host_port == null || host_port.data == null) {
+            throw new NetworkException("[E0333] Network operation failed on socket: null host_port");
+        }
+        int64 handle = TcpStream::native_connect_timeout(host_port.to_chars(), timeout_ms);
+        if (handle <= 0) {
+            throw new NetworkException("[E0333] Network operation failed on socket: could not connect to " + host_port.to_string());
+        }
+        return new TcpStream(handle);
+    }
+
+    public bool set_read_timeout(int32 timeout_ms) {
+        if (this.socket_id <= 0) {
+            return false;
+        }
+        return TcpStream::native_set_read_timeout(this.socket_id, timeout_ms);
+    }
+
+    public bool set_write_timeout(int32 timeout_ms) {
+        if (this.socket_id <= 0) {
+            return false;
+        }
+        return TcpStream::native_set_write_timeout(this.socket_id, timeout_ms);
+    }
+
     public int32 write(int8[] buffer) {
         if (buffer == null || this.socket_id <= 0) {
             return 0;
@@ -76,7 +106,10 @@ public class TcpStream {
     }
 
     private static native int64 native_connect(char[] host_port);
+    private static native int64 native_connect_timeout(char[] host_port, int32 timeout_ms);
     private static native int32 native_write(int64 socket_id, int8[] buffer);
     private static native int8[] native_read(int64 socket_id, int32 max_bytes);
+    private static native bool native_set_read_timeout(int64 socket_id, int32 timeout_ms);
+    private static native bool native_set_write_timeout(int64 socket_id, int32 timeout_ms);
     private static native bool native_close(int64 socket_id);
 }

@@ -4,10 +4,10 @@ use crate::{
     alloc_solix_chars, read_solix_chars, register_symbol_variants, NativeCFunctionPtr,
     RegisterNativeCallback, SolixCValue, SolixVmContext, SOLIX_VM_CONTEXT_MAGIC,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::process::{Child, Command, Stdio};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, RwLock};
 
 struct ProcessHandleEntry {
     child_process: Option<Child>,
@@ -19,6 +19,18 @@ struct ProcessHandleEntry {
 static NEXT_PROCESS_HANDLE: LazyLock<Mutex<i64>> = LazyLock::new(|| Mutex::new(1));
 static PROCESS_TABLE: LazyLock<Mutex<HashMap<i64, ProcessHandleEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static VIRTUAL_ENV_OVERRIDES: LazyLock<RwLock<BTreeMap<String, String>>> =
+    LazyLock::new(|| RwLock::new(BTreeMap::new()));
+
+pub(crate) fn snapshot_virtual_env_overrides() -> Vec<(String, String)> {
+    let guard = VIRTUAL_ENV_OVERRIDES
+        .read()
+        .unwrap_or_else(|poisoned_guard| poisoned_guard.into_inner());
+    guard
+        .iter()
+        .map(|(env_key, env_value)| (env_key.clone(), env_value.clone()))
+        .collect()
+}
 
 // --- Environment Natives ---
 
@@ -33,7 +45,16 @@ pub unsafe extern "C" fn env_native_get_env(
     }
     let key_address = unsafe { (*args.add(0)).as_ref() };
     let key_string = unsafe { read_solix_chars(vm_context, key_address) };
-    if let Ok(value_string) = std::env::var(key_string) {
+    let virtual_match = {
+        let guard = VIRTUAL_ENV_OVERRIDES
+            .read()
+            .unwrap_or_else(|poisoned_guard| poisoned_guard.into_inner());
+        guard.get(&key_string).cloned()
+    };
+    if let Some(value_string) = virtual_match {
+        let allocated_address = unsafe { alloc_solix_chars(vm_context, &value_string) };
+        SolixCValue::ref_val(allocated_address)
+    } else if let Ok(value_string) = std::env::var(key_string) {
         let allocated_address = unsafe { alloc_solix_chars(vm_context, &value_string) };
         SolixCValue::ref_val(allocated_address)
     } else {
@@ -52,9 +73,11 @@ pub unsafe extern "C" fn env_native_set_env(
         let value_address = unsafe { (*args.add(1)).as_ref() };
         let key_string = unsafe { read_solix_chars(vm_context, key_address) };
         let value_string = unsafe { read_solix_chars(vm_context, value_address) };
-        // SAFETY: set_var is called in single-threaded context for test/script runner
-        unsafe {
-            std::env::set_var(key_string, value_string);
+        if !key_string.is_empty() && !key_string.contains('\0') && !value_string.contains('\0') {
+            let mut guard = VIRTUAL_ENV_OVERRIDES
+                .write()
+                .unwrap_or_else(|poisoned_guard| poisoned_guard.into_inner());
+            guard.insert(key_string, value_string);
         }
     }
     SolixCValue::null()
@@ -66,10 +89,14 @@ pub unsafe extern "C" fn env_native_get_all_env(
     _arg_count: u32,
     _out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let mut entries = Vec::new();
-    for (env_key, env_value) in std::env::vars() {
-        entries.push(format!("{env_key}={env_value}"));
+    let mut merged: BTreeMap<String, String> = std::env::vars().collect();
+    for (env_key, env_value) in snapshot_virtual_env_overrides() {
+        merged.insert(env_key, env_value);
     }
+    let entries: Vec<String> = merged
+        .into_iter()
+        .map(|(env_key, env_value)| format!("{env_key}={env_value}"))
+        .collect();
     let combined_env = entries.join("\n");
     let allocated_address = unsafe { alloc_solix_chars(vm_context, &combined_env) };
     SolixCValue::ref_val(allocated_address)
@@ -310,10 +337,13 @@ pub unsafe extern "C" fn process_native_start(
 
     command_runner.stdout(Stdio::piped());
     command_runner.stderr(Stdio::piped());
+    for (env_key, env_value) in snapshot_virtual_env_overrides() {
+        command_runner.env(env_key, env_value);
+    }
 
     match command_runner.spawn() {
         Ok(spawned_child) => {
-            let mut next_handle_guard = NEXT_PROCESS_HANDLE.lock().unwrap();
+            let mut next_handle_guard = crate::lock_poison_safe(&NEXT_PROCESS_HANDLE);
             let assigned_handle = *next_handle_guard;
             *next_handle_guard += 1;
 
@@ -324,10 +354,7 @@ pub unsafe extern "C" fn process_native_start(
                 standard_error: String::new(),
             };
 
-            PROCESS_TABLE
-                .lock()
-                .unwrap()
-                .insert(assigned_handle, process_entry);
+            crate::lock_poison_safe(&PROCESS_TABLE).insert(assigned_handle, process_entry);
             SolixCValue::i64_val(assigned_handle)
         }
         Err(_) => SolixCValue::i64_val(-1),
@@ -344,7 +371,7 @@ pub unsafe extern "C" fn process_native_wait_for_exit(
         return SolixCValue::i32_val(-1);
     }
     let process_handle = unsafe { (*args.add(0)).as_i64() };
-    let mut process_table_guard = PROCESS_TABLE.lock().unwrap();
+    let mut process_table_guard = crate::lock_poison_safe(&PROCESS_TABLE);
     if let Some(entry) = process_table_guard.get_mut(&process_handle) {
         if let Some(child) = entry.child_process.take() {
             let output_result = child.wait_with_output();
@@ -380,7 +407,7 @@ pub unsafe extern "C" fn process_native_get_stdout(
         return SolixCValue::null();
     }
     let process_handle = unsafe { (*args.add(0)).as_i64() };
-    let process_table_guard = PROCESS_TABLE.lock().unwrap();
+    let process_table_guard = crate::lock_poison_safe(&PROCESS_TABLE);
     if let Some(entry) = process_table_guard.get(&process_handle) {
         let allocated_address = unsafe { alloc_solix_chars(vm_context, &entry.standard_output) };
         SolixCValue::ref_val(allocated_address)
@@ -399,7 +426,7 @@ pub unsafe extern "C" fn process_native_get_stderr(
         return SolixCValue::null();
     }
     let process_handle = unsafe { (*args.add(0)).as_i64() };
-    let process_table_guard = PROCESS_TABLE.lock().unwrap();
+    let process_table_guard = crate::lock_poison_safe(&PROCESS_TABLE);
     if let Some(entry) = process_table_guard.get(&process_handle) {
         let allocated_address = unsafe { alloc_solix_chars(vm_context, &entry.standard_error) };
         SolixCValue::ref_val(allocated_address)
@@ -418,7 +445,7 @@ pub unsafe extern "C" fn process_native_kill(
         return SolixCValue::bool_val(false);
     }
     let process_handle = unsafe { (*args.add(0)).as_i64() };
-    let mut process_table_guard = PROCESS_TABLE.lock().unwrap();
+    let mut process_table_guard = crate::lock_poison_safe(&PROCESS_TABLE);
     if let Some(entry) = process_table_guard.get_mut(&process_handle) {
         if let Some(mut child) = entry.child_process.take() {
             let kill_success = child.kill().is_ok();

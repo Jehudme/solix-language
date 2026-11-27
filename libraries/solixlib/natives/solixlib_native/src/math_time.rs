@@ -349,13 +349,10 @@ pub unsafe extern "C" fn random_native_init(
             .unwrap_or(0x1234_5678)
     };
 
-    let mut next_handle_guard = NEXT_RANDOM_HANDLE.lock().unwrap();
+    let mut next_handle_guard = crate::lock_poison_safe(&NEXT_RANDOM_HANDLE);
     let assigned_handle = *next_handle_guard;
     *next_handle_guard += 1;
-    RANDOM_STATES
-        .lock()
-        .unwrap()
-        .insert(assigned_handle, initial_seed);
+    crate::lock_poison_safe(&RANDOM_STATES).insert(assigned_handle, initial_seed);
     SolixCValue::i64_val(assigned_handle as i64)
 }
 
@@ -369,7 +366,7 @@ pub unsafe extern "C" fn random_native_next_u64(
         return SolixCValue::i64_val(0);
     }
     let handle = unsafe { (*args.add(0)).payload };
-    let mut states_guard = RANDOM_STATES.lock().unwrap();
+    let mut states_guard = crate::lock_poison_safe(&RANDOM_STATES);
     if let Some(state) = states_guard.get_mut(&handle) {
         let generated = splitmix64(state);
         SolixCValue::i64_val(generated as i64)
@@ -388,7 +385,7 @@ pub unsafe extern "C" fn random_native_next_double(
         return SolixCValue::f64_val(0.0);
     }
     let handle = unsafe { (*args.add(0)).payload };
-    let mut states_guard = RANDOM_STATES.lock().unwrap();
+    let mut states_guard = crate::lock_poison_safe(&RANDOM_STATES);
     if let Some(state) = states_guard.get_mut(&handle) {
         let generated = splitmix64(state) >> 11;
         let unit_float = (generated as f64) * (1.0 / (1u64 << 53) as f64);

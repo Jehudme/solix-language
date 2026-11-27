@@ -604,7 +604,11 @@ fn pad_numeric_zero(numeric_text: &str, target_width: usize) -> String {
     }
     let has_sign = numeric_text.starts_with('+') || numeric_text.starts_with('-');
     let prefix = if has_sign { &numeric_text[..1] } else { "" };
-    let body = if has_sign { &numeric_text[1..] } else { numeric_text };
+    let body = if has_sign {
+        &numeric_text[1..]
+    } else {
+        numeric_text
+    };
     let zeros_needed = target_width.saturating_sub(prefix.len() + body.len());
     let mut padded_result = String::with_capacity(target_width);
     padded_result.push_str(prefix);
@@ -722,7 +726,10 @@ pub fn format_with_specifier(value_text: &str, specifier: &str) -> Result<String
     let mut type_character: Option<char> = None;
     if cursor < length {
         let candidate = characters[cursor];
-        if matches!(candidate, 'd' | 'i' | 'x' | 'X' | 'b' | 'o' | 'f' | 'F' | 'e' | 'E' | 's') {
+        if matches!(
+            candidate,
+            'd' | 'i' | 'x' | 'X' | 'b' | 'o' | 'f' | 'F' | 'e' | 'E' | 's'
+        ) {
             type_character = Some(candidate);
             cursor += 1;
         } else {
@@ -938,7 +945,10 @@ pub fn format_template_with_arguments(
                 (resolved_index, "")
             };
 
-            let argument_value = arguments.get(target_index).map(|arg_item| arg_item.as_str()).unwrap_or("");
+            let argument_value = arguments
+                .get(target_index)
+                .map(|arg_item| arg_item.as_str())
+                .unwrap_or("");
             let formatted_piece = format_with_specifier(argument_value, specifier)?;
             result.push_str(&formatted_piece);
         } else if current_character == '}' {
@@ -974,9 +984,8 @@ pub unsafe extern "C" fn string_native_format(
     let mut arguments_list = Vec::new();
     if arg_count >= 2 {
         let array_address = unsafe { (*args.add(1)).as_ref() };
-        if array_address != 0 && !vm_context.is_null() {
-            let context_ref = unsafe { &*(vm_context as *const crate::SolixVmContext) };
-            if context_ref.magic == crate::SOLIX_VM_CONTEXT_MAGIC {
+        if array_address != 0 {
+            if let Some(context_ref) = unsafe { crate::validate_vm_context(vm_context) } {
                 let array_length =
                     unsafe { (context_ref.array_len)(context_ref.vm_ptr, array_address) };
                 for argument_index in 0..array_length {
@@ -1001,12 +1010,7 @@ pub unsafe extern "C" fn string_native_format(
             SolixCValue::ref_val(allocated_address)
         }
         Err(error_message) => {
-            if !out_error.is_null() {
-                let allocated_error = unsafe { alloc_solix_chars(vm_context, &error_message) };
-                unsafe {
-                    *out_error = SolixCValue::ref_val(allocated_error);
-                }
-            }
+            unsafe { crate::set_native_error(vm_context, out_error, &error_message) };
             SolixCValue::null()
         }
     }
@@ -1032,12 +1036,7 @@ pub unsafe extern "C" fn string_native_format_spec(
             SolixCValue::ref_val(allocated_address)
         }
         Err(error_message) => {
-            if !out_error.is_null() {
-                let allocated_error = unsafe { alloc_solix_chars(vm_context, &error_message) };
-                unsafe {
-                    *out_error = SolixCValue::ref_val(allocated_error);
-                }
-            }
+            unsafe { crate::set_native_error(vm_context, out_error, &error_message) };
             SolixCValue::null()
         }
     }

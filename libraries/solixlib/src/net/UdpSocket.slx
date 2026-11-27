@@ -44,6 +44,20 @@ public class UdpSocket {
         return UdpSocket::native_recv_from(this.socket_id, max_bytes);
     }
 
+    public bool set_read_timeout(int32 timeout_ms) {
+        if (this.socket_id <= 0) {
+            return false;
+        }
+        return UdpSocket::native_set_read_timeout(this.socket_id, timeout_ms);
+    }
+
+    public bool set_write_timeout(int32 timeout_ms) {
+        if (this.socket_id <= 0) {
+            return false;
+        }
+        return UdpSocket::native_set_write_timeout(this.socket_id, timeout_ms);
+    }
+
     public void close() {
         if (this.socket_id > 0) {
             UdpSocket::native_close(this.socket_id);
@@ -54,5 +68,7 @@ public class UdpSocket {
     private static native int64 native_bind(char[] host_port);
     private static native int32 native_send_to(int64 socket_id, int8[] buffer, char[] target);
     private static native int8[] native_recv_from(int64 socket_id, int32 max_bytes);
+    private static native bool native_set_read_timeout(int64 socket_id, int32 timeout_ms);
+    private static native bool native_set_write_timeout(int64 socket_id, int32 timeout_ms);
     private static native bool native_close(int64 socket_id);
 }
