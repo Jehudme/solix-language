@@ -40,9 +40,9 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 
 | Command ID | Title | Description |
 | :--- | :--- | :--- |
-| `solix.runMain` | `Run Application (solix run)` | Runs `solix build --release && solix run` in an integrated VS Code terminal. Wired to `▶ Run Main` CodeLens. |
+| `solix.runMain` | `Run Application (solix run)` | Builds and runs the active project in an integrated VS Code terminal (shell-aware for PowerShell, `cmd.exe`, and POSIX shells). Wired to `▶ Run Main` CodeLens. |
 | `solix.debugMain` | `Debug Application (solix dap)` | Starts interactive debugging session. Wired to `Debug Main` CodeLens and editor title bar button. |
-| `solix.runTest` | `Run Test Suite (solix run --test)` | Runs test suite via `solix build --test && solix run --test`. Wired to `▶ Run Test` CodeLens. |
+| `solix.runTest` | `Run Test Suite (solix run --test)` | Builds and runs the test suite in an integrated VS Code terminal (shell-aware for PowerShell, `cmd.exe`, and POSIX shells). Wired to `▶ Run Test` CodeLens. |
 | `solix.debugTest` | `Debug Test Suite (solix dap --test)` | Starts interactive debugging of test runner. Wired to `Debug Test` CodeLens. |
 | `solix.showReferences` | `Show References` | Opens VS Code reference peek view for symbol references at target location. |
 | `solix.buildProject` | `Build Project (solix build)` | Builds the active workspace project into `.slxp`. |
