@@ -731,3 +731,30 @@ entrypoint = "Main::main"
     assert_eq!(second_resolution.version, PackageVersion::new(1, 0, 0));
     assert!(second_resolution.native_libraries.is_empty());
 }
+
+#[test]
+fn test_version_constraint_parsing_and_invalid_operator_diagnostics() {
+    for valid_spec in [
+        "raylib@6.0.1",
+        "raylib@>=6.0.1",
+        "raylib@^6.0.1",
+        "raylib@~6.0.1",
+        "raylib@=6.0.1",
+    ] {
+        let parsed = DependencyRequirement::parse(valid_spec)
+            .unwrap_or_else(|err| panic!("Expected '{valid_spec}' to parse: {err}"));
+        assert_eq!(parsed.name, "raylib");
+        assert_eq!(parsed.version, PackageVersion::new(6, 0, 1));
+    }
+
+    let wildcard = DependencyRequirement::parse("raylib@*").expect("wildcard must parse");
+    assert_eq!(wildcard.version, PackageVersion::new(0, 0, 0));
+
+    let invalid_op_err = DependencyRequirement::parse("raylib@=<6.0.1")
+        .expect_err("Invalid operator '=<' must be rejected");
+    let err_msg = invalid_op_err.to_string();
+    assert!(
+        err_msg.contains("Unsupported version constraint operator '=<'"),
+        "Unexpected error message: {err_msg}"
+    );
+}

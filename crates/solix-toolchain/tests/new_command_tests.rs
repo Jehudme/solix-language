@@ -719,4 +719,68 @@ fn test_solix_init_and_add_dependency() {
         release.dependencies.contains_key("raylib"),
         "solix add must add raylib dependency to manifest.yaml"
     );
+
+    // Invalid constraint operator must fail immediately with a clear diagnostic
+    let invalid_add = solix_toolchain::execute_add(solix_toolchain::AddArgs {
+        package: "raylib@=<6.0.1".to_string(),
+        path: temp_dir.path().to_path_buf(),
+        dep_profile: "release".to_string(),
+        pkg_dir: None,
+    });
+    assert!(
+        invalid_add.is_err(),
+        "solix add with invalid operator '=<' must fail"
+    );
+    let invalid_msg = invalid_add.expect_err("error").to_string();
+    assert!(
+        invalid_msg.contains("Unsupported version constraint operator '=<'"),
+        "Unexpected solix add error message: {invalid_msg}"
+    );
+}
+
+#[test]
+fn test_solix_add_writes_exact_semver_matching_solver_when_installed() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let store_dir = tempfile::tempdir().expect("store_dir");
+
+    // Seed an installed package in store_dir
+    let pkg_dir = store_dir.path().join("demo_pkg-release@1.2.3");
+    fs::create_dir_all(&pkg_dir).expect("create pkg dir");
+    let mut dummy_prog = solix_common::bytecode::BinaryProgram::new();
+    dummy_prog.package_name = "demo_pkg".to_string();
+    dummy_prog.build_profile = "release".to_string();
+    fs::write(pkg_dir.join("demo_pkg.slxb"), dummy_prog.to_bytes()).expect("write slxb");
+
+    solix_toolchain::execute_init(solix_toolchain::InitArgs {
+        path: temp_dir.path().to_path_buf(),
+        name: Some("consumer_app".to_string()),
+        force: false,
+    })
+    .expect("execute_init");
+
+    solix_toolchain::execute_add(solix_toolchain::AddArgs {
+        package: "demo_pkg".to_string(),
+        path: temp_dir.path().to_path_buf(),
+        dep_profile: "release".to_string(),
+        pkg_dir: Some(store_dir.path().to_path_buf()),
+    })
+    .expect("execute_add");
+
+    let manifest =
+        solix_common::project::ProjectManifest::from_file(temp_dir.path().join("manifest.yaml"))
+            .expect("parse manifest");
+    let release = manifest.resolve_profile("release").expect("release");
+    let dep = release
+        .dependencies
+        .get("demo_pkg")
+        .expect("demo_pkg present");
+    assert_eq!(
+        dep.version, "1.2.3",
+        "solix add must emit clean semver without incompatible '>=' prefix mismatch"
+    );
+
+    let spec = format!("{}@{}#{}", "demo_pkg", dep.version, dep.profile);
+    let parsed = solix_common::solver::DependencyRequirement::parse(&spec)
+        .expect("DependencyRequirement::parse must accept version written by solix add");
+    assert_eq!(parsed.version, solix_common::PackageVersion::new(1, 2, 3));
 }

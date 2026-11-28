@@ -722,7 +722,7 @@ impl ProjectManifest {
             }
         }
 
-        // Validate removed inherits keyword
+        // Validate removed inherits keyword and dependency version constraints
         for (profile_name, profile_config) in &manifest.profiles {
             if profile_config.inherits.is_some() {
                 let (line_num, col_num) =
@@ -744,6 +744,36 @@ impl ProjectManifest {
                     snippet,
                 }
                 .into());
+            }
+
+            for (dep_name, dep_spec) in &profile_config.dependencies {
+                if let Err(solver_err) =
+                    crate::solver::PackageVersion::parse_constraint(&dep_spec.version)
+                {
+                    let (line_num, col_num) =
+                        find_keyword_in_profile(yaml_content, profile_name, dep_name);
+                    let snippet = render_source_snippet(
+                        yaml_content,
+                        filename,
+                        line_num,
+                        col_num,
+                        &format!(
+                            "invalid version constraint `{}` for `{dep_name}`",
+                            dep_spec.version
+                        ),
+                    );
+                    return Err(ManifestError::ParseFailed {
+                        filename: filename.to_string(),
+                        line: Some(line_num),
+                        column: Some(col_num),
+                        field_path: Some(format!(
+                            "profiles.{profile_name}.dependencies.{dep_name}.version"
+                        )),
+                        message: solver_err.to_string(),
+                        snippet,
+                    }
+                    .into());
+                }
             }
         }
 

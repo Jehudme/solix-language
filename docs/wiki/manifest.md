@@ -184,7 +184,7 @@ Entries under `profiles.<name>.natives.<key>` never require a `type` field. Soli
 
 ### 6. `dependencies` Syntax
 
-Dependencies under `profiles.<name>.dependencies` map package name -> metadata or shorthand version string:
+Dependencies under `profiles.<name>.dependencies` map package name -> metadata or shorthand version string. Version constraints accept exact semver (`"2.0.0"`), minimum/compatible prefixes (`">=2.0.0"`, `"^2.0.0"`, `"~2.0.0"`, `"=2.0.0"`), or wildcard (`"*"`). Unsupported operators such as `=<` are rejected during manifest validation:
 
 ```yaml
 dependencies:
