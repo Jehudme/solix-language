@@ -103,6 +103,8 @@ pub struct CompilationOptions {
     pub link_mode: LinkMode,
     /// Whether to enforce cryptographic SHA-256 checksum verification on dependencies (default true; false when --no-verify).
     pub verify_checksums: bool,
+    /// Whether to compute and embed dependency SHA-256 hashes in compiled output for runtime verification (skipped automatically in static link mode).
+    pub embed_dependency_hashes: bool,
     /// Whether to generate and serialize exported API header AST bytes and per-source disassembly snapshots (default true; false for direct `solix run`).
     pub emit_export_metadata: bool,
     /// Declared dynamic shared library dependencies required by this compilation.
@@ -137,6 +139,7 @@ impl CompilationOptions {
             entry_point: None,
             link_mode: LinkMode::Dynamic,
             verify_checksums: true,
+            embed_dependency_hashes: true,
             emit_export_metadata: true,
             dynamic_libraries: Vec::new(),
             implicit_link_dependency_binaries: true,
@@ -175,6 +178,13 @@ impl CompilationOptions {
     #[must_use]
     pub fn with_verify_checksums(mut self, verify: bool) -> Self {
         self.verify_checksums = verify;
+        self
+    }
+
+    /// Sets whether to compute and embed dependency SHA-256 hashes for runtime verification.
+    #[must_use]
+    pub fn with_embed_dependency_hashes(mut self, embed: bool) -> Self {
+        self.embed_dependency_hashes = embed;
         self
     }
 

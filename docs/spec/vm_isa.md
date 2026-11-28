@@ -331,7 +331,7 @@ For host embeddings, game engines, and long-running interactive processes, the S
 The bytecode serialization format preserves project-level dynamic library dependencies to support automated FFI linkage:
 
 * **`BinaryProgram` Manifest Metadata:** Encodes `dynamic_libraries: Vec<String>` alongside exported functions, classes, and native checksum tables.
-* **`ExportManifest` Integration:** Stores declared shared library identifiers into Section 6 (`Metadata & ExportManifest`), allowing standalone packages and container runners to verify and quicken external native symbols deterministically without external manifest lookups.
+* **`ExportManifest` Integration:** Stores declared shared library identifiers into Section 6 (`Metadata & ExportManifest`), allowing standalone packages and container runners to verify and quicken external native symbols deterministically without external manifest lookups. Tooling and compiler dependency resolution can also decode Sections 6 and 7 directly via `BinaryProgram::from_bytes_manifest_only` without allocating Sections 2–5.
 
 ---
 

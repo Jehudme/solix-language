@@ -166,7 +166,7 @@ pub fn run_dependency_resolution(
             };
             match solver.resolve_compatible(&lookup_name, requirement.version) {
                 Ok(solved_package) => {
-                    let program = solved_package.program.clone();
+                    let program = solved_package.program;
                     let version = solved_package.version;
 
                     if context.options.verify_checksums && !requirement.sha256.is_empty() {
@@ -185,13 +185,13 @@ pub fn run_dependency_resolution(
                         }
                     }
 
-                    solved_map.insert(
-                        requirement.name.clone(),
-                        (version, program.clone(), requirement.profile.clone()),
-                    );
                     for transitive in &program.export_manifest.dependencies {
                         work_queue.push_back((transitive.clone(), requirement.name.clone()));
                     }
+                    solved_map.insert(
+                        requirement.name.clone(),
+                        (version, program, requirement.profile.clone()),
+                    );
                 }
                 Err(SolverError::PackageNotFound { .. }) => {
                     accumulated_diagnostics.push(CompilationDiagnostic::from(
@@ -245,9 +245,17 @@ pub fn run_dependency_resolution(
     sorted_packages.sort_by(|package_a, package_b| package_a.0.cmp(&package_b.0));
 
     for (package_name, version, program, resolved_profile) in sorted_packages {
-        let package_sha256 = program.compute_sha256();
-        let mut recorded_requirement =
-            DependencyRequirement::new(package_name.clone(), version).with_sha256(package_sha256);
+        let should_embed_hash = context.options.embed_dependency_hashes
+            && context.options.link_mode != crate::CompilationContext::LinkMode::Static;
+        let package_sha256 = if should_embed_hash {
+            program.compute_sha256()
+        } else {
+            String::new()
+        };
+        let mut recorded_requirement = DependencyRequirement::new(package_name.clone(), version);
+        if !package_sha256.is_empty() {
+            recorded_requirement = recorded_requirement.with_sha256(package_sha256);
+        }
         if let Some(profile_name) = resolved_profile {
             recorded_requirement = recorded_requirement.with_profile(profile_name);
         }
@@ -259,7 +267,7 @@ pub fn run_dependency_resolution(
             ingest_package_api_source(
                 &package_name,
                 version,
-                &program,
+                program,
                 SourceSpan::from(0..0),
                 context,
             )?;
@@ -272,17 +280,10 @@ pub fn run_dependency_resolution(
 fn ingest_package_api_source(
     package_name: &str,
     version: PackageVersion,
-    program: &BinaryProgram,
+    program: BinaryProgram,
     import_span: SourceSpan,
     context: &mut CompilationContext,
 ) -> Result<(), Vec<CompilationDiagnostic>> {
-    let has_binary = context.options.dependency_binaries.iter().any(|existing| {
-        !existing.package_name.is_empty() && existing.package_name == program.package_name
-    });
-    if !has_binary {
-        context.options.dependency_binaries.push(program.clone());
-    }
-
     let (source_name, source_code) = if !program.export_manifest.api_header.is_empty() {
         (
             format!("{package_name}@{version}.slx"),
@@ -316,6 +317,10 @@ fn ingest_package_api_source(
         .map_err(|diagnostic| vec![diagnostic])?;
     context.mark_external_source(source_id);
 
+    let has_binary = context.options.dependency_binaries.iter().any(|existing| {
+        !existing.package_name.is_empty() && existing.package_name == program.package_name
+    });
+
     if !program.export_manifest.exported_ast_bytes.is_empty() {
         let deserialized_result = bincode::deserialize::<
             crate::phases::parser::statements::ProgramAst,
@@ -326,12 +331,18 @@ fn ingest_package_api_source(
             )
         });
 
+        if !has_binary {
+            context.options.dependency_binaries.push(program);
+        }
+
         if let Ok(mut deserialized_ast) = deserialized_result {
             deserialized_ast.source_id = source_id;
             selectively_prune_ast(&mut deserialized_ast, package_name, context, &source_code);
             context.ast[source_id as usize] = Some(deserialized_ast);
             return Ok(());
         }
+    } else if !has_binary {
+        context.options.dependency_binaries.push(program);
     }
 
     let (tokens, lex_errors) =
@@ -446,7 +457,7 @@ pub fn resolve_extern_import(
         ingest_package_api_source(
             package_name,
             solved_package.version,
-            &solved_package.program,
+            solved_package.program,
             import_span.to_source_span(),
             context,
         )?;
@@ -524,7 +535,7 @@ fn resolve_transitive_requirement(
         ingest_package_api_source(
             &requirement.name,
             solved_package.version,
-            &solved_package.program,
+            solved_package.program,
             import_span.to_source_span(),
             context,
         )?;

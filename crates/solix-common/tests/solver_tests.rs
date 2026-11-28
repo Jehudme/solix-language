@@ -758,3 +758,65 @@ fn test_version_constraint_parsing_and_invalid_operator_diagnostics() {
         "Unexpected error message: {err_msg}"
     );
 }
+
+#[test]
+fn test_manifest_only_decoding_and_cache_mtime_fast_path() {
+    use solix_common::bytecode::{CompiledFunction, Instruction, OpCode};
+    use solix_common::cache::{FilesystemPackageCache, PackageCache};
+
+    let mut program = BinaryProgram::new();
+    program.package_name = "fast_pkg".to_string();
+    program.package_version = "1.2.3".to_string();
+    program.build_profile = "release".to_string();
+    program.export_manifest.build_profile = "release".to_string();
+    program.export_manifest.api_header = "public void ping();".to_string();
+    let _ = program.constant_pool.add_string("fast_const");
+    let mut ping_fn = CompiledFunction::new("fast_pkg::ping", 0, 0, 2);
+    ping_fn
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    program.functions.push(ping_fn);
+
+    let raw_bytes = program.to_bytes();
+    let manifest_only = BinaryProgram::from_bytes_manifest_only(&raw_bytes)
+        .expect("manifest-only decoding must succeed");
+    assert_eq!(manifest_only.package_name, "fast_pkg");
+    assert_eq!(manifest_only.package_version, "1.2.3");
+    assert_eq!(
+        manifest_only.export_manifest.api_header,
+        "public void ping();"
+    );
+    assert!(
+        manifest_only.functions.is_empty(),
+        "manifest-only decoding must skip Sections 2-5 function allocations"
+    );
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let cache_root = temp_dir.path().join("cache");
+    let archive_path = temp_dir.path().join("fast_pkg.slxp");
+    std::fs::write(&archive_path, b"archive-v1").expect("write archive v1");
+
+    let cache = FilesystemPackageCache::with_root(cache_root);
+    cache
+        .put_cached_binary(
+            "fast_pkg",
+            PackageVersion::new(1, 2, 3),
+            &archive_path,
+            &program,
+            &raw_bytes,
+        )
+        .expect("put cached binary");
+
+    let hit = cache
+        .get_cached_binary("fast_pkg", PackageVersion::new(1, 2, 3), &archive_path)
+        .expect("get cached binary")
+        .expect("expected cache hit");
+    assert_eq!(hit.package_name, "fast_pkg");
+
+    // Changing archive size invalidates the fast-path cache cleanly
+    std::fs::write(&archive_path, b"archive-v2-modified").expect("write archive v2");
+    let miss = cache
+        .get_cached_binary("fast_pkg", PackageVersion::new(1, 2, 3), &archive_path)
+        .expect("get cached binary after modification");
+    assert!(miss.is_none(), "modified archive must invalidate cache");
+}

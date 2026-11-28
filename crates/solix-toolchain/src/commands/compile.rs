@@ -197,12 +197,25 @@ pub fn execute_compile_source(args: CompileSourceArgs) -> Result<()> {
             .unwrap_or(""),
     };
 
+    let embed_hashes = parent_manifest
+        .as_ref()
+        .and_then(|manifest| manifest.resolve_profile(&args.profile).ok())
+        .map_or(
+            !args.no_verify && link_mode != solix_compilation::LinkMode::Static,
+            |resolved| {
+                resolved.embed_hashes
+                    && !args.no_verify
+                    && link_mode != solix_compilation::LinkMode::Static
+            },
+        );
+
     let mut options = CompilationOptions::new()
         .with_profile(profile)
         .with_link_mode(link_mode)
         .with_package_metadata(&package_name, package_version, package_description)
         .with_solver(solver)
-        .with_verify_checksums(!args.no_verify);
+        .with_verify_checksums(!args.no_verify)
+        .with_embed_dependency_hashes(embed_hashes);
 
     let effective_entry = args.entry.or_else(|| {
         parent_manifest.as_ref().and_then(|manifest| {

@@ -853,7 +853,7 @@ impl BinaryProgram {
         let dynamic_libraries = export_manifest.dynamic_libraries.clone();
         let source_files = export_manifest.source_files.clone();
 
-        Ok(BinaryProgram {
+        let mut binary = BinaryProgram {
             magic,
             version_major,
             version_minor,
@@ -865,6 +865,219 @@ impl BinaryProgram {
             constant_pool,
             classes,
             functions,
+            entry_point: export_manifest.entry_point.clone(),
+            package_name,
+            package_version,
+            package_description,
+            build_profile,
+            native_library_checksums,
+            dynamic_libraries,
+            exported_ast_bytes,
+            export_manifest,
+            source_files,
+        };
+        if binary.source_files.is_empty() {
+            binary.source_files = binary.export_manifest.source_files.clone();
+        }
+        Ok(binary)
+    }
+
+    /// Decodes only the header, export manifest (Section 6), and pre-parsed AST (Section 7),
+    /// skipping allocation of Sections 2–5 (static symbols, constant pool, classes, functions).
+    ///
+    /// Ideal for `solix check`, `solix lsp`, and dynamic linking dependency ingestion.
+    ///
+    /// # Errors
+    /// Returns `EmissionError` if the byte slice is truncated, corrupted, or incompatible.
+    pub fn from_bytes_manifest_only(bytes: &[u8]) -> Result<Self, EmissionError> {
+        let mut reader = ByteReader::new(bytes);
+
+        // 1. Header
+        let magic_bytes = reader.read_bytes(4, "Header")?;
+        let mut magic = [0u8; 4];
+        magic.copy_from_slice(magic_bytes);
+        if &magic != MAGIC {
+            return Err(EmissionError::InvalidMagic { found: magic });
+        }
+
+        let version_major = reader.read_u16("Header")?;
+        let version_minor = reader.read_u16("Header")?;
+        if version_major != VERSION_MAJOR {
+            return Err(EmissionError::UnsupportedVersion {
+                expected_major: VERSION_MAJOR,
+                expected_minor: VERSION_MINOR,
+                found_major: version_major,
+                found_minor: version_minor,
+            });
+        }
+
+        let flags = reader.read_u32("Header")?;
+        let entry_point_id = if reader.read_flag_bool("Header")? {
+            Some(reader.read_u32("Header")?)
+        } else {
+            None
+        };
+        let entry_point_symbol = if reader.read_flag_bool("Header")? {
+            Some(reader.read_string("Header")?)
+        } else {
+            None
+        };
+        let static_space_size = reader.read_u32("Header")?;
+
+        // 2. Skip Static Symbols Map
+        let static_sym_count = reader.read_u32("StaticSymbols")? as usize;
+        let _ = reader.checked_capacity(static_sym_count, 8, "StaticSymbols")?;
+        for _ in 0..static_sym_count {
+            reader.skip_string("StaticSymbols")?;
+            reader.skip_bytes(4, "StaticSymbols")?;
+        }
+
+        // 3. Skip Constant Pool
+        let pool_count = reader.read_u32("ConstantPool")? as usize;
+        let _ = reader.checked_capacity(pool_count, 1, "ConstantPool")?;
+        for _ in 0..pool_count {
+            let tag = reader.read_u8("ConstantPool")?;
+            match tag {
+                1 | 2 => reader.skip_bytes(8, "ConstantPool")?,
+                3 => reader.skip_string("ConstantPool")?,
+                unknown => {
+                    return Err(EmissionError::CorruptBinaryContainer {
+                        section: "ConstantPool".to_string(),
+                        details: format!("Unknown constant tag: {unknown}"),
+                    });
+                }
+            }
+        }
+
+        // 4. Skip Classes
+        let class_count = reader.read_u32("Classes")? as usize;
+        let _ = reader.checked_capacity(class_count, 32, "Classes")?;
+        for _ in 0..class_count {
+            reader.skip_string("Classes")?;
+            reader.skip_bytes(4, "Classes")?; // vtable_id
+            if reader.read_flag_bool("Classes")? {
+                reader.skip_bytes(4, "Classes")?;
+            }
+            let _ = reader.read_u64_usize("Classes", MAX_INSTANCE_SIZE_BYTES)?;
+            let ref_count = reader.read_u32("Classes")? as usize;
+            reader.skip_bytes(ref_count.saturating_mul(8), "Classes")?;
+            let weak_count = reader.read_u32("Classes")? as usize;
+            reader.skip_bytes(weak_count.saturating_mul(8), "Classes")?;
+            let vtable_len = reader.read_u32("Classes")? as usize;
+            reader.skip_bytes(vtable_len.saturating_mul(4), "Classes")?;
+            let itable_len = reader.read_u32("Classes")? as usize;
+            for _ in 0..itable_len {
+                reader.skip_bytes(4, "Classes")?;
+                let method_len = reader.read_u32("Classes")? as usize;
+                reader.skip_bytes(method_len.saturating_mul(4), "Classes")?;
+            }
+            if reader.read_flag_bool("Classes")? {
+                reader.skip_bytes(4, "Classes")?;
+            }
+            let field_types_len = reader.read_u32("Classes")? as usize;
+            reader.skip_bytes(field_types_len.saturating_mul(9), "Classes")?;
+            let field_names_len = reader.read_u32("Classes")? as usize;
+            for _ in 0..field_names_len {
+                reader.skip_bytes(8, "Classes")?;
+                reader.skip_string("Classes")?;
+                reader.skip_string("Classes")?;
+            }
+        }
+
+        // 5. Skip Functions
+        let func_count = reader.read_u32("Functions")? as usize;
+        let _ = reader.checked_capacity(func_count, 32, "Functions")?;
+        for _ in 0..func_count {
+            reader.skip_string("Functions")?;
+            reader.skip_bytes(10, "Functions")?; // source_id(2)+param_count(2)+num_regs(2)+static_base(4)
+            let inst_count = reader.read_u32("Functions")? as usize;
+            reader.skip_bytes(inst_count.saturating_mul(8), "Functions")?;
+            let ref_reg_count = reader.read_u32("Functions")? as usize;
+            reader.skip_bytes(ref_reg_count.saturating_mul(2), "Functions")?;
+            let handler_count = reader.read_u32("Functions")? as usize;
+            for _ in 0..handler_count {
+                reader.skip_bytes(8, "Functions")?; // try_start(4)+try_end(4)
+                if reader.read_flag_bool("Functions")? {
+                    reader.skip_string("Functions")?;
+                }
+                reader.skip_bytes(6, "Functions")?; // catch_reg(2)+handler_pc(4)
+                if reader.read_flag_bool("Functions")? {
+                    reader.skip_bytes(4, "Functions")?;
+                }
+                let try_ref_count = reader.read_u32("Functions")? as usize;
+                reader.skip_bytes(try_ref_count.saturating_mul(2), "Functions")?;
+            }
+            let span_count = reader.read_u32("Functions")? as usize;
+            reader.skip_bytes(span_count.saturating_mul(22), "Functions")?;
+            let local_vars_len = reader.read_u32("Functions")? as usize;
+            for _ in 0..local_vars_len {
+                reader.skip_bytes(2, "Functions")?;
+                reader.skip_string("Functions")?;
+                reader.skip_string("Functions")?;
+                reader.skip_bytes(9, "Functions")?; // start_pc(4)+end_pc(4)+is_param(1)
+            }
+            reader.skip_bytes(1, "Functions")?; // is_public
+            reader.skip_string("Functions")?; // return_type
+            let param_types_len = reader.read_u32("Functions")? as usize;
+            for _ in 0..param_types_len {
+                reader.skip_string("Functions")?;
+            }
+        }
+
+        // 6. Metadata and Export Manifest
+        let (package_name, package_version, package_description, mut export_manifest) =
+            if reader.has_remaining() {
+                let pkg_name = reader.read_string("Metadata")?;
+                let pkg_version = reader.read_string("Metadata")?;
+                let pkg_desc = reader.read_string("Metadata")?;
+                let manifest_len = reader.read_u32("Metadata")? as usize;
+                let manifest_slice = reader.read_bytes(manifest_len, "ExportManifest")?;
+                let manifest: ExportManifest =
+                    serde_json::from_slice(manifest_slice).map_err(|error| {
+                        EmissionError::MalformedExportManifest {
+                            reason: error.to_string(),
+                        }
+                    })?;
+                (pkg_name, pkg_version, pkg_desc, manifest)
+            } else {
+                (
+                    String::new(),
+                    "0.1.0".to_string(),
+                    String::new(),
+                    ExportManifest::default(),
+                )
+            };
+
+        // 7. Section 7: Exported AST
+        let exported_ast_bytes = if reader.has_remaining() {
+            let ast_len = reader.read_u32("ExportedAst")? as usize;
+            reader.read_bytes(ast_len, "ExportedAst")?.to_vec()
+        } else {
+            export_manifest.exported_ast_bytes.clone()
+        };
+        export_manifest.exported_ast_bytes = exported_ast_bytes.clone();
+
+        let build_profile = if !export_manifest.build_profile.is_empty() {
+            export_manifest.build_profile.clone()
+        } else {
+            "debug".to_string()
+        };
+        let native_library_checksums = export_manifest.native_library_checksums.clone();
+        let dynamic_libraries = export_manifest.dynamic_libraries.clone();
+        let source_files = export_manifest.source_files.clone();
+
+        Ok(BinaryProgram {
+            magic,
+            version_major,
+            version_minor,
+            flags,
+            entry_point_id,
+            entry_point_symbol,
+            static_space_size,
+            static_symbols_map: Vec::new(),
+            constant_pool: ConstantPool::new(),
+            classes: Vec::new(),
+            functions: Vec::new(),
             entry_point: export_manifest.entry_point.clone(),
             package_name,
             package_version,
@@ -1023,5 +1236,23 @@ impl<'buf> ByteReader<'buf> {
             section: section.to_string(),
             details: format!("Invalid UTF-8 string encoding: {err}"),
         })
+    }
+
+    fn skip_bytes(&mut self, count: usize, section: &str) -> Result<(), EmissionError> {
+        let available = self.remaining();
+        if count > available {
+            return Err(EmissionError::UnexpectedEof {
+                section: section.to_string(),
+                required: count,
+                available,
+            });
+        }
+        self.offset += count;
+        Ok(())
+    }
+
+    fn skip_string(&mut self, section: &str) -> Result<(), EmissionError> {
+        let len = self.read_u32(section)? as usize;
+        self.skip_bytes(len, section)
     }
 }
