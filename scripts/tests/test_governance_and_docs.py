@@ -984,7 +984,7 @@ class SolixBenchCliTests(unittest.TestCase):
             [resolved_java, "-cp", str(output_directory), main_class_name]
         )
         self.assertEqual(exit_code, 0)
-        self.assertIn("RESULT: 317811", standard_output)
+        self.assertIn("RESULT: 2178309", standard_output)
 
     def test_solix_bench_lua_engine_resolution_and_luac_compilation(self) -> None:
         """Tests that solix_bench resolves luac and precompiles Lua workloads to .luac."""
@@ -1007,7 +1007,7 @@ class SolixBenchCliTests(unittest.TestCase):
             [resolved_lua, str(compiled_luac)]
         )
         self.assertEqual(exit_code, 0)
-        self.assertIn("RESULT: 317811", standard_output)
+        self.assertIn("RESULT: 2178309", standard_output)
 
     def test_execute_command_measures_independent_child_memory(self) -> None:
         benchmark_runner = solix_bench.BenchmarkRunner(REPO_ROOT)
