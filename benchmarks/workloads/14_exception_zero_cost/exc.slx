@@ -13,7 +13,7 @@ class ExceptionApp {
         int32 caught_count = 0;
         int32 normal_sum = 0;
 
-        for (int32 i = 0; i < 250000; i = i + 1) {
+        for (int32 i = 0; i < 2000000; i = i + 1) {
             try {
                 normal_sum = (normal_sum + (i % 10)) & 0x7FFFFFFF;
             } catch (MyException ex) {
@@ -21,7 +21,7 @@ class ExceptionApp {
             }
         }
 
-        for (int32 i = 0; i < 2500; i = i + 1) {
+        for (int32 i = 0; i < 20000; i = i + 1) {
             try {
                 throw new MyException(i);
             } catch (MyException ex) {
@@ -30,8 +30,8 @@ class ExceptionApp {
         }
 
         int32 checksum = (normal_sum + caught_count) & 0x7FFFFFFF;
-        if (checksum == 4248750) {
-            println("RESULT: 4248750");
+        if (checksum == 208990000) {
+            println("RESULT: 208990000");
         } else {
             println("FAIL");
         }

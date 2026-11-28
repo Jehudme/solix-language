@@ -12,9 +12,12 @@ class AckermannApp {
     }
 
     public static void main() {
-        int32 result = AckermannApp::ack(3, 6);
-        if (result == 509) {
-            println("RESULT: 509");
+        int32 total = 0;
+        for (int32 rep = 0; rep < 15; rep = rep + 1) {
+            total = (total + AckermannApp::ack(3, 6)) & 0x7FFFFFFF;
+        }
+        if (total == 7635) {
+            println("RESULT: 7635");
         } else {
             println("FAIL");
         }

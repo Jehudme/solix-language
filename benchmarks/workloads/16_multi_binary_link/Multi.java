@@ -5,12 +5,12 @@ public class Multi {
 
     public static void main(String[] arguments) {
         int total = 0;
-        for (int iteration = 0; iteration < 300000; iteration++) {
+        for (int iteration = 0; iteration < 3000000; iteration++) {
             total = (total + compute(iteration % 100, iteration % 50)) & 0x7FFFFFFF;
         }
 
-        if (total == 96000000) {
-            System.out.println("RESULT: 96000000");
+        if (total == 960000000) {
+            System.out.println("RESULT: 960000000");
         } else {
             System.out.println("FAIL");
         }

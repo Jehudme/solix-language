@@ -23,7 +23,7 @@ class IDispatchApp {
 
         int32 total = 0;
         IWorker w = wa;
-        for (int32 i = 0; i < 400000; i = i + 1) {
+        for (int32 i = 0; i < 2000000; i = i + 1) {
             if (i % 2 == 0) {
                 w = wa;
             } else {
@@ -32,8 +32,8 @@ class IDispatchApp {
             total = (total + w.work(i % 10)) & 0x7FFFFFFF;
         }
 
-        if (total == 4800000) {
-            println("RESULT: 4800000");
+        if (total == 24000000) {
+            println("RESULT: 24000000");
         } else {
             println("FAIL");
         }

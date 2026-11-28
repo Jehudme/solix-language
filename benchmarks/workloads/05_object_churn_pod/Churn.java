@@ -11,13 +11,13 @@ public class Churn {
 
     public static void main(String[] arguments) {
         int total = 0;
-        for (int iteration = 0; iteration < 300000; iteration++) {
+        for (int iteration = 0; iteration < 3000000; iteration++) {
             Point point = new Point(iteration, iteration * 2);
             total = (total + point.coordinate_x + point.coordinate_y) & 0x7FFFFFFF;
         }
 
-        if (total == 1855563824) {
-            System.out.println("RESULT: 1855563824");
+        if (total == 913288672) {
+            System.out.println("RESULT: 913288672");
         } else {
             System.out.println("FAIL");
         }

@@ -6,7 +6,7 @@ int main(void) {
     double vx = 0.01;
     double vy = 0.02;
 
-    for (int i = 0; i < 250000; i++) {
+    for (int i = 0; i < 2000000; i++) {
         double dist_sq = x * x + y * y + 0.1;
         double force = 1.0 / dist_sq;
         vx += force * 0.001;
@@ -16,8 +16,8 @@ int main(void) {
     }
 
     int energy = (int)(x * 100.0) + (int)(y * 100.0);
-    if (energy == 1792020) {
-        printf("RESULT: 1792020\n");
+    if (energy == 14340304) {
+        printf("RESULT: 14340304\n");
     } else {
         printf("FAIL\n");
     }

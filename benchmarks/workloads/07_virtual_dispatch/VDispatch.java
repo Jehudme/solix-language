@@ -27,13 +27,13 @@ public class VDispatch {
     public static void main(String[] arguments) {
         Shape[] shapes = new Shape[] { new Circle(), new Square(), new Triangle() };
         int total = 0;
-        for (int iteration = 0; iteration < 100000; iteration++) {
+        for (int iteration = 0; iteration < 1200000; iteration++) {
             Shape shape = shapes[iteration % 3];
             total = (total + shape.getArea(iteration % 10)) & 0x7FFFFFFF;
         }
 
-        if (total == 1349997) {
-            System.out.println("RESULT: 1349997");
+        if (total == 16200000) {
+            System.out.println("RESULT: 16200000");
         } else {
             System.out.println("FAIL");
         }

@@ -27,13 +27,13 @@ int main(void) {
     Shape *shapes[3] = { &circle, &square, &triangle };
 
     int total = 0;
-    for (int i = 0; i < 100000; i++) {
+    for (int i = 0; i < 1200000; i++) {
         Shape *s = shapes[i % 3];
         total = (total + s->get_area(s, i % 10)) & 0x7FFFFFFF;
     }
 
-    if (total == 1349997) {
-        printf("RESULT: 1349997\n");
+    if (total == 16200000) {
+        printf("RESULT: 16200000\n");
     } else {
         printf("FAIL\n");
     }

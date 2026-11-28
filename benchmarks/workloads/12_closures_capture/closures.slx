@@ -6,12 +6,12 @@ class ClosureApp {
         int32(*)(int32) adder = (n) => n + base;
 
         int32 total = 0;
-        for (int32 i = 0; i < 400000; i = i + 1) {
+        for (int32 i = 0; i < 4000000; i = i + 1) {
             total = (total + adder(i % 100)) & 0x7FFFFFFF;
         }
 
-        if (total == 22600000) {
-            println("RESULT: 22600000");
+        if (total == 226000000) {
+            println("RESULT: 226000000");
         } else {
             println("FAIL");
         }

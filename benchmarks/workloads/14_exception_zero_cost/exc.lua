@@ -1,7 +1,7 @@
 local caught_count = 0
 local normal_sum = 0
 
-for i = 0, 249999 do
+for i = 0, 1999999 do
     local ok = pcall(function()
         normal_sum = (normal_sum + (i % 10)) % 2147483648
     end)
@@ -10,7 +10,7 @@ for i = 0, 249999 do
     end
 end
 
-for i = 0, 2499 do
+for i = 0, 19999 do
     local ok, err = pcall(function()
         error(i, 0)
     end)
@@ -20,8 +20,8 @@ for i = 0, 2499 do
 end
 
 local checksum = (normal_sum + caught_count) % 2147483648
-if checksum == 4248750 then
-    print("RESULT: 4248750")
+if checksum == 208990000 then
+    print("RESULT: 208990000")
 else
     print("FAIL")
 end

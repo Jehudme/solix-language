@@ -11,9 +11,12 @@ static int ack(int m, int n) {
 }
 
 int main(void) {
-    int result = ack(3, 6);
-    if (result == 509) {
-        printf("RESULT: 509\n");
+    int total = 0;
+    for (int rep = 0; rep < 15; rep++) {
+        total = (total + ack(3, 6)) & 0x7FFFFFFF;
+    }
+    if (total == 7635) {
+        printf("RESULT: 7635\n");
     } else {
         printf("FAIL\n");
     }

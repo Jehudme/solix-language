@@ -9,9 +9,9 @@ class FibApp {
     }
 
     public static void main() {
-        int32 result = FibApp::fib(28);
-        if (result == 317811) {
-            println("RESULT: 317811");
+        int32 result = FibApp::fib(32);
+        if (result == 2178309) {
+            println("RESULT: 2178309");
         } else {
             println("FAIL");
         }

@@ -7,7 +7,7 @@ class NBodyApp {
         float64 vx = 0.01;
         float64 vy = 0.02;
 
-        for (int32 i = 0; i < 250000; i = i + 1) {
+        for (int32 i = 0; i < 2000000; i = i + 1) {
             float64 dist_sq = x * x + y * y + 0.1;
             float64 force = 1.0 / dist_sq;
             vx = vx + force * 0.001;
@@ -17,8 +17,8 @@ class NBodyApp {
         }
 
         int32 energy = (int32)(x * 100.0) + (int32)(y * 100.0);
-        if (energy == 1792020) {
-            println("RESULT: 1792020");
+        if (energy == 14340304) {
+            println("RESULT: 14340304");
         } else {
             println("FAIL");
         }

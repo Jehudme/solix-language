@@ -7,9 +7,9 @@ public class Fib {
     }
 
     public static void main(String[] arguments) {
-        int result = fibonacci(28);
-        if (result == 317811) {
-            System.out.println("RESULT: 317811");
+        int result = fibonacci(32);
+        if (result == 2178309) {
+            System.out.println("RESULT: 2178309");
         } else {
             System.out.println("FAIL");
         }

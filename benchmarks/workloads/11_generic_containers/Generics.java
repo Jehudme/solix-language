@@ -13,14 +13,14 @@ public class Generics {
 
     public static void main(String[] arguments) {
         int total = 0;
-        for (int iteration = 0; iteration < 50000; iteration++) {
+        for (int iteration = 0; iteration < 800000; iteration++) {
             Box<Integer> box_one = new Box<>(iteration);
             Box<Integer> box_two = new Box<>(iteration * 4 + 7);
             total = (total + box_one.getVal() + box_two.getVal()) & 0x7FFFFFFF;
         }
 
-        if (total == 1955257704) {
-            System.out.println("RESULT: 1955257704");
+        if (total == 128282240) {
+            System.out.println("RESULT: 128282240");
         } else {
             System.out.println("FAIL");
         }

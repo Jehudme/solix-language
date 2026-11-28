@@ -8,9 +8,9 @@ static int fib(int n) {
 }
 
 int main(void) {
-    int result = fib(28);
-    if (result == 317811) {
-        printf("RESULT: 317811\n");
+    int result = fib(32);
+    if (result == 2178309) {
+        printf("RESULT: 2178309\n");
     } else {
         printf("FAIL\n");
     }

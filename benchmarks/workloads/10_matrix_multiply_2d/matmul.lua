@@ -20,8 +20,8 @@ for rep = 0, 49 do
     end
 end
 
-if trace == 455915000 then
-    print("RESULT: 455915000")
+if trace == 1499836352 then
+    print("RESULT: 1499836352")
 else
     print("FAIL")
 end

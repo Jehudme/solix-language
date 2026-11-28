@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 int main(void) {
-    int limit = 100000;
+    int limit = 1000000;
     bool *is_prime = (bool *)malloc((limit + 1) * sizeof(bool));
     for (int i = 2; i <= limit; i++) {
         is_prime[i] = true;
@@ -25,8 +25,8 @@ int main(void) {
     }
     free(is_prime);
 
-    if (count == 9592) {
-        printf("RESULT: 9592\n");
+    if (count == 78498) {
+        printf("RESULT: 78498\n");
     } else {
         printf("FAIL\n");
     }
