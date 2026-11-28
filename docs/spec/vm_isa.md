@@ -256,7 +256,7 @@ Used for static, direct, and virtual function dispatch:
 
 When a function executes, its activation record occupies a `CallFrame`:
 - **Sliding Register Base**: When calling `CallDirect(dst, fn_id, arg_base, arg_count)`, registers `r[arg_base .. arg_base + arg_count]` become `r[0 .. arg_count]` in the callee frame.
-- **Direct Dispatch Pointer Caching**: In `run_fast_trap`, `current_binary_id` and `current_static_base` are cached in local execution stack variables across frame transitions, enabling constant pool loads (`LoadF64`, `LoadConst`, `AddF64Imm`, `SubF64Imm`, `MulF64Imm`) and static slot offsets (`GetStatic`, `SetStatic`) to execute with zero vector indirection or frame lookup overhead.
+- **Direct Dispatch Pointer Caching**: In `run_fast_trap`, `current_binary_id` and `current_static_base` are cached in local execution stack variables across frame transitions (avoiding extra pointer locals that would increase register pressure in `'dispatch_loop`), enabling constant pool loads (`LoadF64`, `LoadConst`, `AddF64Imm`, `SubF64Imm`, `MulF64Imm` via `const_pool_cache[current_binary_id]`) and static slot offsets (`GetStatic`, `SetStatic`) to execute with zero frame lookup overhead.
 - **Max Call Stack Depth**: The virtual machine limits recursion to `65,536` frames, raising `RuntimeError::StackOverflow` if exceeded.
 
 ---

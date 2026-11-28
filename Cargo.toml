@@ -56,7 +56,6 @@ tempfile = "3.13"
 
 # Native loading & Archives
 libloading = "0.9"
-mimalloc = "0.1"
 rayon = "1.10"
 toml = "1.2"
 zip = { version = "9.0.5", default-features = false, features = ["deflate"] }

@@ -49,14 +49,27 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         let escape_summaries =
             super::escape_analysis::EscapeFunctionSummaries::from_functions(functions);
 
-        // Optimize each compiled function individually in parallel first so leaf constructors
-        // and arithmetic leaf helpers shrink to minimal bodies.
-        functions
-            .par_iter_mut()
-            .try_for_each(|compiled_function| {
-                optimize_function(compiled_function, classes, &escape_summaries, pool_ref)
-            })
-            .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+        const PARALLEL_OPTIMIZE_THRESHOLD: usize = 16;
+        let use_parallel = functions.len() >= PARALLEL_OPTIMIZE_THRESHOLD;
+
+        // Optimize each compiled function individually first so leaf constructors
+        // and arithmetic leaf helpers shrink to minimal bodies. Avoid rayon thread-pool
+        // startup overhead on small programs.
+        if use_parallel {
+            functions
+                .par_iter_mut()
+                .try_for_each(|compiled_function| {
+                    optimize_function(compiled_function, classes, &escape_summaries, pool_ref)
+                })
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+        } else {
+            functions
+                .iter_mut()
+                .try_for_each(|compiled_function| {
+                    optimize_function(compiled_function, classes, &escape_summaries, pool_ref)
+                })
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+        }
 
         // Inline small leaf constructors and pure leaf arithmetic functions across callers
         // (multiple rounds handle inheritance chains), then re-converge caller passes.
@@ -93,59 +106,103 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             for _inline_round in 0..3 {
                 let leaf_candidates = build_leaf_inline_candidates(functions, allow_arith_inline);
                 let round_changed = AtomicBool::new(false);
-                functions
-                    .par_iter_mut()
-                    .enumerate()
-                    .try_for_each(
-                        |(func_idx, compiled_function)| -> Result<(), EmissionError> {
-                            if inline_leaf_functions(compiled_function, func_idx, &leaf_candidates)?
-                            {
-                                round_changed.store(true, Ordering::Relaxed);
-                                optimize_function(
+                if use_parallel {
+                    functions
+                        .par_iter_mut()
+                        .enumerate()
+                        .try_for_each(
+                            |(func_idx, compiled_function)| -> Result<(), EmissionError> {
+                                if inline_leaf_functions(
                                     compiled_function,
-                                    classes,
-                                    &escape_summaries,
-                                    pool_ref,
-                                )?;
-                            }
-                            Ok(())
-                        },
-                    )
-                    .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+                                    func_idx,
+                                    &leaf_candidates,
+                                )? {
+                                    round_changed.store(true, Ordering::Relaxed);
+                                    optimize_function(
+                                        compiled_function,
+                                        classes,
+                                        &escape_summaries,
+                                        pool_ref,
+                                    )?;
+                                }
+                                Ok(())
+                            },
+                        )
+                        .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+                } else {
+                    functions
+                        .iter_mut()
+                        .enumerate()
+                        .try_for_each(
+                            |(func_idx, compiled_function)| -> Result<(), EmissionError> {
+                                if inline_leaf_functions(
+                                    compiled_function,
+                                    func_idx,
+                                    &leaf_candidates,
+                                )? {
+                                    round_changed.store(true, Ordering::Relaxed);
+                                    optimize_function(
+                                        compiled_function,
+                                        classes,
+                                        &escape_summaries,
+                                        pool_ref,
+                                    )?;
+                                }
+                                Ok(())
+                            },
+                        )
+                        .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+                }
                 if !round_changed.load(Ordering::Relaxed) {
                     break;
                 }
             }
         }
 
-        functions
-            .par_iter_mut()
-            .enumerate()
-            .try_for_each(
-                |(func_idx, compiled_function)| -> Result<(), EmissionError> {
-                    rotate_bottom_tested_loops(compiled_function)?;
-                    optimize_peephole_passes(compiled_function, true, pool_ref)?;
-                    hoist_loop_invariant_constants(compiled_function)?;
-                    eliminate_common_subexpressions(compiled_function);
-                    elide_borrowed_local_arc_ops(compiled_function);
-                    optimize_peephole_passes(compiled_function, true, pool_ref)?;
-                    fuse_post_licm_add_load_band(compiled_function);
-                    propagate_entry_constants(compiled_function, true);
-                    transform_binary_additive_self_recursion(compiled_function, func_idx);
-                    Ok(())
-                },
-            )
-            .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+        let run_final_opt_passes = |(func_idx, compiled_function): (
+            usize,
+            &mut CompiledFunction,
+        )|
+         -> Result<(), EmissionError> {
+            rotate_bottom_tested_loops(compiled_function)?;
+            optimize_peephole_passes(compiled_function, true, pool_ref)?;
+            hoist_loop_invariant_constants(compiled_function)?;
+            eliminate_common_subexpressions(compiled_function);
+            elide_borrowed_local_arc_ops(compiled_function);
+            optimize_peephole_passes(compiled_function, true, pool_ref)?;
+            fuse_post_licm_add_load_band(compiled_function);
+            propagate_entry_constants(compiled_function, true);
+            transform_binary_additive_self_recursion(compiled_function, func_idx);
+            Ok(())
+        };
+        if use_parallel {
+            functions
+                .par_iter_mut()
+                .enumerate()
+                .try_for_each(run_final_opt_passes)
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+        } else {
+            functions
+                .iter_mut()
+                .enumerate()
+                .try_for_each(run_final_opt_passes)
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+        }
 
         let func_has_refs: Vec<bool> = functions
             .iter()
             .map(|func| !func.reference_registers.is_empty())
             .collect();
-        functions.par_iter_mut().for_each(|compiled_function| {
+        let run_tail_passes = |compiled_function: &mut CompiledFunction| {
             mark_array_fill_loops(compiled_function);
             lower_tail_calls(compiled_function, &func_has_refs);
             specialize_primitive_field_accesses(compiled_function);
-        });
+        };
+        if use_parallel {
+            functions.par_iter_mut().for_each(run_tail_passes);
+        } else {
+            functions.iter_mut().for_each(run_tail_passes);
+        }
 
         // Keep functions_by_source synchronized with optimized functions when emitting build artifacts
         if context.options.emit_export_metadata {

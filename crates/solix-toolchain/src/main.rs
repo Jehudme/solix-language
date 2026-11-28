@@ -2,9 +2,6 @@
 
 #![forbid(unsafe_code)]
 
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use clap::Parser;
 use solix_toolchain::RunArgs;
 use solix_toolchain::cli::Cli;
