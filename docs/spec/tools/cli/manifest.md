@@ -201,7 +201,7 @@ native_library_checksums:
   "bin/x86_64-unknown-linux-gnu/native_solixlib.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
 ```
 
-When installing or loading an `.slxp` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxpPackage::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`). Companion native shared libraries must follow the `native_*` naming convention for dynamic loading into the VM FFI table.
+When installing or loading an `.slxp` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxpPackage::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`), caching an `(archive_size, mtime)` sidecar metadata entry so repeated runs skip ZIP/YAML parsing. Companion native shared libraries must follow the `native_*` naming convention for dynamic loading into the VM FFI table.
 
 ---
 
