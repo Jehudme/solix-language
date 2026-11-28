@@ -7,11 +7,22 @@ description = "64-bit register virtual machine, ARC memory manager, and native r
 repository.workspace = true
 documentation.workspace = true
 
+[features]
+default = ["jit"]
+jit = []
+
 [dependencies]
 solix-common.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 libloading.workspace = true
+
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(target_family = "wasm")))'.dependencies]
+cranelift-codegen.workspace = true
+cranelift-frontend.workspace = true
+cranelift-jit.workspace = true
+cranelift-module.workspace = true
+cranelift-native.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

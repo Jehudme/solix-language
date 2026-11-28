@@ -16,6 +16,18 @@ pub const DEFAULT_HEAP_SIZE: usize = 64 * 1024 * 1024;
 /// Default maximum call stack depth: 65,536 call frames.
 pub const DEFAULT_MAX_CALL_STACK_DEPTH: usize = 65_536;
 
+/// Execution mode for the Cranelift JIT backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum JitMode {
+    /// Interpreter only (`fast.rs`).
+    Off,
+    /// Start in `fast.rs` and JIT-compile hot or loop-bearing functions (default).
+    #[default]
+    Tiered,
+    /// JIT-compile eligible functions immediately on first invocation.
+    Eager,
+}
+
 /// Configuration options governing virtual machine execution.
 #[derive(Debug, Clone)]
 pub struct RuntimeOptions {
@@ -36,6 +48,8 @@ pub struct RuntimeOptions {
     /// Execution mode: when `true`, bounds-checking and defensive invariant validations are enforced;
     /// when `false` (default), the high-performance raw-pointer inlined engine is used.
     pub safe_mode: bool,
+    /// Cranelift JIT compilation mode (`Off`, `Tiered`, or `Eager`).
+    pub jit_mode: JitMode,
     /// When `true` (default), records instruction dispatch counts and peak stack depth telemetry.
     pub track_metrics: bool,
     /// Sandboxing flag disabling non-sandboxed host native operations and filesystem access.
@@ -93,6 +107,7 @@ impl PartialEq for RuntimeOptions {
             && self.max_call_stack_depth == other.max_call_stack_depth
             && self.args == other.args
             && self.safe_mode == other.safe_mode
+            && self.jit_mode == other.jit_mode
             && self.track_metrics == other.track_metrics
             && self.sandboxed == other.sandboxed
             && self.native_functions == other.native_functions
@@ -116,6 +131,7 @@ impl Default for RuntimeOptions {
             max_call_stack_depth: DEFAULT_MAX_CALL_STACK_DEPTH,
             args: Vec::new(),
             safe_mode: false,
+            jit_mode: JitMode::Tiered,
             track_metrics: true,
             sandboxed: false,
             cycle_collector: true,
@@ -245,6 +261,13 @@ impl RuntimeOptions {
     #[must_use]
     pub fn with_safe_mode(mut self, safe_mode: bool) -> Self {
         self.safe_mode = safe_mode;
+        self
+    }
+
+    /// Sets the Cranelift JIT compilation mode (`Off`, `Tiered`, or `Eager`).
+    #[must_use]
+    pub fn with_jit_mode(mut self, jit_mode: JitMode) -> Self {
+        self.jit_mode = jit_mode;
         self
     }
 

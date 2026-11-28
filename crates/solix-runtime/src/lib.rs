@@ -28,6 +28,8 @@ pub use native::{
     LoadedSharedLibrary, NativeCFunctionPtr, NativeCallback, NativeFunction, NativeRegistry,
     SharedLibraryLoader, SolixCValue, SolixVmContext,
 };
-pub use options::{DEFAULT_HEAP_SIZE, DEFAULT_MAX_CALL_STACK_DEPTH, OutputSink, RuntimeOptions};
+pub use options::{
+    DEFAULT_HEAP_SIZE, DEFAULT_MAX_CALL_STACK_DEPTH, JitMode, OutputSink, RuntimeOptions,
+};
 pub use value::Value;
 pub use vm::{DebugSignal, VirtualMachine, VmDebugHook, VmTelemetry};

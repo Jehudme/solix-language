@@ -61,6 +61,13 @@ rustc-hash = "2.1"
 toml = "1.2"
 zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
+# JIT Compilation (Cranelift)
+cranelift-codegen = "0.116"
+cranelift-frontend = "0.116"
+cranelift-jit = "0.116"
+cranelift-module = "0.116"
+cranelift-native = "0.116"
+
 [workspace.metadata.dist]
 cargo-dist-version = "0.28.0"
 ci = "github"

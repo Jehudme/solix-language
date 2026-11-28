@@ -588,6 +588,10 @@ pub struct RunPackageArgs {
     #[arg(long)]
     pub safe: bool,
 
+    /// JIT compilation mode (`off`, `tiered`, `eager`) [default: `tiered`]
+    #[arg(long, default_value = "tiered", value_parser = ["off", "tiered", "eager"])]
+    pub jit: String,
+
     /// Print execution telemetry and memory statistics
     #[arg(long, value_name = "FORMAT", num_args = 0..=1, default_missing_value = "text", value_parser = ["text", "json"])]
     pub metrics: Option<String>,
@@ -788,6 +792,10 @@ pub struct RunArgs {
     /// Execute in safe mode (bounds-checked execution with defensive invariant validation)
     #[arg(long)]
     pub safe: bool,
+
+    /// JIT compilation mode (`off`, `tiered`, `eager`) [default: `tiered`]
+    #[arg(long, default_value = "tiered", value_parser = ["off", "tiered", "eager"])]
+    pub jit: String,
 
     /// Print execution telemetry and memory statistics
     #[arg(long, value_name = "FORMAT", num_args = 0..=1, default_missing_value = "text", value_parser = ["text", "json"])]

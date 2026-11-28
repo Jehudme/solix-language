@@ -108,6 +108,8 @@ pub struct ExecutionTelemetry {
     pub instructions_dispatched: u64,
     pub peak_stack_depth: usize,
     pub quickened_calls: u64,
+    pub jit_compiled_functions: u64,
+    pub jit_compile_time_ns: u64,
 }
 
 /// Structured execution telemetry report output for `solix run --metrics json`.
