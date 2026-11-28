@@ -3841,6 +3841,17 @@ impl VirtualMachine {
                 .map_err(VmTrap::from_error)?;
             return Ok(Value::from_raw_u64(raw));
         }
+        if header.tag == BlockTag::String {
+            let string_len = header.size as usize;
+            if index_i64 < 0 || (index_i64 as usize) >= string_len {
+                return Err(VmTrap::index_out_of_bounds(index_i64, string_len));
+            }
+            let byte_val = self
+                .heap
+                .read_u8(arr_addr + index_i64 as u32)
+                .map_err(VmTrap::from_error)?;
+            return Ok(Value::I32(i32::from(byte_val)));
+        }
         if header.tag != BlockTag::ArrayRef {
             return Err(VmTrap::type_mismatch("array", &Value::Ref(arr_addr)));
         }
