@@ -30,6 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_codeql_changes: ${{ steps.collect.outputs.has_codeql_changes }}
+      has_crates: ${{ steps.detect.outputs.has_crates }}
+      has_libraries: ${{ steps.detect.outputs.has_libraries }}
+      has_vscode: ${{ steps.detect.outputs.has_vscode }}
+      has_docs: ${{ steps.detect.outputs.has_docs }}
+      benchmarks_needed: ${{ steps.detect.outputs.benchmarks_needed }}
+      docs_only: ${{ steps.detect.outputs.docs_only }}
     permissions:
       contents: read
       pull-requests: write
@@ -76,6 +82,12 @@ jobs:
           )
           print(f"has_codeql_changes={'true' if has_codeql_changes else 'false'}")
           PY
+
+      - name: Detect changed subsystems and flow decisions (Phase 1)
+        id: detect
+        run: |
+          python3 scripts/ci/detect_changed_subsystems.py \
+            --files-json "$RUNNER_TEMP/risk-audit/changed_files.json"
 
       - name: Upload risk audit artifact for discussion sync
         if: always()
@@ -253,6 +265,8 @@ jobs:
 
   lint-and-docs:
     name: Lint, Formatting & Documentation Gate
+    needs:
+      - pr-risk-audit
     if: >-
       (github.event_name == 'workflow_dispatch')
       || (github.event_name == 'pull_request' && github.base_ref == 'dev')
@@ -327,10 +341,19 @@ jobs:
   test-matrix:
     name: Test Matrix (${{ matrix.os }})
     needs:
+      - pr-risk-audit
       - lint-and-docs
     if: >-
-      (github.event_name == 'workflow_dispatch')
-      || (github.event_name == 'pull_request' && github.base_ref == 'dev')
+      (!cancelled())
+      && (needs.lint-and-docs.result == 'success')
+      && (
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event_name == 'pull_request'
+          && github.base_ref == 'dev'
+          && needs.pr-risk-audit.outputs.docs_only != 'true'
+        )
+      )
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -388,6 +411,11 @@ jobs:
       - name: Build and stage default first-party libraries
         if: runner.os == 'Linux' && steps.setup.outputs.bundled-libs-cache-hit != 'true'
         run: python3 scripts/release/build_default_libraries.py --target host
+
+      - name: Run library integration tests with auto-recompilation recovery
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 scripts/ci/run_library_tests_with_recovery.py --solix-binary ./target/debug/solix
 
       - name: Run workspace tests (including embedded solix wiki and Zip-Slip checks)
         shell: bash
@@ -502,10 +530,19 @@ jobs:
   coverage:
     name: Workspace Code Coverage Gate
     needs:
+      - pr-risk-audit
       - lint-and-docs
     if: >-
-      (github.event_name == 'workflow_dispatch')
-      || (github.event_name == 'pull_request' && github.base_ref == 'dev')
+      (!cancelled())
+      && (needs.lint-and-docs.result == 'success')
+      && (
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event_name == 'pull_request'
+          && github.base_ref == 'dev'
+          && needs.pr-risk-audit.outputs.docs_only != 'true'
+        )
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -655,9 +692,14 @@ jobs:
 
   pr-benchmark:
     name: PR Performance Benchmark (vs dev)
-    if: github.event_name == 'pull_request' && github.base_ref == 'dev'
     needs:
+      - pr-risk-audit
       - lint-and-docs
+    if: >-
+      (!cancelled())
+      && (needs.lint-and-docs.result == 'success')
+      && (github.event_name == 'pull_request' && github.base_ref == 'dev')
+      && (needs.pr-risk-audit.outputs.benchmarks_needed == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -769,6 +811,7 @@ jobs:
         if: always()
         run: |
           if [ -f "$RUNNER_TEMP/pr-bench/report.md" ]; then
+            printf '\n> [!WARNING]\n> **CI Benchmark Hardware Variance Notice:** Benchmark measurements executed on shared virtualized GitHub Actions runners are subject to CPU throttling, noisy neighbors, and hyperthread contention. They provide directional guidance rather than absolute bare-metal performance metrics.\n\n' >> "$RUNNER_TEMP/pr-bench/report.md"
             cat "$RUNNER_TEMP/pr-bench/report.md" >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -786,45 +829,3 @@ jobs:
           path: ${{ runner.temp }}/pr-bench/
           if-no-files-found: ignore
           retention-days: 1
-
-      - name: Post or update sticky PR benchmark comment
-        if: github.event.pull_request.head.repo.fork == false
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO_NAME: ${{ github.repository }}
-        run: |
-          python3 - <<'PY'
-          import json, os, subprocess
-          from pathlib import Path
-
-          report_markdown = (Path(os.environ["RUNNER_TEMP"]) / "pr-bench" / "report.md").read_text(encoding="utf-8")
-          comment_body = f"<!-- solix-pr-benchmark -->\n## PR Benchmark Report\n\n{report_markdown}"
-          repository_name = os.environ["REPO_NAME"]
-          pull_request_number = os.environ["PR_NUMBER"]
-
-          try:
-              comments_raw = subprocess.check_output(
-                  ["gh", "api", "--paginate", f"repos/{repository_name}/issues/{pull_request_number}/comments"],
-                  text=True,
-              )
-              comments_payload = json.loads(comments_raw)
-              existing_comment_identifier = None
-              for current_comment in comments_payload:
-                  if "<!-- solix-pr-benchmark -->" in (current_comment.get("body") or ""):
-                      existing_comment_identifier = current_comment["id"]
-                      break
-
-              if existing_comment_identifier:
-                  subprocess.run(
-                      ["gh", "api", "--method", "PATCH", f"repos/{repository_name}/issues/comments/{existing_comment_identifier}", "-f", f"body={comment_body}"],
-                      check=True,
-                  )
-              else:
-                  subprocess.run(
-                      ["gh", "api", "--method", "POST", f"repos/{repository_name}/issues/{pull_request_number}/comments", "-f", f"body={comment_body}"],
-                      check=True,
-                  )
-          except subprocess.CalledProcessError as called_process_error:
-              print(f"[NOTICE] Unable to post pull request comment: {called_process_error}")
-          PY

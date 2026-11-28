@@ -176,10 +176,10 @@ jobs:
               --solix-bin "$PREV_BINARY" \
               --solix-only \
               --label "$LATEST_STABLE_TAG" \
-              --save-baseline "$RUNNER_TEMP/telemetry/prev_baseline.json"
+              --save-baseline "$RUNNER_TEMP/prev_baseline.json"
 
             python3 scripts/bench/solix_bench.py compare \
-              --previous "$RUNNER_TEMP/telemetry/prev_baseline.json" \
+              --previous "$RUNNER_TEMP/prev_baseline.json" \
               --current "$RUNNER_TEMP/telemetry/dev_baseline.json" \
               --previous-tag "$LATEST_STABLE_TAG" \
               --current-tag "dev (${SHORT_SHA})" \
@@ -187,6 +187,7 @@ jobs:
               --cross-language \
               --min-delta-ms 0.5 \
               --markdown-output "$RUNNER_TEMP/telemetry/benchmark_report.md"
+            rm -f "$RUNNER_TEMP/prev_baseline.json"
           else
             python3 scripts/bench/solix_bench.py compare \
               --current "$RUNNER_TEMP/telemetry/dev_baseline.json" \
@@ -194,6 +195,10 @@ jobs:
               --no-fallback \
               --cross-language \
               --markdown-output "$RUNNER_TEMP/telemetry/benchmark_report.md"
+          fi
+
+          if [ -f "$RUNNER_TEMP/telemetry/benchmark_report.md" ]; then
+            printf '\n> [!WARNING]\n> **CI Benchmark Hardware Variance Notice:** Benchmark measurements executed on shared virtualized GitHub Actions runners are subject to CPU throttling, noisy neighbors, and hyperthread contention. They provide directional guidance rather than absolute bare-metal performance metrics.\n\n' >> "$RUNNER_TEMP/telemetry/benchmark_report.md"
           fi
 
           # 2. Cumulative Code Coverage
