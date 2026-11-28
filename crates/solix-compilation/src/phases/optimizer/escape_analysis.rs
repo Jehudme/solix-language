@@ -5,8 +5,49 @@
 
 #![forbid(unsafe_code)]
 
+use rayon::prelude::*;
 use solix_common::bytecode::{CompiledClass, CompiledFunction, Instruction, OpCode};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+/// Lightweight precomputed per-function summaries for scalar replacement and escape analysis.
+///
+/// Avoids cloning the full `Vec<CompiledFunction>` table before optimizing functions in parallel.
+pub struct EscapeFunctionSummaries {
+    forwarding_constructors: Vec<Option<HashMap<u16, u16>>>,
+    forwarding_getters: Vec<Option<u16>>,
+}
+
+impl EscapeFunctionSummaries {
+    /// Extracts constructor and getter summaries for all compiled functions in parallel.
+    #[must_use]
+    pub fn from_functions(functions: &[CompiledFunction]) -> Self {
+        let (forwarding_constructors, forwarding_getters): (Vec<_>, Vec<_>) = functions
+            .par_iter()
+            .map(|func| {
+                (
+                    analyze_forwarding_constructor(func),
+                    analyze_forwarding_getter(func),
+                )
+            })
+            .unzip();
+        Self {
+            forwarding_constructors,
+            forwarding_getters,
+        }
+    }
+
+    #[inline]
+    fn forwarding_constructor(&self, func_idx: usize) -> Option<&HashMap<u16, u16>> {
+        self.forwarding_constructors
+            .get(func_idx)
+            .and_then(|entry| entry.as_ref())
+    }
+
+    #[inline]
+    fn forwarding_getter(&self, func_idx: usize) -> Option<u16> {
+        self.forwarding_getters.get(func_idx).copied().flatten()
+    }
+}
 
 /// Lifetime and escape classification of a heap-allocated aggregate or reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -660,7 +701,7 @@ fn build_forward_cfg_successors(function: &CompiledFunction, inst_limit: usize) 
 pub fn classify_allocations(
     function: &CompiledFunction,
     classes: &[CompiledClass],
-    all_functions: &[CompiledFunction],
+    function_summaries: &EscapeFunctionSummaries,
 ) -> HashMap<usize, (u16, EscapeCategory)> {
     let mut allocation_categories = HashMap::new();
     let inst_count = function.instructions.len();
@@ -739,9 +780,8 @@ pub fn classify_allocations(
 
             // If a constructor exists, it must be a pure field-forwarding constructor
             if let Some(target_func_index) = constructor_target_id {
-                let is_pure_constructor = all_functions
-                    .get(target_func_index)
-                    .and_then(analyze_forwarding_constructor)
+                let is_pure_constructor = function_summaries
+                    .forwarding_constructor(target_func_index)
                     .is_some();
 
                 if !is_pure_constructor {
@@ -800,9 +840,8 @@ pub fn classify_allocations(
                             }
                             aliases.remove(&call_dst);
                         } else if argument_count == 1 && aliases.contains(&argument_base) {
-                            let getter_offset = all_functions
-                                .get(inspection_instruction.call_target() as usize)
-                                .and_then(analyze_forwarding_getter);
+                            let getter_offset = function_summaries
+                                .forwarding_getter(inspection_instruction.call_target() as usize);
                             if getter_offset.is_some() {
                                 aliases.remove(&call_dst);
                             } else {
@@ -981,12 +1020,12 @@ pub fn classify_allocations(
 pub fn apply_scalar_replacement(
     function: &mut CompiledFunction,
     classes: &[CompiledClass],
-    all_functions: &[CompiledFunction],
+    function_summaries: &EscapeFunctionSummaries,
 ) -> usize {
     let mut scalar_replaced_count = 0;
 
     loop {
-        let allocations = classify_allocations(function, classes, all_functions);
+        let allocations = classify_allocations(function, classes, function_summaries);
         let mut sorted_allocs: Vec<(usize, u16)> = allocations
             .into_iter()
             .filter_map(|(pc, (reg, category))| {
@@ -1001,7 +1040,12 @@ pub fn apply_scalar_replacement(
 
         let mut replaced_this_round = false;
         for (allocation_pc, allocated_register) in sorted_allocs {
-            if try_scalar_replace_one(function, allocation_pc, allocated_register, all_functions) {
+            if try_scalar_replace_one(
+                function,
+                allocation_pc,
+                allocated_register,
+                function_summaries,
+            ) {
                 scalar_replaced_count += 1;
                 replaced_this_round = true;
                 break;
@@ -1021,7 +1065,7 @@ fn try_scalar_replace_one(
     function: &mut CompiledFunction,
     allocation_pc: usize,
     allocated_register: u16,
-    all_functions: &[CompiledFunction],
+    function_summaries: &EscapeFunctionSummaries,
 ) -> bool {
     let inst_count = function.instructions.len();
     let mut enclosing_outer_back: Option<usize> = None;
@@ -1050,17 +1094,15 @@ fn try_scalar_replace_one(
     let ctor_field_to_param = if let (Some(target_func_idx), Some(_)) =
         (constructor_target_func_index, constructor_call_pc)
     {
-        let Some(target_func) = all_functions.get(target_func_idx) else {
-            return false;
-        };
-        let Some(field_to_param) = analyze_forwarding_constructor(target_func) else {
+        let Some(field_to_param) = function_summaries.forwarding_constructor(target_func_idx)
+        else {
             return false;
         };
         for &offset in field_to_param.keys() {
             initial_known_fields.insert(offset);
             sim_known_fields.insert(offset);
         }
-        Some(field_to_param)
+        Some(field_to_param.clone())
     } else {
         None
     };
@@ -1173,10 +1215,9 @@ fn try_scalar_replace_one(
                     cur_must.remove(&call_dst);
                     last_use_or_write_pc = last_use_or_write_pc.max(inspection_index);
                 } else if arg_count == 1 && cur_must.contains(&arg_base) {
-                    let Some(getter_func) = all_functions.get(inst.call_target() as usize) else {
-                        return false;
-                    };
-                    let Some(getter_offset) = analyze_forwarding_getter(getter_func) else {
+                    let Some(getter_offset) =
+                        function_summaries.forwarding_getter(inst.call_target() as usize)
+                    else {
                         return false;
                     };
                     if !cur_known.contains(&getter_offset) {
@@ -1314,9 +1355,8 @@ fn try_scalar_replace_one(
                 let is_this_getter = raw == OpCode::CallDirect as u8
                     && check_inst.arg_count() == 1
                     && sim_check_aliases.contains(&check_inst.arg_base())
-                    && all_functions
-                        .get(check_inst.call_target() as usize)
-                        .and_then(analyze_forwarding_getter)
+                    && function_summaries
+                        .forwarding_getter(check_inst.call_target() as usize)
                         .is_some();
                 if !is_this_ctor && !is_this_getter {
                     intervening_call_indices.push(check_pc);
@@ -1455,9 +1495,8 @@ fn try_scalar_replace_one(
             let call_dst = current_instruction.call_dst();
             if arg_count == 1
                 && pc_must_aliases.contains(&arg_base)
-                && let Some(getter_offset) = all_functions
-                    .get(current_instruction.call_target() as usize)
-                    .and_then(analyze_forwarding_getter)
+                && let Some(getter_offset) =
+                    function_summaries.forwarding_getter(current_instruction.call_target() as usize)
                 && let Some(&source_value_register) = field_values.get(&getter_offset)
             {
                 if call_dst == source_value_register {

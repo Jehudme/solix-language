@@ -1990,10 +1990,12 @@ fn test_escape_analysis_conditional_alias_overwrite_before_return() {
         "Both candidate allocations in choose_point must remain heap-allocated"
     );
 
+    let escape_summaries =
+        escape_analysis::EscapeFunctionSummaries::from_functions(&artifacts.program.functions);
     let categories = escape_analysis::classify_allocations(
         choose_func,
         &artifacts.program.classes,
-        &artifacts.program.functions,
+        &escape_summaries,
     );
     assert!(
         categories
@@ -2063,8 +2065,10 @@ fn test_escape_analysis_sra_conditional_alias_overwrite_before_field_read() {
         field_types: Vec::new(),
         field_names: Vec::new(),
     };
+    let cfg_summaries =
+        escape_analysis::EscapeFunctionSummaries::from_functions(&[cfg_func.clone()]);
     let categories =
-        escape_analysis::classify_allocations(&cfg_func, &[class_desc], &[cfg_func.clone()]);
+        escape_analysis::classify_allocations(&cfg_func, &[class_desc], &cfg_summaries);
     assert_eq!(
         categories.get(&0).map(|&(_reg, cat)| cat),
         Some(EscapeCategory::GlobalEscape),

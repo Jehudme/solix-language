@@ -330,3 +330,82 @@ fn test_extern_import_specific_symbol_and_root_facade() {
         PackageVersion::new(2, 0, 0)
     );
 }
+
+#[test]
+fn test_wildcard_import_prunes_unreferenced_external_ast() {
+    let lib_source = r#"
+package gfx;
+
+public class UsedColor {
+    public int32 rgba;
+    public UsedColor(int32 value) {
+        this.rgba = value;
+    }
+}
+
+public class UnusedMesh {
+    public int32 vertices;
+}
+
+public UsedColor make_color(int32 value) {
+    return new UsedColor(value);
+}
+
+public void unused_helper() {
+    return;
+}
+"#;
+    let lib_options = CompilationOptions::new()
+        .with_emit_export_metadata(true)
+        .with_package_metadata("gfx", "1.0.0", "Graphics")
+        .with_source("gfx.slx", lib_source);
+    let mut lib_context = CompilationContext::new(lib_options);
+    lib_context
+        .execute()
+        .expect("Library compilation must succeed");
+    let lib_program = lib_context
+        .emission_artifacts
+        .expect("Library artifacts")
+        .program;
+
+    let mut solver = InMemoryModuleSolver::new();
+    solver.add_package(SolvedPackage::new(
+        "gfx",
+        PackageVersion::new(1, 0, 0),
+        lib_program,
+    ));
+
+    let consumer_code = r#"
+import gfx.*;
+
+class Main {
+    public static int32 main() {
+        UsedColor color = make_color(42);
+        return color.rgba;
+    }
+}
+"#;
+    let options = CompilationOptions::new()
+        .with_source("app.slx", consumer_code)
+        .with_dependency_spec(DependencyRequirement::new(
+            "gfx",
+            PackageVersion::new(1, 0, 0),
+        ))
+        .with_solver(Arc::new(solver));
+    let mut context = CompilationContext::new(options);
+    context
+        .execute()
+        .expect("Consumer using wildcard import must compile cleanly");
+
+    let external_ast = context
+        .ast
+        .iter()
+        .flatten()
+        .find(|ast| context.is_external_source(ast.source_id))
+        .expect("External AST must be present");
+    assert_eq!(
+        external_ast.declarations.len(),
+        2,
+        "Unreferenced UnusedMesh and unused_helper should be pruned, keeping UsedColor and make_color"
+    );
+}

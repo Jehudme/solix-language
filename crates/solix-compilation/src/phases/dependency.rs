@@ -596,6 +596,93 @@ fn collect_type_names(
     }
 }
 
+fn collect_identifiers_from_slice(slice: &str, target_set: &mut std::collections::HashSet<String>) {
+    let bytes = slice.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = index;
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+            {
+                index += 1;
+            }
+            target_set.insert(slice[start..index].to_string());
+        } else {
+            index += 1;
+        }
+    }
+}
+
+fn collect_user_identifiers(
+    context: &CompilationContext,
+    target_set: &mut std::collections::HashSet<String>,
+) {
+    use crate::phases::lexing::TokenKind;
+    for (source_idx, source_text) in context.sources.iter().enumerate() {
+        if u16::try_from(source_idx).is_ok_and(|id| context.is_external_source(id)) {
+            continue;
+        }
+        if let Some(tokens) = context.tokens.get(source_idx)
+            && !tokens.is_empty()
+        {
+            for token in tokens {
+                if token.kind == TokenKind::Identifier {
+                    let lexeme = context.get_lexeme(token.span);
+                    if !lexeme.is_empty() {
+                        target_set.insert(lexeme.to_string());
+                    }
+                }
+            }
+        } else {
+            collect_identifiers_from_slice(source_text, target_set);
+        }
+    }
+}
+
+fn scan_raw_source_imports(
+    source_text: &str,
+    package_name: &str,
+    has_any_package_import: &mut bool,
+    has_wildcard_import: &mut bool,
+    imported_symbols: &mut std::collections::HashSet<String>,
+) {
+    for statement in source_text.split(';') {
+        let trimmed = statement.trim();
+        let rest = if let Some(after) = trimmed.strip_prefix("extern") {
+            let after_ws = after.trim_start();
+            if let Some(after_import) = after_ws.strip_prefix("import") {
+                after_import.trim()
+            } else {
+                continue;
+            }
+        } else if let Some(after_import) = trimmed.strip_prefix("import") {
+            after_import.trim()
+        } else {
+            continue;
+        };
+
+        let normalized = rest.replace("::", ".");
+        let segments: Vec<&str> = normalized
+            .split('.')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        if segments.first().copied() != Some(package_name) {
+            continue;
+        }
+        *has_any_package_import = true;
+        if segments.len() == 1 || segments.last().copied() == Some("*") {
+            *has_wildcard_import = true;
+        } else if let Some(last_segment) = segments.last() {
+            imported_symbols.insert(segments.join("::"));
+            imported_symbols.insert((*last_segment).to_string());
+        }
+    }
+}
+
 fn selectively_prune_ast(
     ast: &mut crate::phases::parser::statements::ProgramAst,
     package_name: &str,
@@ -604,57 +691,63 @@ fn selectively_prune_ast(
 ) {
     use crate::phases::parser::statements::{ClassMember, Declaration};
 
-    let mut has_root_wildcard = false;
-    let mut imported_namespaces = std::collections::HashSet::new();
+    let mut has_wildcard_import = false;
+    let imported_namespaces: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut imported_symbols = std::collections::HashSet::new();
-    let mut has_any_extern_import = false;
+    let mut has_any_package_import = false;
 
-    for user_ast in context.ast.iter().flatten() {
-        if context.is_external_source(user_ast.source_id) {
+    for (source_idx, user_source_text) in context.sources.iter().enumerate() {
+        if u16::try_from(source_idx).is_ok_and(|id| context.is_external_source(id)) {
             continue;
         }
-        for import_statement in &user_ast.imports {
-            if !import_statement.is_extern || import_statement.path.is_empty() {
-                continue;
-            }
-            let first_lexeme = context.get_lexeme(import_statement.path[0]);
-            if first_lexeme != package_name {
-                continue;
-            }
-            has_any_extern_import = true;
-            if import_statement.path.len() == 1 {
-                has_root_wildcard = true;
-                break;
-            }
-            if import_statement.is_wildcard {
-                let namespace_segments: Vec<String> = import_statement
-                    .path
-                    .iter()
-                    .map(|span| context.get_lexeme(*span).to_string())
-                    .collect();
-                imported_namespaces.insert(namespace_segments.join("::"));
-            } else {
-                let symbol_segments: Vec<String> = import_statement
-                    .path
-                    .iter()
-                    .map(|span| context.get_lexeme(*span).to_string())
-                    .collect();
-                imported_symbols.insert(symbol_segments.join("::"));
-                if let Some(last_segment) = symbol_segments.last() {
-                    imported_symbols.insert(last_segment.clone());
+        if let Some(Some(user_ast)) = context.ast.get(source_idx) {
+            for import_statement in &user_ast.imports {
+                if import_statement.path.is_empty() {
+                    continue;
+                }
+                let first_lexeme = context.get_lexeme(import_statement.path[0]);
+                if first_lexeme != package_name {
+                    continue;
+                }
+                has_any_package_import = true;
+                if import_statement.path.len() == 1 || import_statement.is_wildcard {
+                    has_wildcard_import = true;
+                } else {
+                    let symbol_segments: Vec<String> = import_statement
+                        .path
+                        .iter()
+                        .map(|span| context.get_lexeme(*span).to_string())
+                        .collect();
+                    imported_symbols.insert(symbol_segments.join("::"));
+                    if let Some(last_segment) = symbol_segments.last() {
+                        imported_symbols.insert(last_segment.clone());
+                    }
                 }
             }
+        } else {
+            scan_raw_source_imports(
+                user_source_text,
+                package_name,
+                &mut has_any_package_import,
+                &mut has_wildcard_import,
+                &mut imported_symbols,
+            );
         }
     }
 
-    if !has_any_extern_import || has_root_wildcard {
+    if !has_any_package_import {
         return;
     }
 
     let mut needed_symbols = imported_symbols;
+    if has_wildcard_import {
+        collect_user_identifiers(context, &mut needed_symbols);
+    }
     needed_symbols.insert("String".to_string());
     needed_symbols.insert("IStringable".to_string());
     needed_symbols.insert("Object".to_string());
+
+    let core_namespace_prefix = format!("{package_name}::core");
 
     loop {
         let size_before = needed_symbols.len();
@@ -679,7 +772,7 @@ fn selectively_prune_ast(
                     let is_needed = needed_symbols.contains(class_name)
                         || needed_symbols.contains(&qualified_name)
                         || imported_namespaces.contains(&namespace)
-                        || namespace.starts_with(&format!("{package_name}::core"));
+                        || namespace.starts_with(&core_namespace_prefix);
 
                     if is_needed {
                         if let Some(super_class) = &class_declaration.super_class {
@@ -696,6 +789,11 @@ fn selectively_prune_ast(
                                         source_text,
                                         &mut needed_symbols,
                                     );
+                                    if field_declaration.initializer.is_some() {
+                                        let slice =
+                                            get_span_slice(field_declaration.span, source_text);
+                                        collect_identifiers_from_slice(slice, &mut needed_symbols);
+                                    }
                                 }
                                 ClassMember::Method(method_declaration) => {
                                     collect_type_names(
@@ -710,6 +808,22 @@ fn selectively_prune_ast(
                                             &mut needed_symbols,
                                         );
                                     }
+                                    if let Some(body) = &method_declaration.body {
+                                        let slice = get_span_slice(body.span, source_text);
+                                        collect_identifiers_from_slice(slice, &mut needed_symbols);
+                                    }
+                                }
+                                ClassMember::Constructor(ctor_declaration) => {
+                                    for parameter in &ctor_declaration.parameters {
+                                        collect_type_names(
+                                            &parameter.param_type,
+                                            source_text,
+                                            &mut needed_symbols,
+                                        );
+                                    }
+                                    let slice =
+                                        get_span_slice(ctor_declaration.body.span, source_text);
+                                    collect_identifiers_from_slice(slice, &mut needed_symbols);
                                 }
                                 _ => {}
                             }
@@ -718,7 +832,23 @@ fn selectively_prune_ast(
                 }
                 Declaration::Interface(interface_declaration) => {
                     let iface_name = get_span_slice(interface_declaration.name_span, source_text);
-                    if needed_symbols.contains(iface_name) {
+                    let namespace_segments: Vec<&str> = interface_declaration
+                        .namespace_path
+                        .iter()
+                        .map(|span| get_span_slice(*span, source_text))
+                        .filter(|segment| !segment.is_empty())
+                        .collect();
+                    let namespace = namespace_segments.join("::");
+                    let qualified_name = if namespace.is_empty() {
+                        iface_name.to_string()
+                    } else {
+                        format!("{namespace}::{iface_name}")
+                    };
+                    if needed_symbols.contains(iface_name)
+                        || needed_symbols.contains(&qualified_name)
+                        || imported_namespaces.contains(&namespace)
+                        || namespace.starts_with(&core_namespace_prefix)
+                    {
                         for super_iface in &interface_declaration.super_interfaces {
                             collect_type_names(super_iface, source_text, &mut needed_symbols);
                         }
@@ -738,6 +868,73 @@ fn selectively_prune_ast(
                         }
                     }
                 }
+                Declaration::Method(method_declaration) => {
+                    let method_name = get_span_slice(method_declaration.name_span, source_text);
+                    let namespace_segments: Vec<&str> = method_declaration
+                        .namespace_path
+                        .iter()
+                        .map(|span| get_span_slice(*span, source_text))
+                        .filter(|segment| !segment.is_empty())
+                        .collect();
+                    let namespace = namespace_segments.join("::");
+                    let qualified_name = if namespace.is_empty() {
+                        method_name.to_string()
+                    } else {
+                        format!("{namespace}::{method_name}")
+                    };
+                    if needed_symbols.contains(method_name)
+                        || needed_symbols.contains(&qualified_name)
+                        || imported_namespaces.contains(&namespace)
+                        || namespace.starts_with(&core_namespace_prefix)
+                    {
+                        collect_type_names(
+                            &method_declaration.return_type,
+                            source_text,
+                            &mut needed_symbols,
+                        );
+                        for parameter in &method_declaration.parameters {
+                            collect_type_names(
+                                &parameter.param_type,
+                                source_text,
+                                &mut needed_symbols,
+                            );
+                        }
+                        if let Some(body) = &method_declaration.body {
+                            let slice = get_span_slice(body.span, source_text);
+                            collect_identifiers_from_slice(slice, &mut needed_symbols);
+                        }
+                    }
+                }
+                Declaration::Field(field_declaration) => {
+                    let field_name = get_span_slice(field_declaration.name_span, source_text);
+                    let namespace_segments: Vec<&str> = field_declaration
+                        .namespace_path
+                        .iter()
+                        .map(|span| get_span_slice(*span, source_text))
+                        .filter(|segment| !segment.is_empty())
+                        .collect();
+                    let namespace = namespace_segments.join("::");
+                    let qualified_name = if namespace.is_empty() {
+                        field_name.to_string()
+                    } else {
+                        format!("{namespace}::{field_name}")
+                    };
+                    if needed_symbols.contains(field_name)
+                        || needed_symbols.contains(&qualified_name)
+                        || imported_namespaces.contains(&namespace)
+                        || namespace.starts_with(&core_namespace_prefix)
+                    {
+                        collect_type_names(
+                            &field_declaration.field_type,
+                            source_text,
+                            &mut needed_symbols,
+                        );
+                        if field_declaration.initializer.is_some() {
+                            let slice = get_span_slice(field_declaration.span, source_text);
+                            collect_identifiers_from_slice(slice, &mut needed_symbols);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -746,6 +943,9 @@ fn selectively_prune_ast(
             break;
         }
     }
+
+    // Retained for future explicit namespace-level whitelisting if needed.
+    let _ = &imported_namespaces;
 
     ast.declarations.retain(|declaration| match declaration {
         Declaration::Class(class_declaration) => {
