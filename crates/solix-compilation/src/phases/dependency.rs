@@ -327,6 +327,7 @@ fn ingest_package_api_source(
             &program.export_manifest.exported_ast_bytes,
             package_name,
             context,
+            &source_code,
         ) {
             if !has_binary {
                 context.options.dependency_binaries.push(program);
@@ -770,6 +771,7 @@ fn try_deserialize_indexed_ast(
     bytes: &[u8],
     package_name: &str,
     context: &CompilationContext,
+    source_text: &str,
 ) -> Option<crate::phases::parser::statements::ProgramAst> {
     use crate::phases::export_api::{INDEXED_AST_MAGIC, IndexedAstHeader};
     use crate::phases::parser::statements::ProgramAst;
@@ -792,6 +794,9 @@ fn try_deserialize_indexed_ast(
     let needed_opt = collect_needed_seed_symbols(package_name, context);
     let mut selected = vec![false; header.entries.len()];
     if let Some(mut needed_symbols) = needed_opt {
+        for alias in &header.aliases {
+            collect_type_names(&alias.target_type, source_text, &mut needed_symbols);
+        }
         let core_namespace_prefix = format!("{package_name}::core");
         loop {
             let size_before = needed_symbols.len();
