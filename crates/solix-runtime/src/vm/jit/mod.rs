@@ -48,7 +48,7 @@ impl RegType {
 /// Function signature metadata for a JIT-compiled Solix function.
 #[derive(Debug, Clone)]
 pub(crate) struct JitFuncSig {
-    pub param_types: Vec<RegType>,
+    pub param_types: Vec<Option<RegType>>,
     pub return_type: Option<RegType>,
 }
 
@@ -155,6 +155,8 @@ pub(crate) struct JitRuntimeSymbols {
     pub rt_call_symbol_slow: FuncId,
     pub rt_call_virtual_slow: FuncId,
     pub rt_call_interface_slow: FuncId,
+    pub rt_resolve_jit_virtual_fn: FuncId,
+    pub rt_resolve_jit_interface_fn: FuncId,
     pub rt_set_field_ref: FuncId,
     pub rt_get_array_slow: FuncId,
     pub rt_set_array_slow: FuncId,
@@ -215,6 +217,14 @@ impl JitEngine {
         builder.symbol(
             "solix_rt_call_interface_slow",
             rt_call_interface_slow as *const u8,
+        );
+        builder.symbol(
+            "solix_rt_resolve_jit_virtual_fn",
+            rt_resolve_jit_virtual_fn as *const u8,
+        );
+        builder.symbol(
+            "solix_rt_resolve_jit_interface_fn",
+            rt_resolve_jit_interface_fn as *const u8,
         );
         builder.symbol("solix_rt_set_field_ref", rt_set_field_ref as *const u8);
         builder.symbol("solix_rt_get_array_slow", rt_get_array_slow as *const u8);
@@ -382,6 +392,16 @@ fn declare_runtime_symbols(module: &mut JITModule) -> Result<JitRuntimeSymbols, 
             ],
             Some(types::I8),
         )?,
+        rt_resolve_jit_virtual_fn: declare(
+            "solix_rt_resolve_jit_virtual_fn",
+            &[ptr_ty, types::I32, types::I32, types::I32],
+            Some(ptr_ty),
+        )?,
+        rt_resolve_jit_interface_fn: declare(
+            "solix_rt_resolve_jit_interface_fn",
+            &[ptr_ty, types::I32, types::I32, types::I32],
+            Some(ptr_ty),
+        )?,
         rt_set_field_ref: declare(
             "solix_rt_set_field_ref",
             &[ptr_ty, types::I32, types::I32, types::I32, types::I8],
@@ -521,7 +541,10 @@ pub(crate) fn try_invoke_jit(
     }
 
     let mut raw_args = [0u64; 4];
-    for (arg_idx, &reg_ty) in sig.param_types.iter().enumerate() {
+    for (arg_idx, &reg_ty_opt) in sig.param_types.iter().enumerate() {
+        let Some(reg_ty) = reg_ty_opt else {
+            continue;
+        };
         let val = vm.register_stack[caller_arg_start + arg_idx];
         match value_to_jit_bits(val, reg_ty) {
             Ok(bits) => raw_args[arg_idx] = bits,
@@ -944,6 +967,80 @@ unsafe extern "C" fn rt_call_interface_slow(
             vm.register_stack.truncate(arg_start);
             ctx.set_trap(trap);
             1
+        }
+    }
+}
+
+#[inline(always)]
+fn resolve_jit_target_ptr(vm: &mut VirtualMachine, func_id: u32, arg_count: usize) -> *const u8 {
+    let idx = func_id as usize;
+    let should_compile = {
+        let Some(engine) = vm.jit_engine.as_mut() else {
+            return std::ptr::null();
+        };
+        let Some(slot) = engine.slots.get_mut(idx) else {
+            return std::ptr::null();
+        };
+        if slot.state == JitCompileState::Compiled && !slot.ptr.is_null() {
+            let matches_arity = slot
+                .sig
+                .as_ref()
+                .is_some_and(|sig| sig.param_types.len() == arg_count);
+            return if matches_arity {
+                slot.ptr
+            } else {
+                std::ptr::null()
+            };
+        }
+        if slot.state == JitCompileState::Unsupported {
+            return std::ptr::null();
+        }
+        slot.call_count = slot.call_count.saturating_add(1);
+        match vm.jit_mode {
+            JitMode::Off => false,
+            JitMode::Eager => true,
+            JitMode::Tiered => slot.has_loop || slot.call_count >= 50,
+        }
+    };
+    if should_compile
+        && let Some((ptr, sig)) = compiler::ensure_compiled(vm, func_id)
+        && sig.param_types.len() == arg_count
+    {
+        return ptr;
+    }
+    std::ptr::null()
+}
+
+unsafe extern "C" fn rt_resolve_jit_virtual_fn(
+    ctx_ptr: *mut JitContext,
+    obj_addr: u32,
+    raw_target: u32,
+    arg_count: u32,
+) -> *const u8 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    match vm.jit_resolve_virtual(obj_addr, raw_target as u16) {
+        Ok(func_id) => resolve_jit_target_ptr(vm, func_id, arg_count as usize),
+        Err(trap) => {
+            ctx.set_trap(trap);
+            std::ptr::null()
+        }
+    }
+}
+
+unsafe extern "C" fn rt_resolve_jit_interface_fn(
+    ctx_ptr: *mut JitContext,
+    obj_addr: u32,
+    target: u32,
+    arg_count: u32,
+) -> *const u8 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    match vm.jit_resolve_interface(obj_addr, target as u16) {
+        Ok(func_id) => resolve_jit_target_ptr(vm, func_id, arg_count as usize),
+        Err(trap) => {
+            ctx.set_trap(trap);
+            std::ptr::null()
         }
     }
 }
