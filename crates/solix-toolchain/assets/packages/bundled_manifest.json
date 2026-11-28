@@ -3,19 +3,19 @@
   "packages": [
     {
       "name": "raylib",
-      "version": "6.0.1",
+      "version": "6.1.0",
       "profile": "release",
-      "archive_rel_path": "raylib-release@6.0.1/raylib.slxarc",
-      "sha256": "af707e847321f7dc7a1376eaeefaf17199d9d6437d039977ca120e61308dff19",
-      "size_bytes": 1581419
+      "archive_rel_path": "raylib-release@6.1.0/raylib.slxarc",
+      "sha256": "5c2b3a1bd3693cee0bf6fe68f57b75d6e1d5061dc122090aac4ab70b8d58926b",
+      "size_bytes": 1786754
     },
     {
       "name": "solix",
       "version": "2.2.1",
       "profile": "release",
       "archive_rel_path": "solix-release@2.2.1/solix.slxarc",
-      "sha256": "39a5bdde14d4e5c663104ab8c4fadb7af0558812e874cd292946254fe9752ad9",
-      "size_bytes": 1532186
+      "sha256": "6a46843efb275be783ebef84428ab490d4925e076dca55c88c1af49b8f21c6ba",
+      "size_bytes": 1553273
     }
   ]
 }
