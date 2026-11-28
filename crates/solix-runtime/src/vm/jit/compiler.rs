@@ -91,6 +91,16 @@ pub(crate) fn ensure_compiled(
             }
         }
     }
+    if let Some(mono_sites) = vm.monomorphic_call_caches.get(func_id as usize) {
+        for site in mono_sites.iter().flatten() {
+            if site.expected_vtable_id != u32::MAX {
+                let target_id = site.target_func_id;
+                if target_id != func_id && !direct_callees.contains(&target_id) {
+                    direct_callees.push(target_id);
+                }
+            }
+        }
+    }
     for target_id in direct_callees {
         let should_precompile = vm
             .jit_engine
@@ -110,6 +120,10 @@ pub(crate) fn ensure_compiled(
 
     let const_pool = vm.context.get_constant_pool(meta.binary_id);
     let const_pool_cache = vm.const_pool_cache.get(meta.binary_id).map(Vec::as_slice);
+    let monomorphic_caches = vm
+        .monomorphic_call_caches
+        .get(func_id as usize)
+        .map(Vec::as_slice);
     let mut fb_ctx = FunctionBuilderContext::new();
     let build_ok = {
         let engine = vm.jit_engine.as_mut()?;
@@ -118,6 +132,7 @@ pub(crate) fn ensure_compiled(
             meta.binary_id as u32,
             const_pool,
             const_pool_cache,
+            monomorphic_caches,
             &sig_info,
             clif_func_id,
             &mut clif_ctx.func,
@@ -1240,24 +1255,38 @@ fn infer_signature_and_types(
                     OpCode::CallDirect
                     | OpCode::TailCallDirect
                     | OpCode::CallNativeDirect
-                    | OpCode::CallSymbol => {
+                    | OpCode::CallSymbol
+                    | OpCode::CallVirtual
+                    | OpCode::CallVirtualDirect
+                    | OpCode::CallInterface => {
+                        let is_method_call = matches!(
+                            opcode,
+                            OpCode::CallVirtual | OpCode::CallVirtualDirect | OpCode::CallInterface
+                        );
                         let is_self_call =
                             matches!(opcode, OpCode::CallDirect | OpCode::TailCallDirect)
                                 && u32::from(inst.call_target()) == func_id;
                         let arg_base = inst.arg_base() as usize;
                         let arg_count = inst.arg_count() as usize;
-                        if arg_count > 4 || arg_base + arg_count > num_regs {
+                        if arg_count > 4
+                            || arg_base + arg_count > num_regs
+                            || (is_method_call && arg_count == 0)
+                        {
                             return None;
                         }
                         for arg_idx in 0..arg_count.min(4) {
                             let reg = (arg_base + arg_idx) as u16;
-                            let inferred = current_ty[arg_base + arg_idx].or_else(|| {
-                                if is_self_call {
-                                    param_types.get(arg_idx).copied().flatten()
-                                } else {
-                                    None
-                                }
-                            });
+                            let inferred = if is_method_call && arg_idx == 0 {
+                                Some(RegType::Ref)
+                            } else {
+                                current_ty[arg_base + arg_idx].or_else(|| {
+                                    if is_self_call {
+                                        param_types.get(arg_idx).copied().flatten()
+                                    } else {
+                                        None
+                                    }
+                                })
+                            };
                             if let Some(ty) = inferred {
                                 inst_types[pc].call_args[arg_idx] = Some(ty);
                                 mark_read(
@@ -1412,8 +1441,7 @@ fn infer_signature_and_types(
         return None;
     }
 
-    let resolved_params: Vec<RegType> =
-        param_types.into_iter().collect::<Option<Vec<RegType>>>()?;
+    let resolved_params = param_types;
 
     for (pc, inst) in compiled_fn.instructions.iter().enumerate() {
         if !reachable_inst[pc] {
@@ -1434,7 +1462,10 @@ fn infer_signature_and_types(
             OpCode::CallDirect
             | OpCode::TailCallDirect
             | OpCode::CallNativeDirect
-            | OpCode::CallSymbol => {
+            | OpCode::CallSymbol
+            | OpCode::CallVirtual
+            | OpCode::CallVirtualDirect
+            | OpCode::CallInterface => {
                 let arg_count = inst.arg_count() as usize;
                 for arg_ty in inst_types[pc].call_args.iter().take(arg_count.min(4)) {
                     (*arg_ty)?;
@@ -1605,6 +1636,11 @@ fn infer_next_consumer_type(
             {
                 return Some(RegType::Ref);
             }
+            OpCode::CallVirtual | OpCode::CallVirtualDirect | OpCode::CallInterface
+                if inst.arg_base() == reg && inst.arg_count() >= 1 =>
+            {
+                return Some(RegType::Ref);
+            }
             OpCode::Jump | OpCode::Return | OpCode::ReturnValue | OpCode::TailCallDirect => {
                 return None;
             }
@@ -1690,6 +1726,7 @@ fn translate_function(
     binary_id: u32,
     const_pool: Option<&solix_common::bytecode::ConstantPool>,
     const_pool_cache: Option<&[crate::Value]>,
+    monomorphic_caches: Option<&[Option<crate::vm::engine::MonomorphicCallSite>]>,
     types_info: &InferredFunctionTypes,
     self_clif_id: FuncId,
     clif_func: &mut cranelift_codegen::ir::Function,
@@ -1767,7 +1804,12 @@ fn translate_function(
     };
     let all_reg_types = [RegType::I32, RegType::I64, RegType::F64, RegType::Ref];
     for (reg_idx, &mask) in types_info.used_masks.iter().enumerate() {
-        let param_ty = types_info.func_sig.param_types.get(reg_idx).copied();
+        let param_ty = types_info
+            .func_sig
+            .param_types
+            .get(reg_idx)
+            .copied()
+            .flatten();
         let effective_mask = if let Some(pty) = param_ty {
             mask | (1u8 << pty.to_code())
         } else {
@@ -1833,6 +1875,21 @@ fn translate_function(
     let rt_call_interface_slow_ref = engine
         .module
         .declare_func_in_func(engine.rt_symbols.rt_call_interface_slow, builder.func);
+    let rt_resolve_jit_virtual_fn_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_resolve_jit_virtual_fn, builder.func);
+    let rt_resolve_jit_interface_fn_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_resolve_jit_interface_fn, builder.func);
+    let jit_call_sig_ref = {
+        let mut sig = Signature::new(engine.module.isa().default_call_conv());
+        sig.params.push(AbiParam::new(ptr_ty));
+        for _ in 0..4 {
+            sig.params.push(AbiParam::new(types::I64));
+        }
+        sig.returns.push(AbiParam::new(types::I64));
+        builder.import_signature(sig)
+    };
     let rt_set_field_ref_fn = engine
         .module
         .declare_func_in_func(engine.rt_symbols.rt_set_field_ref, builder.func);
@@ -3183,7 +3240,12 @@ fn translate_function(
                 {
                     let mut next_params: [Option<(Variable, ClifVal)>; 4] = [None; 4];
                     let mut all_match = true;
-                    for (arg_idx, &param_ty) in types_info.func_sig.param_types.iter().enumerate() {
+                    for (arg_idx, &param_ty_opt) in
+                        types_info.func_sig.param_types.iter().enumerate()
+                    {
+                        let Some(param_ty) = param_ty_opt else {
+                            continue;
+                        };
                         let reg_ty = inst_ty.call_args[arg_idx].unwrap_or(RegType::I32);
                         if reg_ty != param_ty {
                             all_match = false;
@@ -3332,18 +3394,42 @@ fn translate_function(
                 let arg_count = inst.arg_count() as usize;
                 let call_dst = inst.call_dst() as usize;
                 let is_dst_used = is_reg_used_after(&compiled_fn.instructions, pc, call_dst as u16);
-                emit_slow_call_dispatch(
+                let mono_site = monomorphic_caches
+                    .and_then(|sites| sites.get(pc).copied().flatten())
+                    .filter(|site| site.expected_vtable_id != u32::MAX);
+                let effective_target =
+                    mono_site.map_or(raw_target, |site| u32::from(site.original_slot) | 0x8000);
+                let mono_clif = mono_site.and_then(|site| {
+                    engine
+                        .slots
+                        .get(site.target_func_id as usize)
+                        .and_then(|slot| slot.clif_id)
+                        .map(|clif_id| (site.expected_vtable_id, clif_id))
+                });
+                let mono_target_ref = mono_clif.map(|(expected_vt, target_clif_id)| {
+                    let func_ref = if target_clif_id == self_clif_id {
+                        self_func_ref
+                    } else {
+                        engine
+                            .module
+                            .declare_func_in_func(target_clif_id, builder.func)
+                    };
+                    (expected_vt, func_ref)
+                });
+                emit_virtual_or_interface_call(
                     &mut builder,
+                    rt_resolve_jit_virtual_fn_ref,
                     rt_call_virtual_slow_ref,
+                    jit_call_sig_ref,
+                    rt_trap_null_ref,
                     ctx_ptr,
                     ptr_ty,
-                    None,
-                    raw_target,
+                    effective_target,
                     arg_base,
                     arg_count,
                     call_dst,
                     is_dst_used,
-                    false,
+                    mono_target_ref,
                     &vars,
                     inst_ty,
                 );
@@ -3354,18 +3440,20 @@ fn translate_function(
                 let arg_count = inst.arg_count() as usize;
                 let call_dst = inst.call_dst() as usize;
                 let is_dst_used = is_reg_used_after(&compiled_fn.instructions, pc, call_dst as u16);
-                emit_slow_call_dispatch(
+                emit_virtual_or_interface_call(
                     &mut builder,
+                    rt_resolve_jit_interface_fn_ref,
                     rt_call_interface_slow_ref,
+                    jit_call_sig_ref,
+                    rt_trap_null_ref,
                     ctx_ptr,
                     ptr_ty,
-                    None,
                     target,
                     arg_base,
                     arg_count,
                     call_dst,
                     is_dst_used,
-                    false,
+                    None,
                     &vars,
                     inst_ty,
                 );
@@ -3599,6 +3687,112 @@ fn is_reg_used_after(
         }
     }
     false
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_virtual_or_interface_call(
+    builder: &mut FunctionBuilder<'_>,
+    resolve_jit_ref: cranelift_codegen::ir::FuncRef,
+    slow_callee_ref: cranelift_codegen::ir::FuncRef,
+    jit_call_sig_ref: cranelift_codegen::ir::SigRef,
+    rt_trap_null_ref: cranelift_codegen::ir::FuncRef,
+    ctx_ptr: ClifVal,
+    ptr_ty: types::Type,
+    target_id: u32,
+    arg_base: usize,
+    arg_count: usize,
+    call_dst: usize,
+    is_dst_used: bool,
+    mono_target: Option<(u32, cranelift_codegen::ir::FuncRef)>,
+    vars: &VarTable,
+    inst_ty: InstTypeInfo,
+) {
+    let obj = builder.use_var(vars.get(arg_base as u16, RegType::Ref));
+    emit_null_check(builder, ctx_ptr, obj, rt_trap_null_ref);
+
+    let mut call_args = [builder.ins().iconst(types::I64, 0); 5];
+    call_args[0] = ctx_ptr;
+    for (arg_idx, arg_ty_opt) in inst_ty.call_args.iter().enumerate().take(arg_count.min(4)) {
+        let reg_ty = arg_ty_opt.unwrap_or(RegType::I32);
+        let reg_val = builder.use_var(vars.get((arg_base + arg_idx) as u16, reg_ty));
+        call_args[1 + arg_idx] = encode_raw_word(builder, reg_val, reg_ty);
+    }
+
+    let merge_blk = builder.create_block();
+    builder.append_block_param(merge_blk, types::I64);
+    let resolve_blk = builder.create_block();
+
+    if let Some((expected_vtable_id, direct_ref)) = mono_target {
+        let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+        let obj_ext = builder.ins().uextend(ptr_ty, obj);
+        let obj_ptr = builder.ins().iadd(heap_base, obj_ext);
+        let actual_vt = builder.ins().load(types::I32, MemFlags::new(), obj_ptr, 0);
+        let is_hit = builder
+            .ins()
+            .icmp_imm(IntCC::Equal, actual_vt, i64::from(expected_vtable_id));
+        let mono_blk = builder.create_block();
+        builder.ins().brif(is_hit, mono_blk, &[], resolve_blk, &[]);
+
+        builder.switch_to_block(mono_blk);
+        let direct_call = builder.ins().call(direct_ref, &call_args);
+        let ret_raw = builder.inst_results(direct_call)[0];
+        emit_trap_return_check(builder, ctx_ptr);
+        builder.ins().jump(merge_blk, &[ret_raw]);
+    } else {
+        builder.ins().jump(resolve_blk, &[]);
+    }
+
+    builder.switch_to_block(resolve_blk);
+    let target_val = builder.ins().iconst(types::I32, i64::from(target_id));
+    let cnt_val = builder.ins().iconst(types::I32, arg_count as i64);
+    let resolve_call = builder
+        .ins()
+        .call(resolve_jit_ref, &[ctx_ptr, obj, target_val, cnt_val]);
+    let fn_ptr = builder.inst_results(resolve_call)[0];
+    let is_jit = builder.ins().icmp_imm(IntCC::NotEqual, fn_ptr, 0);
+    let indirect_blk = builder.create_block();
+    let slow_blk = builder.create_block();
+    builder.ins().brif(is_jit, indirect_blk, &[], slow_blk, &[]);
+
+    builder.switch_to_block(indirect_blk);
+    let ind_call = builder
+        .ins()
+        .call_indirect(jit_call_sig_ref, fn_ptr, &call_args);
+    let ind_ret = builder.inst_results(ind_call)[0];
+    emit_trap_return_check(builder, ctx_ptr);
+    builder.ins().jump(merge_blk, &[ind_ret]);
+
+    builder.switch_to_block(slow_blk);
+    emit_trap_return_check(builder, ctx_ptr);
+    emit_slow_call_dispatch(
+        builder,
+        slow_callee_ref,
+        ctx_ptr,
+        ptr_ty,
+        None,
+        target_id,
+        arg_base,
+        arg_count,
+        call_dst,
+        is_dst_used,
+        false,
+        vars,
+        inst_ty,
+    );
+    let slow_ret = if let Some(dst_ty) = inst_ty.dst_ty {
+        let val = builder.use_var(vars.get(call_dst as u16, dst_ty));
+        encode_raw_word(builder, val, dst_ty)
+    } else {
+        builder.ins().iconst(types::I64, 0)
+    };
+    builder.ins().jump(merge_blk, &[slow_ret]);
+
+    builder.switch_to_block(merge_blk);
+    let merged_raw = builder.block_params(merge_blk)[0];
+    if let Some(dst_ty) = inst_ty.dst_ty {
+        let typed = decode_raw_word(builder, merged_raw, dst_ty);
+        builder.def_var(vars.get(call_dst as u16, dst_ty), typed);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
