@@ -150,6 +150,12 @@ pub(crate) struct JitRuntimeSymbols {
     pub rt_set_static: FuncId,
     pub rt_load_const: FuncId,
     pub rt_call_slow: FuncId,
+    pub rt_call_symbol_slow: FuncId,
+    pub rt_call_virtual_slow: FuncId,
+    pub rt_call_interface_slow: FuncId,
+    pub rt_set_field_ref: FuncId,
+    pub rt_get_array_slow: FuncId,
+    pub rt_set_array_slow: FuncId,
     pub rt_string_eq: FuncId,
     pub rt_trap_null: FuncId,
     pub rt_trap_div_zero: FuncId,
@@ -196,6 +202,21 @@ impl JitEngine {
         builder.symbol("solix_rt_set_static", rt_set_static as *const u8);
         builder.symbol("solix_rt_load_const", rt_load_const as *const u8);
         builder.symbol("solix_rt_call_slow", rt_call_slow as *const u8);
+        builder.symbol(
+            "solix_rt_call_symbol_slow",
+            rt_call_symbol_slow as *const u8,
+        );
+        builder.symbol(
+            "solix_rt_call_virtual_slow",
+            rt_call_virtual_slow as *const u8,
+        );
+        builder.symbol(
+            "solix_rt_call_interface_slow",
+            rt_call_interface_slow as *const u8,
+        );
+        builder.symbol("solix_rt_set_field_ref", rt_set_field_ref as *const u8);
+        builder.symbol("solix_rt_get_array_slow", rt_get_array_slow as *const u8);
+        builder.symbol("solix_rt_set_array_slow", rt_set_array_slow as *const u8);
         builder.symbol("solix_rt_string_eq", rt_string_eq as *const u8);
         builder.symbol("solix_rt_trap_null", rt_trap_null as *const u8);
         builder.symbol("solix_rt_trap_div_zero", rt_trap_div_zero as *const u8);
@@ -319,6 +340,68 @@ fn declare_runtime_symbols(module: &mut JITModule) -> Result<JitRuntimeSymbols, 
             ],
             Some(types::I8),
         )?,
+        rt_call_symbol_slow: declare(
+            "solix_rt_call_symbol_slow",
+            &[
+                ptr_ty,
+                types::I32,
+                types::I32,
+                ptr_ty,
+                types::I32,
+                ptr_ty,
+                types::I32,
+                types::I32,
+            ],
+            Some(types::I8),
+        )?,
+        rt_call_virtual_slow: declare(
+            "solix_rt_call_virtual_slow",
+            &[
+                ptr_ty,
+                types::I32,
+                ptr_ty,
+                types::I32,
+                ptr_ty,
+                types::I32,
+                types::I32,
+            ],
+            Some(types::I8),
+        )?,
+        rt_call_interface_slow: declare(
+            "solix_rt_call_interface_slow",
+            &[
+                ptr_ty,
+                types::I32,
+                ptr_ty,
+                types::I32,
+                ptr_ty,
+                types::I32,
+                types::I32,
+            ],
+            Some(types::I8),
+        )?,
+        rt_set_field_ref: declare(
+            "solix_rt_set_field_ref",
+            &[ptr_ty, types::I32, types::I32, types::I32, types::I8],
+            None,
+        )?,
+        rt_get_array_slow: declare(
+            "solix_rt_get_array_slow",
+            &[ptr_ty, types::I32, types::I64, types::I32],
+            Some(types::I64),
+        )?,
+        rt_set_array_slow: declare(
+            "solix_rt_set_array_slow",
+            &[
+                ptr_ty,
+                types::I32,
+                types::I64,
+                types::I64,
+                types::I32,
+                types::I8,
+            ],
+            None,
+        )?,
         rt_string_eq: declare(
             "solix_rt_string_eq",
             &[ptr_ty, types::I32, types::I32],
@@ -380,6 +463,7 @@ fn jit_bits_to_value(bits: u64, reg_ty: RegType) -> Value {
 /// Attempts to execute `func_id` via Cranelift JIT when `JitMode` and eligibility permit.
 ///
 /// Returns `None` if the function is cold or unsupported by JIT (caller should run `fast.rs`).
+#[inline(never)]
 pub(crate) fn try_invoke_jit(
     vm: &mut VirtualMachine,
     func_id: u32,
@@ -439,7 +523,14 @@ pub(crate) fn try_invoke_jit(
         let val = vm.register_stack[caller_arg_start + arg_idx];
         match value_to_jit_bits(val, reg_ty) {
             Ok(bits) => raw_args[arg_idx] = bits,
-            Err(trap) => return Some(Err(trap)),
+            Err(_) => {
+                if let Some(engine) = vm.jit_engine.as_mut()
+                    && let Some(slot) = engine.slots.get_mut(idx)
+                {
+                    slot.state = JitCompileState::Unsupported;
+                }
+                return None;
+            }
         }
     }
 
@@ -486,6 +577,7 @@ pub(crate) fn try_invoke_jit(
 }
 
 /// Attempts to run the current top-of-stack entrypoint frame (`call_frames.len() == 1`) in JIT.
+#[inline(never)]
 pub(crate) fn try_run_entry_jit(
     vm: &mut VirtualMachine,
     target_depth: usize,
@@ -595,11 +687,24 @@ unsafe extern "C" fn rt_dec_ref(ctx_ptr: *mut JitContext, addr: u32) {
             .cast::<u32>()
     };
     let tag_and_ref = unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
-    let ref_count = tag_and_ref & 0x0FFF_FFFF;
+    let ref_count = tag_and_ref & crate::memory::MAX_REF_COUNT;
     if ref_count > 1 && ref_count < crate::memory::MAX_REF_COUNT {
-        let updated = (tag_and_ref & 0xF000_0000) | (ref_count - 1);
+        let updated = (tag_and_ref & !crate::memory::MAX_REF_COUNT) | (ref_count - 1);
         unsafe {
             std::ptr::write_unaligned(word_ptr, updated.to_le());
+        }
+        if vm.cycle_collector_enabled
+            && ((updated >> 26) & 3) != 3
+            && crate::memory::layout::can_contain_references(BlockTag::from_nibble(
+                ((updated >> 28) & 0x0F) as u8,
+            ))
+        {
+            ctx.sync_to_vm(vm);
+            if let Err(trap) = vm.push_purple_candidate_cold(addr, updated) {
+                ctx.set_trap(trap);
+            } else {
+                ctx.refresh_heap(vm);
+            }
         }
     } else if ref_count == 1 {
         ctx.sync_to_vm(vm);
@@ -644,45 +749,32 @@ unsafe extern "C" fn rt_load_const(ctx_ptr: *mut JitContext, binary_id: u32, poo
     }
 }
 
-unsafe extern "C" fn rt_call_slow(
-    ctx_ptr: *mut JitContext,
-    func_id: u32,
+#[inline(always)]
+unsafe fn marshal_jit_args(
+    vm: &mut VirtualMachine,
     args_ptr: *const u64,
-    arg_count: u32,
-    out_ptr: *mut u64,
+    count: usize,
     arg_types_mask: u32,
-    ret_type_code: u32,
-) -> u8 {
-    let ctx = unsafe { &mut *ctx_ptr };
-    let vm = unsafe { &mut *ctx.vm_ptr };
-    ctx.sync_to_vm(vm);
-    let count = arg_count as usize;
-    let base_depth = vm.call_frames.len();
+) -> usize {
     let arg_start = vm.register_stack.len();
     vm.register_stack
         .resize(arg_start + count.max(1), Value::Null);
     for arg_idx in 0..count {
-        // SAFETY: `args_ptr` points to `arg_count` `u64` raw JIT register words on caller stack.
+        // SAFETY: `args_ptr` points to `count` `u64` raw JIT register words on caller stack.
         let raw_word = unsafe { *args_ptr.add(arg_idx) };
         let reg_ty = RegType::from_code(arg_types_mask >> (arg_idx * 2));
         vm.register_stack[arg_start + arg_idx] = jit_bits_to_value(raw_word, reg_ty);
     }
+    arg_start
+}
 
-    let push_res = vm.dispatch_call_slow(func_id, u16::MAX, arg_start, count);
-    if let Err(trap) = push_res {
-        vm.register_stack.truncate(arg_start);
-        ctx.set_trap(trap);
-        return 1;
-    }
-
-    if vm.call_frames.len() > base_depth
-        && let Err(trap) = vm.run_fast_trap::<false, false>(base_depth)
-    {
-        vm.register_stack.truncate(arg_start);
-        ctx.set_trap(trap);
-        return 1;
-    }
-
+unsafe fn finish_jit_slow_return(
+    ctx: &mut JitContext,
+    vm: &mut VirtualMachine,
+    arg_start: usize,
+    out_ptr: *mut u64,
+    ret_type_code: u32,
+) -> u8 {
     let ret_raw = if ret_type_code < 4 {
         if matches!(vm.last_return_value, Value::Null) {
             0
@@ -708,6 +800,215 @@ unsafe extern "C" fn rt_call_slow(
     }
     ctx.refresh_heap(vm);
     0
+}
+
+unsafe fn dispatch_func_from_jit_slow(
+    ctx: &mut JitContext,
+    vm: &mut VirtualMachine,
+    func_id: u32,
+    arg_start: usize,
+    count: usize,
+    out_ptr: *mut u64,
+    ret_type_code: u32,
+) -> u8 {
+    if vm.jit_mode != JitMode::Off
+        && count <= 4
+        && let Some(jit_res) = try_invoke_jit(vm, func_id, u16::MAX, arg_start, count)
+    {
+        if let Err(trap) = jit_res {
+            vm.register_stack.truncate(arg_start);
+            ctx.set_trap(trap);
+            return 1;
+        }
+        return unsafe { finish_jit_slow_return(ctx, vm, arg_start, out_ptr, ret_type_code) };
+    }
+
+    let base_depth = vm.call_frames.len();
+    if let Err(trap) = vm.dispatch_call_slow(func_id, u16::MAX, arg_start, count) {
+        vm.register_stack.truncate(arg_start);
+        ctx.set_trap(trap);
+        return 1;
+    }
+    if vm.call_frames.len() > base_depth
+        && let Err(trap) = vm.run_fast_trap::<false, false>(base_depth)
+    {
+        vm.register_stack.truncate(arg_start);
+        ctx.set_trap(trap);
+        return 1;
+    }
+    unsafe { finish_jit_slow_return(ctx, vm, arg_start, out_ptr, ret_type_code) }
+}
+
+unsafe extern "C" fn rt_call_slow(
+    ctx_ptr: *mut JitContext,
+    func_id: u32,
+    args_ptr: *const u64,
+    arg_count: u32,
+    out_ptr: *mut u64,
+    arg_types_mask: u32,
+    ret_type_code: u32,
+) -> u8 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
+    let count = arg_count as usize;
+    let arg_start = unsafe { marshal_jit_args(vm, args_ptr, count, arg_types_mask) };
+    unsafe {
+        dispatch_func_from_jit_slow(ctx, vm, func_id, arg_start, count, out_ptr, ret_type_code)
+    }
+}
+
+unsafe extern "C" fn rt_call_symbol_slow(
+    ctx_ptr: *mut JitContext,
+    binary_id: u32,
+    sym_idx: u32,
+    args_ptr: *const u64,
+    arg_count: u32,
+    out_ptr: *mut u64,
+    arg_types_mask: u32,
+    ret_type_code: u32,
+) -> u8 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
+    let count = arg_count as usize;
+    let arg_start = unsafe { marshal_jit_args(vm, args_ptr, count, arg_types_mask) };
+    match vm.jit_resolve_symbol_call(binary_id as usize, sym_idx as usize, arg_start, count) {
+        Ok(Some(func_id)) => unsafe {
+            dispatch_func_from_jit_slow(ctx, vm, func_id, arg_start, count, out_ptr, ret_type_code)
+        },
+        Ok(None) => unsafe { finish_jit_slow_return(ctx, vm, arg_start, out_ptr, ret_type_code) },
+        Err(trap) => {
+            vm.register_stack.truncate(arg_start);
+            ctx.set_trap(trap);
+            1
+        }
+    }
+}
+
+unsafe extern "C" fn rt_call_virtual_slow(
+    ctx_ptr: *mut JitContext,
+    raw_target: u32,
+    args_ptr: *const u64,
+    arg_count: u32,
+    out_ptr: *mut u64,
+    arg_types_mask: u32,
+    ret_type_code: u32,
+) -> u8 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
+    let count = arg_count as usize;
+    let arg_start = unsafe { marshal_jit_args(vm, args_ptr, count, arg_types_mask) };
+    let obj_addr = match vm.register_stack.get(arg_start) {
+        Some(Value::Ref(addr)) => *addr,
+        _ => 0,
+    };
+    match vm.jit_resolve_virtual(obj_addr, raw_target as u16) {
+        Ok(func_id) => unsafe {
+            dispatch_func_from_jit_slow(ctx, vm, func_id, arg_start, count, out_ptr, ret_type_code)
+        },
+        Err(trap) => {
+            vm.register_stack.truncate(arg_start);
+            ctx.set_trap(trap);
+            1
+        }
+    }
+}
+
+unsafe extern "C" fn rt_call_interface_slow(
+    ctx_ptr: *mut JitContext,
+    target: u32,
+    args_ptr: *const u64,
+    arg_count: u32,
+    out_ptr: *mut u64,
+    arg_types_mask: u32,
+    ret_type_code: u32,
+) -> u8 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
+    let count = arg_count as usize;
+    let arg_start = unsafe { marshal_jit_args(vm, args_ptr, count, arg_types_mask) };
+    let obj_addr = match vm.register_stack.get(arg_start) {
+        Some(Value::Ref(addr)) => *addr,
+        _ => 0,
+    };
+    match vm.jit_resolve_interface(obj_addr, target as u16) {
+        Ok(func_id) => unsafe {
+            dispatch_func_from_jit_slow(ctx, vm, func_id, arg_start, count, out_ptr, ret_type_code)
+        },
+        Err(trap) => {
+            vm.register_stack.truncate(arg_start);
+            ctx.set_trap(trap);
+            1
+        }
+    }
+}
+
+unsafe extern "C" fn rt_set_field_ref(
+    ctx_ptr: *mut JitContext,
+    obj_addr: u32,
+    offset: u32,
+    new_addr: u32,
+    is_move: u8,
+) {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
+    if let Err(trap) = vm.jit_set_field_ref(obj_addr, offset as usize, new_addr, is_move != 0) {
+        ctx.set_trap(trap);
+    } else {
+        ctx.refresh_heap(vm);
+    }
+}
+
+unsafe extern "C" fn rt_get_array_slow(
+    ctx_ptr: *mut JitContext,
+    arr_addr: u32,
+    index_i64: i64,
+    expected_ty_code: u32,
+) -> u64 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    match vm.jit_get_array_slow(arr_addr, index_i64) {
+        Ok(val) => {
+            if matches!(val, Value::Null) {
+                0
+            } else {
+                match value_to_jit_bits(val, RegType::from_code(expected_ty_code)) {
+                    Ok(bits) => bits,
+                    Err(trap) => {
+                        ctx.set_trap(trap);
+                        0
+                    }
+                }
+            }
+        }
+        Err(trap) => {
+            ctx.set_trap(trap);
+            0
+        }
+    }
+}
+
+unsafe extern "C" fn rt_set_array_slow(
+    ctx_ptr: *mut JitContext,
+    arr_addr: u32,
+    index_i64: i64,
+    raw_val: u64,
+    val_ty_code: u32,
+    is_move: u8,
+) {
+    let ctx = unsafe { &mut *ctx_ptr };
+    let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
+    let val = jit_bits_to_value(raw_val, RegType::from_code(val_ty_code));
+    if let Err(trap) = vm.jit_set_array_slow(arr_addr, index_i64, val, is_move != 0) {
+        ctx.set_trap(trap);
+    } else {
+        ctx.refresh_heap(vm);
+    }
 }
 
 unsafe extern "C" fn rt_string_eq(ctx_ptr: *mut JitContext, left_addr: u32, right_addr: u32) -> u8 {
