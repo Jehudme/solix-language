@@ -1,4 +1,4 @@
-local limit = 100000
+local limit = 1000000
 local is_prime = {}
 for i = 2, limit do
     is_prime[i] = true
@@ -21,8 +21,8 @@ for i = 2, limit do
     end
 end
 
-if count == 9592 then
-    print("RESULT: 9592")
+if count == 78498 then
+    print("RESULT: 78498")
 else
     print("FAIL")
 end

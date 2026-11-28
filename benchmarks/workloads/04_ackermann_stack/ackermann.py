@@ -10,8 +10,10 @@ def ack(m: int, n: int) -> int:
     return ack(m - 1, ack(m, n - 1))
 
 if __name__ == "__main__":
-    result = ack(3, 6)
-    if result == 509:
-        print("RESULT: 509")
+    total = 0
+    for _ in range(15):
+        total = (total + ack(3, 6)) & 0x7FFFFFFF
+    if total == 7635:
+        print("RESULT: 7635")
     else:
         print("FAIL")

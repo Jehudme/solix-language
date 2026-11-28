@@ -15,7 +15,7 @@ class MatMulApp {
         }
 
         int32 trace = 0;
-        for (int32 rep = 0; rep < 50; rep = rep + 1) {
+        for (int32 rep = 0; rep < 400; rep = rep + 1) {
             for (int32 i = 0; i < n; i = i + 1) {
                 int32 c_ii = 0;
                 for (int32 k = 0; k < n; k = k + 1) {
@@ -25,8 +25,8 @@ class MatMulApp {
             }
         }
 
-        if (trace == 455915000) {
-            println("RESULT: 455915000");
+        if (trace == 1499836352) {
+            println("RESULT: 1499836352");
         } else {
             println("FAIL");
         }

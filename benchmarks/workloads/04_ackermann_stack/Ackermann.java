@@ -10,9 +10,12 @@ public class Ackermann {
     }
 
     public static void main(String[] arguments) {
-        int result = ackermann(3, 6);
-        if (result == 509) {
-            System.out.println("RESULT: 509");
+        int total = 0;
+        for (int rep = 0; rep < 15; rep++) {
+            total = (total + ackermann(3, 6)) & 0x7FFFFFFF;
+        }
+        if (total == 7635) {
+            System.out.println("RESULT: 7635");
         } else {
             System.out.println("FAIL");
         }

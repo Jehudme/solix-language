@@ -1,5 +1,5 @@
 if __name__ == "__main__":
-    limit = 100000
+    limit = 1000000
     is_prime = [True] * (limit + 1)
     is_prime[0] = False
     is_prime[1] = False
@@ -12,7 +12,7 @@ if __name__ == "__main__":
         p += 1
 
     count = sum(1 for i in range(2, limit + 1) if is_prime[i])
-    if count == 9592:
-        print("RESULT: 9592")
+    if count == 78498:
+        print("RESULT: 78498")
     else:
         print("FAIL")

@@ -1,6 +1,6 @@
 public class Sieve {
     public static void main(String[] arguments) {
-        int limit = 100000;
+        int limit = 1000000;
         boolean[] is_prime = new boolean[limit + 1];
         for (int number = 2; number <= limit; number++) {
             is_prime[number] = true;
@@ -21,8 +21,8 @@ public class Sieve {
             }
         }
 
-        if (count == 9592) {
-            System.out.println("RESULT: 9592");
+        if (count == 78498) {
+            System.out.println("RESULT: 78498");
         } else {
             System.out.println("FAIL");
         }

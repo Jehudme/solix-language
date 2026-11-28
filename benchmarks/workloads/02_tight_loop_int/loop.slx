@@ -3,12 +3,12 @@ native void println(string msg);
 class TightLoopApp {
     public static void main() {
         int32 sum = 0;
-        for (int32 i = 0; i < 1000000; i = i + 1) {
+        for (int32 i = 0; i < 8000000; i = i + 1) {
             sum = (sum + (i ^ (i % 7))) & 0x7FFFFFFF;
         }
 
-        if (sum == 1783293643) {
-            println("RESULT: 1783293643");
+        if (sum == 342161131) {
+            println("RESULT: 342161131");
         } else {
             println("FAIL");
         }

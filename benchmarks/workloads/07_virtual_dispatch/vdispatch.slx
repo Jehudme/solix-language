@@ -32,13 +32,13 @@ class VDispatchApp {
         shapes[2] = new Triangle();
 
         int32 total = 0;
-        for (int32 i = 0; i < 100000; i = i + 1) {
+        for (int32 i = 0; i < 1200000; i = i + 1) {
             Shape s = shapes[i % 3];
             total = (total + s.get_area(i % 10)) & 0x7FFFFFFF;
         }
 
-        if (total == 1349997) {
-            println("RESULT: 1349997");
+        if (total == 16200000) {
+            println("RESULT: 16200000");
         } else {
             println("FAIL");
         }

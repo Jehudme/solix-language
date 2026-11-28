@@ -37,14 +37,14 @@ static void free_tree(Node *node) {
 
 int main(void) {
     int total = 0;
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 100; i++) {
         Node *root = build_tree(10, i + 1);
         total = (total + check_tree(root)) & 0x7FFFFFFF;
         free_tree(root);
     }
 
-    if (total == 83875825) {
-        printf("RESULT: 83875825\n");
+    if (total == 687761806) {
+        printf("RESULT: 687761806\n");
     } else {
         printf("FAIL\n");
     }

@@ -17,10 +17,10 @@ class Triangle(Shape):
 if __name__ == "__main__":
     shapes = [Circle(), Square(), Triangle()]
     total = 0
-    for i in range(100000):
+    for i in range(1200000):
         total = (total + shapes[i % 3].get_area(i % 10)) & 0x7FFFFFFF
 
-    if total == 1349997:
-        print("RESULT: 1349997")
+    if total == 16200000:
+        print("RESULT: 16200000")
     else:
         print("FAIL")

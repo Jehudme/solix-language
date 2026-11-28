@@ -8,12 +8,12 @@ public class Closures {
         IntUnaryOperator adder = (int input_val) -> input_val + base_value;
 
         int total = 0;
-        for (int iteration = 0; iteration < 400000; iteration++) {
+        for (int iteration = 0; iteration < 4000000; iteration++) {
             total = (total + adder.apply(iteration % 100)) & 0x7FFFFFFF;
         }
 
-        if (total == 22600000) {
-            System.out.println("RESULT: 22600000");
+        if (total == 226000000) {
+            System.out.println("RESULT: 226000000");
         } else {
             System.out.println("FAIL");
         }

@@ -20,8 +20,8 @@ for i = 0, 9 do
     total = (total + check_tree(root)) % 2147483648
 end
 
-if total == 83875825 then
-    print("RESULT: 83875825")
+if total == 687761806 then
+    print("RESULT: 687761806")
 else
     print("FAIL")
 end

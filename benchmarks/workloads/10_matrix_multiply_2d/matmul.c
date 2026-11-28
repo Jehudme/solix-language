@@ -14,7 +14,7 @@ int main(void) {
     }
 
     int trace = 0;
-    for (int rep = 0; rep < 50; rep++) {
+    for (int rep = 0; rep < 400; rep++) {
         for (int i = 0; i < N; i++) {
             int c_ii = 0;
             for (int k = 0; k < N; k++) {
@@ -24,8 +24,8 @@ int main(void) {
         }
     }
 
-    if (trace == 455915000) {
-        printf("RESULT: 455915000\n");
+    if (trace == 1499836352) {
+        printf("RESULT: 1499836352\n");
     } else {
         printf("FAIL\n");
     }

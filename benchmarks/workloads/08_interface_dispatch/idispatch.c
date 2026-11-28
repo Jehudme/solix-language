@@ -20,13 +20,13 @@ int main(void) {
     IWorker wb = { worker_b_work };
 
     int total = 0;
-    for (int i = 0; i < 400000; i++) {
+    for (int i = 0; i < 2000000; i++) {
         IWorker *w = (i % 2 == 0) ? &wa : &wb;
         total = (total + w->work(w, i % 10)) & 0x7FFFFFFF;
     }
 
-    if (total == 4800000) {
-        printf("RESULT: 4800000\n");
+    if (total == 24000000) {
+        printf("RESULT: 24000000\n");
     } else {
         printf("FAIL\n");
     }

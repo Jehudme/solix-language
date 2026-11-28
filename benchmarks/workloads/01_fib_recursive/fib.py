@@ -4,8 +4,8 @@ def fib(n: int) -> int:
     return fib(n - 1) + fib(n - 2)
 
 if __name__ == "__main__":
-    result = fib(28)
-    if result == 317811:
-        print("RESULT: 317811")
+    result = fib(32)
+    if result == 2178309:
+        print("RESULT: 2178309")
     else:
         print("FAIL")

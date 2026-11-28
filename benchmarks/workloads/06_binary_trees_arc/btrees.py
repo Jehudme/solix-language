@@ -20,11 +20,11 @@ def check_tree(node) -> int:
 
 if __name__ == "__main__":
     total = 0
-    for i in range(10):
+    for i in range(100):
         root = build_tree(10, i + 1)
         total = (total + check_tree(root)) & 0x7FFFFFFF
 
-    if total == 83875825:
-        print("RESULT: 83875825")
+    if total == 687761806:
+        print("RESULT: 687761806")
     else:
         print("FAIL")

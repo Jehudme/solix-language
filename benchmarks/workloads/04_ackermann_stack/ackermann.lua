@@ -8,9 +8,12 @@ local function ack(m, n)
     return ack(m - 1, ack(m, n - 1))
 end
 
-local result = ack(3, 6)
-if result == 509 then
-    print("RESULT: 509")
+local total = 0
+for rep = 1, 15 do
+    total = (total + ack(3, 6)) % 2147483648
+end
+if total == 7635 then
+    print("RESULT: 7635")
 else
     print("FAIL")
 end

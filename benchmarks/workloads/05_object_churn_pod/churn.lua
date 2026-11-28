@@ -4,8 +4,8 @@ for i = 0, 299999 do
     total = (total + p.x + p.y) % 2147483648
 end
 
-if total == 1855563824 then
-    print("RESULT: 1855563824")
+if total == 913288672 then
+    print("RESULT: 913288672")
 else
     print("FAIL")
 end

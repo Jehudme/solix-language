@@ -15,14 +15,14 @@ class Box<T> {
 class GenericsApp {
     public static void main() {
         int32 total = 0;
-        for (int32 i = 0; i < 50000; i = i + 1) {
+        for (int32 i = 0; i < 800000; i = i + 1) {
             Box<int32> b1 = new Box<int32>(i);
             Box<int32> b2 = new Box<int32>(i * 4 + 7);
             total = (total + b1.get_val() + b2.get_val()) & 0x7FFFFFFF;
         }
 
-        if (total == 1955257704) {
-            println("RESULT: 1955257704");
+        if (total == 128282240) {
+            println("RESULT: 128282240");
         } else {
             println("FAIL");
         }

@@ -2,8 +2,8 @@ native void println(string msg);
 
 class SieveApp {
     public static void main() {
-        int32 limit = 100000;
-        bool[] is_prime = new bool[100001];
+        int32 limit = 1000000;
+        bool[] is_prime = new bool[10000001];
 
         for (int32 i = 2; i <= limit; i = i + 1) {
             is_prime[i] = true;
@@ -24,8 +24,8 @@ class SieveApp {
             }
         }
 
-        if (count == 9592) {
-            println("RESULT: 9592");
+        if (count == 78498) {
+            println("RESULT: 78498");
         } else {
             println("FAIL");
         }
