@@ -598,27 +598,33 @@ jobs:
           fi
 
           if [ -n "$PREV_BIN" ] && [ -x "$PREV_BIN" ]; then
-            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin "$PREV_BIN" --solix-only --label "$PREV_TAG" --save-baseline staging-benchmarks/prev_baseline.json
-            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin target/release/solix --label "$CURRENT_TAG" --save-baseline staging-benchmarks/release_baseline.json
+            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin "$PREV_BIN" --solix-only --label "$PREV_TAG" --save-baseline "$RUNNER_TEMP/prev_baseline.json"
+            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin target/release/solix --label "$CURRENT_TAG" --save-baseline "$RUNNER_TEMP/release_baseline.json"
             python3 scripts/bench/solix_bench.py compare \
-              --previous staging-benchmarks/prev_baseline.json \
-              --current staging-benchmarks/release_baseline.json \
+              --previous "$RUNNER_TEMP/prev_baseline.json" \
+              --current "$RUNNER_TEMP/release_baseline.json" \
               --current-tag "$CURRENT_TAG" \
               --previous-tag "$PREV_TAG" \
               --same-host \
               --cross-language \
               --min-delta-ms 0.5 \
               --markdown-output staging-benchmarks/benchmark_comparison.md
+            rm -f "$RUNNER_TEMP/prev_baseline.json" "$RUNNER_TEMP/release_baseline.json"
           else
             echo "Previous Linux binary unavailable; running single-host baseline and historical comparison."
-            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin target/release/solix --label "$CURRENT_TAG" --save-baseline staging-benchmarks/release_baseline.json
+            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin target/release/solix --label "$CURRENT_TAG" --save-baseline "$RUNNER_TEMP/release_baseline.json"
             python3 scripts/bench/solix_bench.py compare \
-              --current staging-benchmarks/release_baseline.json \
+              --current "$RUNNER_TEMP/release_baseline.json" \
               --download-previous \
               --current-tag "$CURRENT_TAG" \
               --cross-language \
               --min-delta-ms 0.5 \
               --markdown-output staging-benchmarks/benchmark_comparison.md
+            rm -f "$RUNNER_TEMP/release_baseline.json"
+          fi
+
+          if [ -f staging-benchmarks/benchmark_comparison.md ]; then
+            printf '\n> [!WARNING]\n> **CI Benchmark Hardware Variance Notice:** Benchmark measurements executed on shared virtualized GitHub Actions runners are subject to CPU throttling, noisy neighbors, and hyperthread contention. They provide directional guidance rather than absolute bare-metal performance metrics.\n\n' >> staging-benchmarks/benchmark_comparison.md
           fi
 
       - name: Upload benchmark artifacts for release ingestion

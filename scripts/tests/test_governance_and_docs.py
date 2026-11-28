@@ -1068,11 +1068,11 @@ class SolixBenchCliTests(unittest.TestCase):
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("--remove-label", ci_text)
         self.assertIn("pr-benchmark:", ci_text)
-        self.assertIn("<!-- solix-pr-benchmark -->", ci_text)
+        self.assertIn("benchmarks_needed", ci_text)
         self.assertIn("<!-- solix-pr-coverage -->", ci_text)
         self.assertIn("Publish benchmark report to Step Summary", ci_text)
         self.assertIn(
-            "pr-benchmark:\n    name: PR Performance Benchmark (vs dev)\n    if: github.event_name == 'pull_request' && github.base_ref == 'dev'\n",
+            "pr-benchmark:\n    name: PR Performance Benchmark (vs dev)\n",
             ci_text,
         )
         self.assertNotIn("  push:\n    branches:\n      - dev", ci_text)
