@@ -8,6 +8,7 @@
 use crate::CompilationContext::CompilationContext;
 use crate::CompilationDiagnostic;
 use crate::phases::phase::CompilationPhase;
+use smallvec::{SmallVec, smallvec};
 use solix_common::bytecode::{CompiledFunction, Instruction, OpCode, SourceMapEntry};
 use solix_common::diagnostics::EmissionError;
 use std::collections::{HashMap, HashSet};
@@ -167,12 +168,96 @@ impl CompilationPhase for BytecodeOptimizerPhase {
     }
 }
 
+/// Dense register bitset avoiding SipHash `HashSet<u16>` allocations for common `<= 128`-register frames.
+#[derive(Clone, Default)]
+struct RegisterBitSet {
+    inline_words: [u64; 2],
+    overflow_words: Vec<u64>,
+}
+
+impl RegisterBitSet {
+    fn new(num_registers: usize) -> Self {
+        let total_words = num_registers.div_ceil(64);
+        let overflow_words = if total_words > 2 {
+            vec![0; total_words - 2]
+        } else {
+            Vec::new()
+        };
+        Self {
+            inline_words: [0; 2],
+            overflow_words,
+        }
+    }
+
+    fn insert(&mut self, reg: u16) -> bool {
+        let reg_index = reg as usize;
+        let word_idx = reg_index / 64;
+        let bit_mask = 1u64 << (reg_index % 64);
+        if word_idx < 2 {
+            let was_set = (self.inline_words[word_idx] & bit_mask) != 0;
+            self.inline_words[word_idx] |= bit_mask;
+            !was_set
+        } else {
+            let overflow_idx = word_idx - 2;
+            if overflow_idx >= self.overflow_words.len() {
+                self.overflow_words.resize(overflow_idx + 1, 0);
+            }
+            let was_set = (self.overflow_words[overflow_idx] & bit_mask) != 0;
+            self.overflow_words[overflow_idx] |= bit_mask;
+            !was_set
+        }
+    }
+
+    fn remove(&mut self, reg: u16) -> bool {
+        let reg_index = reg as usize;
+        let word_idx = reg_index / 64;
+        let bit_mask = 1u64 << (reg_index % 64);
+        if word_idx < 2 {
+            let was_set = (self.inline_words[word_idx] & bit_mask) != 0;
+            self.inline_words[word_idx] &= !bit_mask;
+            was_set
+        } else {
+            let overflow_idx = word_idx - 2;
+            if let Some(word_slot) = self.overflow_words.get_mut(overflow_idx) {
+                let was_set = (*word_slot & bit_mask) != 0;
+                *word_slot &= !bit_mask;
+                was_set
+            } else {
+                false
+            }
+        }
+    }
+
+    #[inline]
+    fn contains(&self, reg: &u16) -> bool {
+        let reg_index = *reg as usize;
+        let word_idx = reg_index / 64;
+        let bit_mask = 1u64 << (reg_index % 64);
+        if word_idx < 2 {
+            (self.inline_words[word_idx] & bit_mask) != 0
+        } else {
+            self.overflow_words
+                .get(word_idx - 2)
+                .is_some_and(|word_val| (*word_val & bit_mask) != 0)
+        }
+    }
+
+    fn clear(&mut self) {
+        self.inline_words = [0; 2];
+        self.overflow_words.fill(0);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inline_words == [0; 2] && self.overflow_words.iter().all(|word_val| *word_val == 0)
+    }
+}
+
 /// Intermediate representation of an instruction during optimization passes.
 #[derive(Clone)]
 struct IntermediateInstruction {
     instruction: Instruction,
     original_pc: usize,
-    covered_original_pcs: Vec<usize>,
+    covered_original_pcs: SmallVec<[usize; 2]>,
     jump_target_old_pc: Option<usize>,
 }
 
@@ -1000,29 +1085,36 @@ fn eliminate_dead_pack_closures(function: &mut CompiledFunction) -> bool {
         return false;
     }
 
-    let mut write_counts: HashMap<u16, usize> = HashMap::new();
-    let mut non_arc_read_counts: HashMap<u16, usize> = HashMap::new();
+    let num_regs = function.num_registers as usize;
+    let mut write_counts = vec![0u32; num_regs];
+    let mut non_arc_read_counts = vec![0u32; num_regs];
     for inst in &function.instructions {
         let raw = inst.raw_opcode();
         if raw == OpCode::UnpackCaptures as u8 {
             let base = inst.arg_base();
             let count = inst.arg_count() as u16;
             for reg in base..base + count {
-                *write_counts.entry(reg).or_insert(0) += 1;
+                if let Some(slot) = write_counts.get_mut(reg as usize) {
+                    *slot += 1;
+                }
             }
-        } else if let Some(dst) = instruction_write_dst(inst) {
-            *write_counts.entry(dst).or_insert(0) += 1;
+        } else if let Some(dst) = instruction_write_dst(inst)
+            && let Some(slot) = write_counts.get_mut(dst as usize)
+        {
+            *slot += 1;
         }
         if raw != OpCode::IncRef as u8 && raw != OpCode::DecRef as u8 {
             for reg in 0..function.num_registers {
-                if instruction_reads_register(inst, reg) {
-                    *non_arc_read_counts.entry(reg).or_insert(0) += 1;
+                if instruction_reads_register(inst, reg)
+                    && let Some(slot) = non_arc_read_counts.get_mut(reg as usize)
+                {
+                    *slot += 1;
                 }
             }
         }
     }
 
-    let mut dead_closure_regs: HashSet<u16> = HashSet::new();
+    let mut dead_closure_regs = RegisterBitSet::new(num_regs);
     for inst in &function.instructions {
         if inst.raw_opcode() == OpCode::PackClosure as u8 {
             let closure_reg = inst.call_dst();
@@ -1032,8 +1124,12 @@ fn eliminate_dead_pack_closures(function: &mut CompiledFunction) -> bool {
                 .any(|handler| handler.catch_reg == closure_reg);
             if !is_catch_reg
                 && closure_reg >= function.param_count
-                && write_counts.get(&closure_reg).copied() == Some(1)
-                && non_arc_read_counts.get(&closure_reg).copied().unwrap_or(0) == 0
+                && write_counts.get(closure_reg as usize).copied() == Some(1)
+                && non_arc_read_counts
+                    .get(closure_reg as usize)
+                    .copied()
+                    .unwrap_or(0)
+                    == 0
             {
                 dead_closure_regs.insert(closure_reg);
             }
@@ -1324,16 +1420,20 @@ fn propagate_entry_constants(function: &mut CompiledFunction, fold_branches: boo
     }
 
     let critical_targets = collect_critical_targets(function);
-    let mut write_counts: HashMap<u16, usize> = HashMap::new();
+    let mut write_counts = vec![0u32; function.num_registers as usize];
     for inst in &function.instructions {
         if inst.raw_opcode() == OpCode::UnpackCaptures as u8 {
             let base = inst.arg_base();
             let count = inst.arg_count() as u16;
             for reg in base..base + count {
-                *write_counts.entry(reg).or_insert(0) += 1;
+                if let Some(slot) = write_counts.get_mut(reg as usize) {
+                    *slot += 1;
+                }
             }
-        } else if let Some(dst) = instruction_write_dst(inst) {
-            *write_counts.entry(dst).or_insert(0) += 1;
+        } else if let Some(dst) = instruction_write_dst(inst)
+            && let Some(slot) = write_counts.get_mut(dst as usize)
+        {
+            *slot += 1;
         }
     }
 
@@ -1355,7 +1455,7 @@ fn propagate_entry_constants(function: &mut CompiledFunction, fold_branches: boo
             let dst = inst.dst();
             let imm = inst.imm32_signed();
             if dst >= function.param_count
-                && write_counts.get(&dst).copied() == Some(1)
+                && write_counts.get(dst as usize).copied() == Some(1)
                 && let Ok(imm16) = i16::try_from(imm)
             {
                 entry_consts.insert(dst, imm16);
@@ -1725,8 +1825,8 @@ fn elide_fresh_null_set_fields(function: &mut CompiledFunction) {
     }
     let critical_targets = collect_critical_targets(function);
     let is_ctor = function.symbol.contains("::constructor");
-    let mut fresh_zero_regs: HashSet<u16> = HashSet::new();
-    let mut block_null_regs: HashSet<u16> = HashSet::new();
+    let mut fresh_zero_regs = RegisterBitSet::new(function.num_registers as usize);
+    let mut block_null_regs = RegisterBitSet::new(function.num_registers as usize);
     if is_ctor {
         fresh_zero_regs.insert(0);
     }
@@ -1754,19 +1854,19 @@ fn elide_fresh_null_set_fields(function: &mut CompiledFunction) {
 
         if raw == OpCode::AllocObject as u8 {
             fresh_zero_regs.insert(inst.dst());
-            block_null_regs.remove(&inst.dst());
+            block_null_regs.remove(inst.dst());
             continue;
         }
 
         if raw == OpCode::LoadNull as u8 {
             block_null_regs.insert(inst.dst());
-            fresh_zero_regs.remove(&inst.dst());
+            fresh_zero_regs.remove(inst.dst());
             continue;
         }
 
         if let Some(written) = instruction_write_dst(&inst) {
-            block_null_regs.remove(&written);
-            fresh_zero_regs.remove(&written);
+            block_null_regs.remove(written);
+            fresh_zero_regs.remove(written);
         }
 
         if is_control_flow_terminator(raw)
@@ -2199,11 +2299,13 @@ fn optimize_peephole_passes(
         stream.push(IntermediateInstruction {
             instruction: *instruction,
             original_pc: pc_index,
-            covered_original_pcs: vec![pc_index],
+            covered_original_pcs: smallvec![pc_index],
             jump_target_old_pc: decode_jump_target(*instruction, pc_index, original_count),
         });
     }
 
+    let mut next_stream: Vec<IntermediateInstruction> = Vec::with_capacity(original_count);
+    let mut pending_orphaned_pcs: SmallVec<[usize; 2]> = SmallVec::new();
     let max_passes = 6;
     for _pass_index in 0..max_passes {
         let mut old_pc_to_stream_idx: Vec<Option<usize>> = vec![None; original_count + 1];
@@ -2233,8 +2335,8 @@ fn optimize_peephole_passes(
         changed |=
             propagate_single_def_copies(&mut stream, &old_pc_to_stream_idx, &stream_critical);
 
-        let mut next_stream: Vec<IntermediateInstruction> = Vec::with_capacity(stream.len());
-        let mut pending_orphaned_pcs: Vec<usize> = Vec::new();
+        next_stream.clear();
+        pending_orphaned_pcs.clear();
         let mut cursor = 0;
 
         while cursor < stream.len() {
@@ -3314,7 +3416,7 @@ fn optimize_peephole_passes(
                 .extend_from_slice(&pending_orphaned_pcs);
         }
 
-        stream = next_stream;
+        std::mem::swap(&mut stream, &mut next_stream);
         if !changed {
             break;
         }

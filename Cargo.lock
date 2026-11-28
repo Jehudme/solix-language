@@ -1214,6 +1214,7 @@ dependencies = [
  "miette",
  "serde",
  "serde_json",
+ "smallvec",
  "solix-common",
  "solix-runtime",
  "tempfile",
