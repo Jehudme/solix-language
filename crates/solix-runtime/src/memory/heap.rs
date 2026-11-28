@@ -333,6 +333,36 @@ impl VirtualHeap {
         Ok(payload_abs_addr)
     }
 
+    /// Returns the high-water zeroed byte address in `buffer`.
+    #[inline(always)]
+    pub(crate) fn high_water_zeroed(&self) -> usize {
+        self.high_water_zeroed
+    }
+
+    /// Reconciles inline JIT bump allocations back into `VirtualHeap` accounting.
+    #[inline(always)]
+    pub(crate) fn commit_jit_bump(
+        &mut self,
+        new_bump_cursor: usize,
+        alloc_count: u64,
+        alloc_bytes: usize,
+    ) {
+        if new_bump_cursor > self.bump_cursor {
+            self.bump_cursor = new_bump_cursor;
+            self.high_water_zeroed = self
+                .high_water_zeroed
+                .max(self.static_size + new_bump_cursor);
+        }
+        if alloc_count > 0 {
+            self.total_allocations_count += alloc_count;
+            self.active_live_objects += alloc_count as usize;
+            self.current_allocated_bytes += alloc_bytes;
+            if self.current_allocated_bytes > self.peak_allocated_bytes {
+                self.peak_allocated_bytes = self.current_allocated_bytes;
+            }
+        }
+    }
+
     /// Allocates from `FreeListManager` when quick lists and bump allocation are exhausted.
     fn allocate_from_free_list(
         &mut self,

@@ -78,15 +78,56 @@ pub struct JitContext {
     pub heap_ptr: *mut u8,
     pub heap_len: usize,
     pub vm_ptr: *mut VirtualMachine,
+    pub static_size: usize,
+    pub bump_cursor: usize,
+    pub bump_limit: usize,
+    pub jit_alloc_count: u64,
+    pub jit_alloc_bytes: usize,
     pub has_trap: u8,
     pub(crate) pending_trap: Option<VmTrap>,
 }
 
 impl JitContext {
     #[inline(always)]
+    fn from_vm(vm: &mut VirtualMachine) -> Self {
+        let mut ctx = Self {
+            heap_ptr: std::ptr::null_mut(),
+            heap_len: 0,
+            vm_ptr: vm as *mut VirtualMachine,
+            static_size: 0,
+            bump_cursor: 0,
+            bump_limit: 0,
+            jit_alloc_count: 0,
+            jit_alloc_bytes: 0,
+            has_trap: 0,
+            pending_trap: None,
+        };
+        ctx.refresh_heap(vm);
+        ctx
+    }
+
+    #[inline(always)]
+    fn sync_to_vm(&mut self, vm: &mut VirtualMachine) {
+        vm.heap
+            .commit_jit_bump(self.bump_cursor, self.jit_alloc_count, self.jit_alloc_bytes);
+        self.jit_alloc_count = 0;
+        self.jit_alloc_bytes = 0;
+    }
+
+    #[inline(always)]
     fn refresh_heap(&mut self, vm: &mut VirtualMachine) {
         self.heap_ptr = vm.heap.buffer.as_mut_ptr();
         self.heap_len = vm.heap.buffer.len();
+        let static_size = vm.heap.static_size();
+        self.static_size = static_size;
+        self.bump_cursor = vm.heap.bump_cursor;
+        // Only expose committed zeroed tail above high_water_zeroed so inline bump alloc
+        // never skips zero-initialization on reused/dirty buffer regions.
+        self.bump_limit = if static_size + vm.heap.bump_cursor >= vm.heap.high_water_zeroed() {
+            vm.heap.buffer.len().saturating_sub(static_size)
+        } else {
+            vm.heap.bump_cursor
+        };
     }
 
     #[inline(never)]
@@ -402,13 +443,7 @@ pub(crate) fn try_invoke_jit(
         }
     }
 
-    let mut jit_ctx = JitContext {
-        heap_ptr: vm.heap.buffer.as_mut_ptr(),
-        heap_len: vm.heap.buffer.len(),
-        vm_ptr: vm as *mut VirtualMachine,
-        has_trap: 0,
-        pending_trap: None,
-    };
+    let mut jit_ctx = JitContext::from_vm(vm);
 
     type JitFn4 = unsafe extern "C" fn(*mut JitContext, u64, u64, u64, u64) -> u64;
     // SAFETY: `fn_ptr` was finalized by `JITModule` with signature `(ptr, i64, i64, i64, i64) -> i64`.
@@ -422,6 +457,7 @@ pub(crate) fn try_invoke_jit(
             raw_args[3],
         )
     };
+    jit_ctx.sync_to_vm(vm);
 
     if jit_ctx.has_trap != 0 {
         let trap = jit_ctx
@@ -478,6 +514,7 @@ unsafe extern "C" fn rt_alloc_object(
     let ctx = unsafe { &mut *ctx_ptr };
     // SAFETY: `ctx.vm_ptr` points to the active `VirtualMachine` for the duration of JIT execution.
     let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
     let tag = if is_pod != 0 {
         BlockTag::ObjectPod
     } else {
@@ -504,6 +541,7 @@ unsafe extern "C" fn rt_alloc_array(
 ) -> u32 {
     let ctx = unsafe { &mut *ctx_ptr };
     let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
     if array_len < 0 {
         ctx.set_trap(VmTrap::index_out_of_bounds(i64::from(array_len), 0));
         return 0;
@@ -564,6 +602,7 @@ unsafe extern "C" fn rt_dec_ref(ctx_ptr: *mut JitContext, addr: u32) {
             std::ptr::write_unaligned(word_ptr, updated.to_le());
         }
     } else if ref_count == 1 {
+        ctx.sync_to_vm(vm);
         if let Err(trap) = vm.release_reference_cold(addr) {
             ctx.set_trap(trap);
         } else {
@@ -616,6 +655,7 @@ unsafe extern "C" fn rt_call_slow(
 ) -> u8 {
     let ctx = unsafe { &mut *ctx_ptr };
     let vm = unsafe { &mut *ctx.vm_ptr };
+    ctx.sync_to_vm(vm);
     let count = arg_count as usize;
     let base_depth = vm.call_frames.len();
     let arg_start = vm.register_stack.len();
