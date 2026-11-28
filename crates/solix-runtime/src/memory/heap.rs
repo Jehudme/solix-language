@@ -60,6 +60,9 @@ pub struct VirtualHeap {
     pub active_live_objects: usize,
     /// Monotonically advancing bump allocation cursor.
     pub bump_cursor: usize,
+    /// High-water byte address in `buffer` that has already been written past or dirtied;
+    /// bump allocations at or above this address are guaranteed zero-initialized from `Vec::resize`.
+    high_water_zeroed: usize,
     /// O(1) intrusive quick-lists for size classes 8B..256B in 8-byte increments.
     pub quick_lists: [u32; 32],
     /// Lazily allocated weak-reference generation tracker; stays `None` until first weak write.
@@ -98,6 +101,7 @@ impl VirtualHeap {
             safe_mode: false,
             active_live_objects: 0,
             bump_cursor: 0,
+            high_water_zeroed: 0,
             quick_lists: [0u32; 32],
             weak_tracker: None,
         }
@@ -211,6 +215,7 @@ impl VirtualHeap {
             self.static_size = new_static_size;
             self.free_list = FreeListManager::new_empty(self.dynamic_capacity);
             self.bump_cursor = 0;
+            self.high_water_zeroed = 0;
             self.quick_lists = [0u32; 32];
             self.active_live_objects = 0;
         }
@@ -294,7 +299,12 @@ impl VirtualHeap {
                     .copy_from_slice(&header_bytes);
 
                 let payload_end = block_abs_addr + required_block_size;
-                self.buffer[payload_addr as usize..payload_end].fill(0);
+                if (payload_addr as usize) < self.high_water_zeroed {
+                    self.buffer[payload_addr as usize..payload_end].fill(0);
+                }
+                if payload_end > self.high_water_zeroed {
+                    self.high_water_zeroed = payload_end;
+                }
 
                 (payload_addr, required_block_size)
             } else {
@@ -856,7 +866,7 @@ impl VirtualHeap {
             let _ = writeln!(
                 report,
                 "Free-list is fragmented: {} free blocks remaining instead of 1 coalesced block.",
-                self.free_list.free_by_offset.len()
+                self.free_list.free_block_count()
             );
             return Err(RuntimeError::MemoryLeak {
                 unallocated_count: 0,
