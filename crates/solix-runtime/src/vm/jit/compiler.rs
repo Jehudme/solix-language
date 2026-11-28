@@ -1913,6 +1913,13 @@ fn translate_function(
         .declare_func_in_func(engine.rt_symbols.rt_trap_oob, builder.func);
 
     let mut block_terminated = false;
+    let can_realloc = function_can_reallocate_heap(&compiled_fn.instructions, types_info);
+    let hoisted_heap_base = if can_realloc {
+        None
+    } else {
+        Some(builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0))
+    };
+    let mut opt_state = BlockOptState::new(hoisted_heap_base);
 
     for (pc, inst) in compiled_fn.instructions.iter().enumerate() {
         if pc > 0
@@ -1923,6 +1930,7 @@ fn translate_function(
             }
             builder.switch_to_block(next_blk);
             block_terminated = false;
+            opt_state.reset_block();
         }
         if block_terminated {
             continue;
@@ -1936,6 +1944,12 @@ fn translate_function(
                 let mov_ty = inst_ty.dst_ty.unwrap_or(RegType::I32);
                 let val = builder.use_var(vars.get(inst.src1(), mov_ty));
                 builder.def_var(vars.get(inst.dst(), mov_ty), val);
+                if mov_ty == RegType::Ref {
+                    let src_non_null = opt_state.is_non_null(inst.src1());
+                    opt_state.set_non_null(inst.dst(), src_non_null);
+                } else {
+                    opt_state.clear_non_null(inst.dst());
+                }
             }
             OpCode::LoadI32 => {
                 let val = builder
@@ -2500,6 +2514,8 @@ fn translate_function(
                 builder.switch_to_block(merge_blk);
                 let merged_addr = builder.block_params(merge_blk)[0];
                 builder.def_var(vars.get(inst.dst(), RegType::Ref), merged_addr);
+                opt_state.invalidate_heap();
+                opt_state.set_non_null(inst.dst(), true);
             }
             OpCode::AllocArray => {
                 use crate::memory::{BlockTag, GcColor};
@@ -2620,11 +2636,19 @@ fn translate_function(
                 builder.switch_to_block(merge_blk);
                 let merged_addr = builder.block_params(merge_blk)[0];
                 builder.def_var(vars.get(inst.dst(), RegType::Ref), merged_addr);
+                opt_state.invalidate_heap();
+                opt_state.set_non_null(inst.dst(), true);
             }
             OpCode::GetFieldI32 | OpCode::GetFieldF64 => {
                 let obj = builder.use_var(vars.get(inst.src1(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, obj, rt_trap_null_ref);
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                opt_state.ensure_non_null(
+                    &mut builder,
+                    ctx_ptr,
+                    inst.src1(),
+                    obj,
+                    rt_trap_null_ref,
+                );
+                let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let obj_ext = builder.ins().uextend(ptr_ty, obj);
                 let field_off = inst.src2() as i32;
                 let ptr = builder.ins().iadd(heap_base, obj_ext);
@@ -2635,11 +2659,18 @@ fn translate_function(
                 };
                 let val = builder.ins().load(read_ty, MemFlags::new(), ptr, field_off);
                 builder.def_var(vars.get(inst.dst(), dst_ty), val);
+                opt_state.clear_non_null(inst.dst());
             }
             OpCode::SetFieldI32 | OpCode::SetFieldF64 => {
                 let obj = builder.use_var(vars.get(inst.src1(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, obj, rt_trap_null_ref);
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                opt_state.ensure_non_null(
+                    &mut builder,
+                    ctx_ptr,
+                    inst.src1(),
+                    obj,
+                    rt_trap_null_ref,
+                );
+                let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let obj_ext = builder.ins().uextend(ptr_ty, obj);
                 let field_off = inst.src2() as i32;
                 let ptr = builder.ins().iadd(heap_base, obj_ext);
@@ -2653,8 +2684,14 @@ fn translate_function(
             }
             OpCode::GetField => {
                 let obj = builder.use_var(vars.get(inst.src1(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, obj, rt_trap_null_ref);
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                opt_state.ensure_non_null(
+                    &mut builder,
+                    ctx_ptr,
+                    inst.src1(),
+                    obj,
+                    rt_trap_null_ref,
+                );
+                let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let obj_ext = builder.ins().uextend(ptr_ty, obj);
                 let field_off = inst.src2() as i32;
                 let ptr = builder.ins().iadd(heap_base, obj_ext);
@@ -2686,13 +2723,20 @@ fn translate_function(
                     }
                     _ => return Err(()),
                 }
+                opt_state.clear_non_null(inst.dst());
             }
             OpCode::SetField => {
                 let raw_flags = inst.flags();
                 let is_move = (raw_flags & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
                 let field_tag = (raw_flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1;
                 let obj = builder.use_var(vars.get(inst.src1(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, obj, rt_trap_null_ref);
+                opt_state.ensure_non_null(
+                    &mut builder,
+                    ctx_ptr,
+                    inst.src1(),
+                    obj,
+                    rt_trap_null_ref,
+                );
                 let val_ty = inst_ty.src_ty.unwrap_or(RegType::I32);
                 let val = builder.use_var(vars.get(inst.dst(), val_ty));
                 if field_tag == 12 {
@@ -2704,8 +2748,9 @@ fn translate_function(
                         .ins()
                         .call(rt_set_field_ref_fn, &[ctx_ptr, obj, off_val, val, move_val]);
                     emit_trap_return_check(&mut builder, ctx_ptr);
+                    opt_state.invalidate_heap();
                 } else {
-                    let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                    let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                     let obj_ext = builder.ins().uextend(ptr_ty, obj);
                     let field_off = inst.src2() as i32;
                     let ptr = builder.ins().iadd(heap_base, obj_ext);
@@ -2754,7 +2799,7 @@ fn translate_function(
                     .brif(any_zero, neq_blk, &[], non_null_blk, &[]);
 
                 builder.switch_to_block(non_null_blk);
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let heap_base = opt_state.peek_or_load_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let lhs_ext = builder.ins().uextend(ptr_ty, lhs);
                 let rhs_ext = builder.ins().uextend(ptr_ty, rhs);
                 let lhs_ptr = builder.ins().iadd(heap_base, lhs_ext);
@@ -2787,8 +2832,14 @@ fn translate_function(
                 use crate::memory::BlockTag;
 
                 let arr = builder.use_var(vars.get(inst.src1(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                opt_state.ensure_non_null(
+                    &mut builder,
+                    ctx_ptr,
+                    inst.src1(),
+                    arr,
+                    rt_trap_null_ref,
+                );
+                let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let arr_ext = builder.ins().uextend(ptr_ty, arr);
                 let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
                 let tag_byte = builder.ins().load(types::I8, MemFlags::new(), arr_ptr, -1);
@@ -2803,16 +2854,23 @@ fn translate_function(
                 let arr_len = builder.ins().load(types::I32, MemFlags::new(), arr_ptr, 0);
                 let final_len = builder.ins().select(is_str, str_len, arr_len);
                 builder.def_var(vars.get(inst.dst(), RegType::I32), final_len);
+                opt_state.clear_non_null(inst.dst());
             }
             OpCode::GetArray => {
                 use crate::memory::BlockTag;
 
                 let arr = builder.use_var(vars.get(inst.src1(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
+                opt_state.ensure_non_null(
+                    &mut builder,
+                    ctx_ptr,
+                    inst.src1(),
+                    arr,
+                    rt_trap_null_ref,
+                );
                 let idx_i32 = builder.use_var(vars.get(inst.src2(), RegType::I32));
                 let dst_ty = inst_ty.dst_ty.unwrap_or(RegType::I32);
 
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let arr_ext = builder.ins().uextend(ptr_ty, arr);
                 let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
                 let tag_byte = builder.ins().load(types::I8, MemFlags::new(), arr_ptr, -1);
@@ -2929,12 +2987,13 @@ fn translate_function(
                 builder.switch_to_block(merge_blk);
                 let merged_val = builder.block_params(merge_blk)[0];
                 builder.def_var(vars.get(inst.dst(), dst_ty), merged_val);
+                opt_state.clear_non_null(inst.dst());
             }
             OpCode::SetArray => {
                 use crate::memory::BlockTag;
 
                 let arr = builder.use_var(vars.get(inst.dst(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
+                opt_state.ensure_non_null(&mut builder, ctx_ptr, inst.dst(), arr, rt_trap_null_ref);
                 let idx_i32 = builder.use_var(vars.get(inst.src1(), RegType::I32));
                 let val_ty = inst_ty.src_ty.unwrap_or(RegType::I32);
                 let val = builder.use_var(vars.get(inst.src2(), val_ty));
@@ -2955,8 +3014,9 @@ fn translate_function(
                         &[ctx_ptr, arr, idx_i64, raw_val, ty_code_val, move_val],
                     );
                     emit_trap_return_check(&mut builder, ctx_ptr);
+                    opt_state.invalidate_heap();
                 } else {
-                    let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                    let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                     let arr_ext = builder.ins().uextend(ptr_ty, arr);
                     let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
                     let tag_byte = builder.ins().load(types::I8, MemFlags::new(), arr_ptr, -1);
@@ -3072,9 +3132,9 @@ fn translate_function(
             }
             OpCode::GetArrayJumpIfFalse | OpCode::GetArrayJumpIfTrue => {
                 let arr = builder.use_var(vars.get(inst.dst(), RegType::Ref));
-                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
+                opt_state.ensure_non_null(&mut builder, ctx_ptr, inst.dst(), arr, rt_trap_null_ref);
                 let idx_i32 = builder.use_var(vars.get(inst.src1(), RegType::I32));
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let heap_base = opt_state.get_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let arr_ext = builder.ins().uextend(ptr_ty, arr);
                 let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
                 let arr_len = builder.ins().load(types::I32, MemFlags::new(), arr_ptr, 0);
@@ -3125,7 +3185,7 @@ fn translate_function(
                     .brif(is_null, done_blk, &[], non_null_blk, &[]);
 
                 builder.switch_to_block(non_null_blk);
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let heap_base = opt_state.peek_or_load_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let addr_ext = builder.ins().uextend(ptr_ty, addr);
                 let payload_ptr = builder.ins().iadd(heap_base, addr_ext);
                 let word = builder
@@ -3183,7 +3243,7 @@ fn translate_function(
                     .brif(is_null, done_blk, &[], non_null_blk, &[]);
 
                 builder.switch_to_block(non_null_blk);
-                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let heap_base = opt_state.peek_or_load_heap_base(&mut builder, ctx_ptr, ptr_ty);
                 let addr_ext = builder.ins().uextend(ptr_ty, addr);
                 let payload_ptr = builder.ins().iadd(heap_base, addr_ext);
                 let word = builder
@@ -3222,6 +3282,7 @@ fn translate_function(
                 builder.ins().jump(done_blk, &[]);
 
                 builder.switch_to_block(done_blk);
+                opt_state.invalidate_heap();
             }
             OpCode::CallDirect | OpCode::TailCallDirect => {
                 let target_id = inst.call_target() as u32;
@@ -3432,6 +3493,7 @@ fn translate_function(
                     mono_target_ref,
                     &vars,
                     inst_ty,
+                    &mut opt_state,
                 );
             }
             OpCode::CallInterface => {
@@ -3456,6 +3518,7 @@ fn translate_function(
                     None,
                     &vars,
                     inst_ty,
+                    &mut opt_state,
                 );
             }
             OpCode::Return => {
@@ -3471,6 +3534,20 @@ fn translate_function(
                 block_terminated = true;
             }
             _ => return Err(()),
+        }
+
+        match opcode {
+            OpCode::CallDirect
+            | OpCode::TailCallDirect
+            | OpCode::CallNativeDirect
+            | OpCode::CallSymbol => {
+                opt_state.invalidate_heap();
+                opt_state.clear_non_null(inst.call_dst());
+            }
+            OpCode::LoadNull | OpCode::LoadConst => {
+                opt_state.clear_non_null(inst.dst());
+            }
+            _ => {}
         }
     }
 
@@ -3498,6 +3575,129 @@ fn decode_raw_word(builder: &mut FunctionBuilder<'_>, raw: ClifVal, reg_ty: RegT
         RegType::I64 => raw,
         RegType::F64 => builder.ins().bitcast(types::F64, MemFlags::new(), raw),
     }
+}
+
+struct BlockOptState {
+    hoisted_heap_base: Option<ClifVal>,
+    block_heap_base: Option<ClifVal>,
+    non_null_mask: u128,
+}
+
+impl BlockOptState {
+    fn new(hoisted_heap_base: Option<ClifVal>) -> Self {
+        Self {
+            hoisted_heap_base,
+            block_heap_base: hoisted_heap_base,
+            non_null_mask: 0,
+        }
+    }
+
+    fn reset_block(&mut self) {
+        self.block_heap_base = self.hoisted_heap_base;
+        self.non_null_mask = 0;
+    }
+
+    fn invalidate_heap(&mut self) {
+        self.block_heap_base = self.hoisted_heap_base;
+    }
+
+    fn is_non_null(&self, reg: u16) -> bool {
+        let idx = usize::from(reg);
+        idx < 128 && (self.non_null_mask & (1u128 << idx)) != 0
+    }
+
+    fn set_non_null(&mut self, reg: u16, non_null: bool) {
+        let idx = usize::from(reg);
+        if idx >= 128 {
+            return;
+        }
+        if non_null {
+            self.non_null_mask |= 1u128 << idx;
+        } else {
+            self.non_null_mask &= !(1u128 << idx);
+        }
+    }
+
+    fn clear_non_null(&mut self, reg: u16) {
+        self.set_non_null(reg, false);
+    }
+
+    fn ensure_non_null(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ctx_ptr: ClifVal,
+        reg: u16,
+        obj: ClifVal,
+        rt_trap_null_ref: cranelift_codegen::ir::FuncRef,
+    ) {
+        if self.is_non_null(reg) {
+            return;
+        }
+        emit_null_check(builder, ctx_ptr, obj, rt_trap_null_ref);
+        self.set_non_null(reg, true);
+    }
+
+    fn get_heap_base(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ctx_ptr: ClifVal,
+        ptr_ty: types::Type,
+    ) -> ClifVal {
+        if let Some(base) = self.block_heap_base {
+            return base;
+        }
+        let base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+        self.block_heap_base = Some(base);
+        base
+    }
+
+    fn peek_or_load_heap_base(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        ctx_ptr: ClifVal,
+        ptr_ty: types::Type,
+    ) -> ClifVal {
+        if let Some(base) = self.block_heap_base {
+            return base;
+        }
+        builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0)
+    }
+}
+
+fn function_can_reallocate_heap(
+    instructions: &[solix_common::bytecode::Instruction],
+    types_info: &InferredFunctionTypes,
+) -> bool {
+    for (pc, inst) in instructions.iter().enumerate() {
+        let Some(opcode) = OpCode::from_raw_u8(inst.raw_opcode()) else {
+            return true;
+        };
+        match opcode {
+            OpCode::AllocObject
+            | OpCode::AllocArray
+            | OpCode::DecRef
+            | OpCode::CallDirect
+            | OpCode::TailCallDirect
+            | OpCode::CallNativeDirect
+            | OpCode::CallSymbol
+            | OpCode::CallVirtual
+            | OpCode::CallVirtualDirect
+            | OpCode::CallInterface
+            | OpCode::Throw => return true,
+            OpCode::SetField => {
+                let raw_flags = inst.flags();
+                let field_tag = (raw_flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1;
+                if field_tag == 12 {
+                    return true;
+                }
+            }
+            OpCode::SetArray if types_info.inst_types[pc].src_ty == Some(RegType::Ref) => {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn emit_null_check(
@@ -3706,9 +3906,10 @@ fn emit_virtual_or_interface_call(
     mono_target: Option<(u32, cranelift_codegen::ir::FuncRef)>,
     vars: &VarTable,
     inst_ty: InstTypeInfo,
+    opt_state: &mut BlockOptState,
 ) {
     let obj = builder.use_var(vars.get(arg_base as u16, RegType::Ref));
-    emit_null_check(builder, ctx_ptr, obj, rt_trap_null_ref);
+    opt_state.ensure_non_null(builder, ctx_ptr, arg_base as u16, obj, rt_trap_null_ref);
 
     let mut call_args = [builder.ins().iconst(types::I64, 0); 5];
     call_args[0] = ctx_ptr;
@@ -3723,7 +3924,7 @@ fn emit_virtual_or_interface_call(
     let resolve_blk = builder.create_block();
 
     if let Some((expected_vtable_id, direct_ref)) = mono_target {
-        let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+        let heap_base = opt_state.get_heap_base(builder, ctx_ptr, ptr_ty);
         let obj_ext = builder.ins().uextend(ptr_ty, obj);
         let obj_ptr = builder.ins().iadd(heap_base, obj_ext);
         let actual_vt = builder.ins().load(types::I32, MemFlags::new(), obj_ptr, 0);
@@ -3793,6 +3994,8 @@ fn emit_virtual_or_interface_call(
         let typed = decode_raw_word(builder, merged_raw, dst_ty);
         builder.def_var(vars.get(call_dst as u16, dst_ty), typed);
     }
+    opt_state.invalidate_heap();
+    opt_state.clear_non_null(call_dst as u16);
 }
 
 #[allow(clippy::too_many_arguments)]
