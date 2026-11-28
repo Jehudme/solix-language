@@ -13,6 +13,220 @@ const string RAYLIB_VERSION = "6.2";
 const float32 PI = (float32)3.141592653589793;
 const float32 DEG2RAD = (float32)0.017453292519943295;
 const float32 RAD2DEG = (float32)57.29577951308232;
+const string RLGL_VERSION = "6.0";
+const int32 RL_DEFAULT_BATCH_BUFFER_ELEMENTS = 8192;
+/// Default number of batch buffers (multi-buffering)
+const int32 RL_DEFAULT_BATCH_BUFFERS = 1;
+/// Default number of batch draw calls (by state changes: mode, texture)
+const int32 RL_DEFAULT_BATCH_DRAWCALLS = 256;
+/// Maximum number of textures units that can be activated on batch drawing (SetShaderValueTexture())
+const int32 RL_DEFAULT_BATCH_MAX_TEXTURE_UNITS = 4;
+/// Maximum size of Matrix stack
+const int32 RL_MAX_MATRIX_STACK_SIZE = 32;
+/// Maximum number of shader locations supported
+const int32 RL_MAX_SHADER_LOCATIONS = 32;
+/// GL_TEXTURE_WRAP_S
+const int32 RL_TEXTURE_WRAP_S = 10242;
+/// GL_TEXTURE_WRAP_T
+const int32 RL_TEXTURE_WRAP_T = 10243;
+/// GL_TEXTURE_MAG_FILTER
+const int32 RL_TEXTURE_MAG_FILTER = 10240;
+/// GL_TEXTURE_MIN_FILTER
+const int32 RL_TEXTURE_MIN_FILTER = 10241;
+/// GL_NEAREST
+const int32 RL_TEXTURE_FILTER_NEAREST = 9728;
+/// GL_LINEAR
+const int32 RL_TEXTURE_FILTER_LINEAR = 9729;
+/// GL_NEAREST_MIPMAP_NEAREST
+const int32 RL_TEXTURE_FILTER_MIP_NEAREST = 9984;
+/// GL_NEAREST_MIPMAP_LINEAR
+const int32 RL_TEXTURE_FILTER_NEAREST_MIP_LINEAR = 9986;
+/// GL_LINEAR_MIPMAP_NEAREST
+const int32 RL_TEXTURE_FILTER_LINEAR_MIP_NEAREST = 9985;
+/// GL_LINEAR_MIPMAP_LINEAR
+const int32 RL_TEXTURE_FILTER_MIP_LINEAR = 9987;
+/// Anisotropic filter (custom identifier)
+const int32 RL_TEXTURE_FILTER_ANISOTROPIC = 12288;
+/// Texture mipmap bias, percentage ratio (custom identifier)
+const int32 RL_TEXTURE_MIPMAP_BIAS_RATIO = 16384;
+/// GL_REPEAT
+const int32 RL_TEXTURE_WRAP_REPEAT = 10497;
+/// GL_CLAMP_TO_EDGE
+const int32 RL_TEXTURE_WRAP_CLAMP = 33071;
+/// GL_MIRRORED_REPEAT
+const int32 RL_TEXTURE_WRAP_MIRROR_REPEAT = 33648;
+/// GL_MIRROR_CLAMP_EXT
+const int32 RL_TEXTURE_WRAP_MIRROR_CLAMP = 34626;
+/// GL_MODELVIEW
+const int32 RL_MODELVIEW = 5888;
+/// GL_PROJECTION
+const int32 RL_PROJECTION = 5889;
+/// GL_TEXTURE
+const int32 RL_TEXTURE = 5890;
+/// GL_LINES
+const int32 RL_LINES = 1;
+/// GL_TRIANGLES
+const int32 RL_TRIANGLES = 4;
+/// GL_QUADS
+const int32 RL_QUADS = 7;
+/// GL_UNSIGNED_BYTE
+const int32 RL_UNSIGNED_BYTE = 5121;
+/// GL_FLOAT
+const int32 RL_FLOAT = 5126;
+/// GL_STREAM_DRAW
+const int32 RL_STREAM_DRAW = 35040;
+/// GL_STREAM_READ
+const int32 RL_STREAM_READ = 35041;
+/// GL_STREAM_COPY
+const int32 RL_STREAM_COPY = 35042;
+/// GL_STATIC_DRAW
+const int32 RL_STATIC_DRAW = 35044;
+/// GL_STATIC_READ
+const int32 RL_STATIC_READ = 35045;
+/// GL_STATIC_COPY
+const int32 RL_STATIC_COPY = 35046;
+/// GL_DYNAMIC_DRAW
+const int32 RL_DYNAMIC_DRAW = 35048;
+/// GL_DYNAMIC_READ
+const int32 RL_DYNAMIC_READ = 35049;
+/// GL_DYNAMIC_COPY
+const int32 RL_DYNAMIC_COPY = 35050;
+/// GL_FRAGMENT_SHADER
+const int32 RL_FRAGMENT_SHADER = 35632;
+/// GL_VERTEX_SHADER
+const int32 RL_VERTEX_SHADER = 35633;
+/// GL_COMPUTE_SHADER
+const int32 RL_COMPUTE_SHADER = 37305;
+/// GL_ZERO
+const int32 RL_ZERO = 0;
+/// GL_ONE
+const int32 RL_ONE = 1;
+/// GL_SRC_COLOR
+const int32 RL_SRC_COLOR = 768;
+/// GL_ONE_MINUS_SRC_COLOR
+const int32 RL_ONE_MINUS_SRC_COLOR = 769;
+/// GL_SRC_ALPHA
+const int32 RL_SRC_ALPHA = 770;
+/// GL_ONE_MINUS_SRC_ALPHA
+const int32 RL_ONE_MINUS_SRC_ALPHA = 771;
+/// GL_DST_ALPHA
+const int32 RL_DST_ALPHA = 772;
+/// GL_ONE_MINUS_DST_ALPHA
+const int32 RL_ONE_MINUS_DST_ALPHA = 773;
+/// GL_DST_COLOR
+const int32 RL_DST_COLOR = 774;
+/// GL_ONE_MINUS_DST_COLOR
+const int32 RL_ONE_MINUS_DST_COLOR = 775;
+/// GL_SRC_ALPHA_SATURATE
+const int32 RL_SRC_ALPHA_SATURATE = 776;
+/// GL_CONSTANT_COLOR
+const int32 RL_CONSTANT_COLOR = 32769;
+/// GL_ONE_MINUS_CONSTANT_COLOR
+const int32 RL_ONE_MINUS_CONSTANT_COLOR = 32770;
+/// GL_CONSTANT_ALPHA
+const int32 RL_CONSTANT_ALPHA = 32771;
+/// GL_ONE_MINUS_CONSTANT_ALPHA
+const int32 RL_ONE_MINUS_CONSTANT_ALPHA = 32772;
+/// GL_FUNC_ADD
+const int32 RL_FUNC_ADD = 32774;
+/// GL_MIN
+const int32 RL_MIN = 32775;
+/// GL_MAX
+const int32 RL_MAX = 32776;
+/// GL_FUNC_SUBTRACT
+const int32 RL_FUNC_SUBTRACT = 32778;
+/// GL_FUNC_REVERSE_SUBTRACT
+const int32 RL_FUNC_REVERSE_SUBTRACT = 32779;
+/// GL_BLEND_EQUATION
+const int32 RL_BLEND_EQUATION = 32777;
+/// GL_BLEND_EQUATION_RGB   // (Same as BLEND_EQUATION)
+const int32 RL_BLEND_EQUATION_RGB = 32777;
+/// GL_BLEND_EQUATION_ALPHA
+const int32 RL_BLEND_EQUATION_ALPHA = 34877;
+/// GL_BLEND_DST_RGB
+const int32 RL_BLEND_DST_RGB = 32968;
+/// GL_BLEND_SRC_RGB
+const int32 RL_BLEND_SRC_RGB = 32969;
+/// GL_BLEND_DST_ALPHA
+const int32 RL_BLEND_DST_ALPHA = 32970;
+/// GL_BLEND_SRC_ALPHA
+const int32 RL_BLEND_SRC_ALPHA = 32971;
+/// GL_BLEND_COLOR
+const int32 RL_BLEND_COLOR = 32773;
+/// GL_READ_FRAMEBUFFER
+const int32 RL_READ_FRAMEBUFFER = 36008;
+/// GL_DRAW_FRAMEBUFFER
+const int32 RL_DRAW_FRAMEBUFFER = 36009;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION = 0;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD = 1;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL = 2;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR = 3;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT = 4;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2 = 5;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES = 6;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES = 7;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS = 8;
+const int32 RL_DEFAULT_SHADER_ATTRIB_LOCATION_INSTANCETRANSFORM = 9;
+const int32 GL_SHADING_LANGUAGE_VERSION = 35724;
+const int32 GL_COMPRESSED_RGB_S3TC_DXT1_EXT = 33776;
+const int32 GL_COMPRESSED_RGBA_S3TC_DXT1_EXT = 33777;
+const int32 GL_COMPRESSED_RGBA_S3TC_DXT3_EXT = 33778;
+const int32 GL_COMPRESSED_RGBA_S3TC_DXT5_EXT = 33779;
+const int32 GL_ETC1_RGB8_OES = 36196;
+const int32 GL_COMPRESSED_RGB8_ETC2 = 37492;
+const int32 GL_COMPRESSED_RGBA8_ETC2_EAC = 37496;
+const int32 GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG = 35840;
+const int32 GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG = 35842;
+const int32 GL_COMPRESSED_RGBA_ASTC_4x4_KHR = 37808;
+const int32 GL_COMPRESSED_RGBA_ASTC_8x8_KHR = 37815;
+const int32 GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 34047;
+const int32 GL_TEXTURE_MAX_ANISOTROPY_EXT = 34046;
+const int32 GL_PROGRAM_POINT_SIZE = 34370;
+const int32 GL_LINE_WIDTH = 2849;
+const int32 GL_UNSIGNED_SHORT_5_6_5 = 33635;
+const int32 GL_UNSIGNED_SHORT_5_5_5_1 = 32820;
+const int32 GL_UNSIGNED_SHORT_4_4_4_4 = 32819;
+const int32 GL_LUMINANCE = 6409;
+const int32 GL_LUMINANCE_ALPHA = 6410;
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_POSITION = "vertexPosition";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_TEXCOORD = "vertexTexCoord";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_NORMAL = "vertexNormal";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_COLOR = "vertexColor";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_TANGENT = "vertexTangent";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_TEXCOORD2 = "vertexTexCoord2";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_BONEINDICES = "vertexBoneIndices";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_BONEWEIGHTS = "vertexBoneWeights";
+/// Bound by default to shader location: RL_DEFAULT_SHADER_ATTRIB_LOCATION_INSTANCETRANSFORM
+const string RL_DEFAULT_SHADER_ATTRIB_NAME_INSTANCETRANSFORM = "instanceTransform";
+/// model-view-projection matrix
+const string RL_DEFAULT_SHADER_UNIFORM_NAME_MVP = "mvp";
+/// view matrix
+const string RL_DEFAULT_SHADER_UNIFORM_NAME_VIEW = "matView";
+/// projection matrix
+const string RL_DEFAULT_SHADER_UNIFORM_NAME_PROJECTION = "matProjection";
+/// model matrix
+const string RL_DEFAULT_SHADER_UNIFORM_NAME_MODEL = "matModel";
+/// normal matrix (transpose(inverse(matModelView))
+const string RL_DEFAULT_SHADER_UNIFORM_NAME_NORMAL = "matNormal";
+/// color diffuse (base tint color, multiplied by texture color)
+const string RL_DEFAULT_SHADER_UNIFORM_NAME_COLOR = "colDiffuse";
+/// bone matrices (required for GPU skinning)
+const string RL_DEFAULT_SHADER_UNIFORM_NAME_BONEMATRICES = "boneMatrices";
+/// texture0 (texture slot active 0)
+const string RL_DEFAULT_SHADER_SAMPLER2D_NAME_TEXTURE0 = "texture0";
+/// texture1 (texture slot active 1)
+const string RL_DEFAULT_SHADER_SAMPLER2D_NAME_TEXTURE1 = "texture1";
+/// texture2 (texture slot active 2)
+const string RL_DEFAULT_SHADER_SAMPLER2D_NAME_TEXTURE2 = "texture2";
+const float32 EPSILON = (float32)1e-06;
 
 // ===========================================================================
 // Enums & Bitflags
@@ -711,6 +925,280 @@ public enum NPatchLayout {
     NPATCH_THREE_PATCH_HORIZONTAL = 2
 }
 
+/// OpenGL version
+public enum rlGlVersion {
+    /// Software rendering
+    RL_OPENGL_SOFTWARE = 0,
+    /// OpenGL 1.1
+    RL_OPENGL_11 = 1,
+    /// OpenGL 2.1 (GLSL 120)
+    RL_OPENGL_21 = 2,
+    /// OpenGL 3.3 (GLSL 330)
+    RL_OPENGL_33 = 3,
+    /// OpenGL 4.3 (using GLSL 330)
+    RL_OPENGL_43 = 4,
+    /// OpenGL ES 2.0 (GLSL 100)
+    RL_OPENGL_ES_20 = 5,
+    /// OpenGL ES 3.0 (GLSL 300 es)
+    RL_OPENGL_ES_30 = 6
+}
+
+/// Trace log level
+public enum rlTraceLogLevel {
+    /// Display all logs
+    RL_LOG_ALL = 0,
+    /// Trace logging, intended for internal use only
+    RL_LOG_TRACE = 1,
+    /// Debug logging, used for internal debugging, it should be disabled on release builds
+    RL_LOG_DEBUG = 2,
+    /// Info logging, used for program execution info
+    RL_LOG_INFO = 3,
+    /// Warning logging, used on recoverable failures
+    RL_LOG_WARNING = 4,
+    /// Error logging, used on unrecoverable failures
+    RL_LOG_ERROR = 5,
+    /// Fatal logging, used to abort program: exit(EXIT_FAILURE)
+    RL_LOG_FATAL = 6,
+    /// Disable logging
+    RL_LOG_NONE = 7
+}
+
+/// Texture pixel formats
+public enum rlPixelFormat {
+    /// 8 bit per pixel (no alpha)
+    RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE = 1,
+    /// 8*2 bpp (2 channels)
+    RL_PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA = 2,
+    /// 16 bpp
+    RL_PIXELFORMAT_UNCOMPRESSED_R5G6B5 = 3,
+    /// 24 bpp
+    RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8 = 4,
+    /// 16 bpp (1 bit alpha)
+    RL_PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 = 5,
+    /// 16 bpp (4 bit alpha)
+    RL_PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 = 6,
+    /// 32 bpp
+    RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 = 7,
+    /// 32 bpp (1 channel - float)
+    RL_PIXELFORMAT_UNCOMPRESSED_R32 = 8,
+    /// 32*3 bpp (3 channels - float)
+    RL_PIXELFORMAT_UNCOMPRESSED_R32G32B32 = 9,
+    /// 32*4 bpp (4 channels - float)
+    RL_PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 = 10,
+    /// 16 bpp (1 channel - half float)
+    RL_PIXELFORMAT_UNCOMPRESSED_R16 = 11,
+    /// 16*3 bpp (3 channels - half float)
+    RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16 = 12,
+    /// 16*4 bpp (4 channels - half float)
+    RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 = 13,
+    /// 4 bpp (no alpha)
+    RL_PIXELFORMAT_COMPRESSED_DXT1_RGB = 14,
+    /// 4 bpp (1 bit alpha)
+    RL_PIXELFORMAT_COMPRESSED_DXT1_RGBA = 15,
+    /// 8 bpp
+    RL_PIXELFORMAT_COMPRESSED_DXT3_RGBA = 16,
+    /// 8 bpp
+    RL_PIXELFORMAT_COMPRESSED_DXT5_RGBA = 17,
+    /// 4 bpp
+    RL_PIXELFORMAT_COMPRESSED_ETC1_RGB = 18,
+    /// 4 bpp
+    RL_PIXELFORMAT_COMPRESSED_ETC2_RGB = 19,
+    /// 8 bpp
+    RL_PIXELFORMAT_COMPRESSED_ETC2_EAC_RGBA = 20,
+    /// 4 bpp
+    RL_PIXELFORMAT_COMPRESSED_PVRT_RGB = 21,
+    /// 4 bpp
+    RL_PIXELFORMAT_COMPRESSED_PVRT_RGBA = 22,
+    /// 8 bpp
+    RL_PIXELFORMAT_COMPRESSED_ASTC_4x4_RGBA = 23,
+    /// 2 bpp
+    RL_PIXELFORMAT_COMPRESSED_ASTC_8x8_RGBA = 24
+}
+
+/// Texture parameters: filter mode
+public enum rlTextureFilter {
+    /// No filter, pixel approximation
+    RL_TEXTURE_FILTER_POINT = 0,
+    /// Linear filtering
+    RL_TEXTURE_FILTER_BILINEAR = 1,
+    /// Trilinear filtering (linear with mipmaps)
+    RL_TEXTURE_FILTER_TRILINEAR = 2,
+    /// Anisotropic filtering 4x
+    RL_TEXTURE_FILTER_ANISOTROPIC_4X = 3,
+    /// Anisotropic filtering 8x
+    RL_TEXTURE_FILTER_ANISOTROPIC_8X = 4,
+    /// Anisotropic filtering 16x
+    RL_TEXTURE_FILTER_ANISOTROPIC_16X = 5
+}
+
+/// Color blending modes (pre-defined)
+public enum rlBlendMode {
+    /// Blend textures considering alpha (default)
+    RL_BLEND_ALPHA = 0,
+    /// Blend textures adding colors
+    RL_BLEND_ADDITIVE = 1,
+    /// Blend textures multiplying colors
+    RL_BLEND_MULTIPLIED = 2,
+    /// Blend textures adding colors (alternative)
+    RL_BLEND_ADD_COLORS = 3,
+    /// Blend textures subtracting colors (alternative)
+    RL_BLEND_SUBTRACT_COLORS = 4,
+    /// Blend premultiplied textures considering alpha
+    RL_BLEND_ALPHA_PREMULTIPLY = 5,
+    /// Blend textures using custom src/dst factors (use rlSetBlendFactors())
+    RL_BLEND_CUSTOM = 6,
+    /// Blend textures using custom src/dst factors (use rlSetBlendFactorsSeparate())
+    RL_BLEND_CUSTOM_SEPARATE = 7
+}
+
+/// Shader location point type
+public enum rlShaderLocationIndex {
+    /// Shader location: vertex attribute: position
+    RL_SHADER_LOC_VERTEX_POSITION = 0,
+    /// Shader location: vertex attribute: texcoord01
+    RL_SHADER_LOC_VERTEX_TEXCOORD01 = 1,
+    /// Shader location: vertex attribute: texcoord02
+    RL_SHADER_LOC_VERTEX_TEXCOORD02 = 2,
+    /// Shader location: vertex attribute: normal
+    RL_SHADER_LOC_VERTEX_NORMAL = 3,
+    /// Shader location: vertex attribute: tangent
+    RL_SHADER_LOC_VERTEX_TANGENT = 4,
+    /// Shader location: vertex attribute: color
+    RL_SHADER_LOC_VERTEX_COLOR = 5,
+    /// Shader location: matrix uniform: model-view-projection
+    RL_SHADER_LOC_MATRIX_MVP = 6,
+    /// Shader location: matrix uniform: view (camera transform)
+    RL_SHADER_LOC_MATRIX_VIEW = 7,
+    /// Shader location: matrix uniform: projection
+    RL_SHADER_LOC_MATRIX_PROJECTION = 8,
+    /// Shader location: matrix uniform: model (transform)
+    RL_SHADER_LOC_MATRIX_MODEL = 9,
+    /// Shader location: matrix uniform: normal
+    RL_SHADER_LOC_MATRIX_NORMAL = 10,
+    /// Shader location: vector uniform: view
+    RL_SHADER_LOC_VECTOR_VIEW = 11,
+    /// Shader location: vector uniform: diffuse color
+    RL_SHADER_LOC_COLOR_DIFFUSE = 12,
+    /// Shader location: vector uniform: specular color
+    RL_SHADER_LOC_COLOR_SPECULAR = 13,
+    /// Shader location: vector uniform: ambient color
+    RL_SHADER_LOC_COLOR_AMBIENT = 14,
+    /// Shader location: sampler2d texture: albedo (same as: RL_SHADER_LOC_MAP_DIFFUSE)
+    RL_SHADER_LOC_MAP_ALBEDO = 15,
+    /// Shader location: sampler2d texture: metalness (same as: RL_SHADER_LOC_MAP_SPECULAR)
+    RL_SHADER_LOC_MAP_METALNESS = 16,
+    /// Shader location: sampler2d texture: normal
+    RL_SHADER_LOC_MAP_NORMAL = 17,
+    /// Shader location: sampler2d texture: roughness
+    RL_SHADER_LOC_MAP_ROUGHNESS = 18,
+    /// Shader location: sampler2d texture: occlusion
+    RL_SHADER_LOC_MAP_OCCLUSION = 19,
+    /// Shader location: sampler2d texture: emission
+    RL_SHADER_LOC_MAP_EMISSION = 20,
+    /// Shader location: sampler2d texture: height
+    RL_SHADER_LOC_MAP_HEIGHT = 21,
+    /// Shader location: samplerCube texture: cubemap
+    RL_SHADER_LOC_MAP_CUBEMAP = 22,
+    /// Shader location: samplerCube texture: irradiance
+    RL_SHADER_LOC_MAP_IRRADIANCE = 23,
+    /// Shader location: samplerCube texture: prefilter
+    RL_SHADER_LOC_MAP_PREFILTER = 24,
+    /// Shader location: sampler2d texture: brdf
+    RL_SHADER_LOC_MAP_BRDF = 25
+}
+
+/// Shader uniform data type
+public enum rlShaderUniformDataType {
+    /// Shader uniform type: float
+    RL_SHADER_UNIFORM_FLOAT = 0,
+    /// Shader uniform type: vec2 (2 float)
+    RL_SHADER_UNIFORM_VEC2 = 1,
+    /// Shader uniform type: vec3 (3 float)
+    RL_SHADER_UNIFORM_VEC3 = 2,
+    /// Shader uniform type: vec4 (4 float)
+    RL_SHADER_UNIFORM_VEC4 = 3,
+    /// Shader uniform type: int
+    RL_SHADER_UNIFORM_INT = 4,
+    /// Shader uniform type: ivec2 (2 int)
+    RL_SHADER_UNIFORM_IVEC2 = 5,
+    /// Shader uniform type: ivec3 (3 int)
+    RL_SHADER_UNIFORM_IVEC3 = 6,
+    /// Shader uniform type: ivec4 (4 int)
+    RL_SHADER_UNIFORM_IVEC4 = 7,
+    /// Shader uniform type: unsigned int
+    RL_SHADER_UNIFORM_UINT = 8,
+    /// Shader uniform type: uivec2 (2 unsigned int)
+    RL_SHADER_UNIFORM_UIVEC2 = 9,
+    /// Shader uniform type: uivec3 (3 unsigned int)
+    RL_SHADER_UNIFORM_UIVEC3 = 10,
+    /// Shader uniform type: uivec4 (4 unsigned int)
+    RL_SHADER_UNIFORM_UIVEC4 = 11,
+    /// Shader uniform type: sampler2d
+    RL_SHADER_UNIFORM_SAMPLER2D = 12
+}
+
+/// Shader attribute data types
+public enum rlShaderAttributeDataType {
+    /// Shader attribute type: float
+    RL_SHADER_ATTRIB_FLOAT = 0,
+    /// Shader attribute type: vec2 (2 float)
+    RL_SHADER_ATTRIB_VEC2 = 1,
+    /// Shader attribute type: vec3 (3 float)
+    RL_SHADER_ATTRIB_VEC3 = 2,
+    /// Shader attribute type: vec4 (4 float)
+    RL_SHADER_ATTRIB_VEC4 = 3
+}
+
+/// Framebuffer attachment type
+public enum rlFramebufferAttachType {
+    /// Framebuffer attachment type: color 0
+    RL_ATTACHMENT_COLOR_CHANNEL0 = 0,
+    /// Framebuffer attachment type: color 1
+    RL_ATTACHMENT_COLOR_CHANNEL1 = 1,
+    /// Framebuffer attachment type: color 2
+    RL_ATTACHMENT_COLOR_CHANNEL2 = 2,
+    /// Framebuffer attachment type: color 3
+    RL_ATTACHMENT_COLOR_CHANNEL3 = 3,
+    /// Framebuffer attachment type: color 4
+    RL_ATTACHMENT_COLOR_CHANNEL4 = 4,
+    /// Framebuffer attachment type: color 5
+    RL_ATTACHMENT_COLOR_CHANNEL5 = 5,
+    /// Framebuffer attachment type: color 6
+    RL_ATTACHMENT_COLOR_CHANNEL6 = 6,
+    /// Framebuffer attachment type: color 7
+    RL_ATTACHMENT_COLOR_CHANNEL7 = 7,
+    /// Framebuffer attachment type: depth
+    RL_ATTACHMENT_DEPTH = 100,
+    /// Framebuffer attachment type: stencil
+    RL_ATTACHMENT_STENCIL = 200
+}
+
+/// Framebuffer texture attachment type
+public enum rlFramebufferAttachTextureType {
+    /// Framebuffer texture attachment type: cubemap, +X side
+    RL_ATTACHMENT_CUBEMAP_POSITIVE_X = 0,
+    /// Framebuffer texture attachment type: cubemap, -X side
+    RL_ATTACHMENT_CUBEMAP_NEGATIVE_X = 1,
+    /// Framebuffer texture attachment type: cubemap, +Y side
+    RL_ATTACHMENT_CUBEMAP_POSITIVE_Y = 2,
+    /// Framebuffer texture attachment type: cubemap, -Y side
+    RL_ATTACHMENT_CUBEMAP_NEGATIVE_Y = 3,
+    /// Framebuffer texture attachment type: cubemap, +Z side
+    RL_ATTACHMENT_CUBEMAP_POSITIVE_Z = 4,
+    /// Framebuffer texture attachment type: cubemap, -Z side
+    RL_ATTACHMENT_CUBEMAP_NEGATIVE_Z = 5,
+    /// Framebuffer texture attachment type: texture2d
+    RL_ATTACHMENT_TEXTURE2D = 100,
+    /// Framebuffer texture attachment type: renderbuffer
+    RL_ATTACHMENT_RENDERBUFFER = 200
+}
+
+/// Face culling mode
+public enum rlCullMode {
+    RL_CULL_FACE_FRONT = 0,
+    RL_CULL_FACE_BACK = 1
+}
+
 // ===========================================================================
 // Struct Classes
 // ===========================================================================
@@ -1120,6 +1608,8 @@ public class Vector4 {
         if (target == null) { return new Vector4(this.x, this.y, this.z, this.w); }
         return new Vector4(this.x + ((target.x - this.x) * amount), this.y + ((target.y - this.y) * amount), this.z + ((target.z - this.z) * amount), this.w + ((target.w - this.w) * amount));
     }
+
+    public static Vector4 IDENTITY = new Vector4((float32)0.0, (float32)0.0, (float32)0.0, (float32)1.0);
 }
 
 /// Matrix, 4x4 components, column major, OpenGL style, right-handed
@@ -2309,37 +2799,130 @@ public class AutomationEventList {
     }
 }
 
+/// Dynamic vertex buffers (position + texcoords + colors + indices arrays)
+public class rlVertexBuffer {
+    /// Number of elements in the buffer (QUADS)
+    public int32 elementCount;
+    /// Vertex position (XYZ - 3 components per vertex) (shader-location = 0)
+    public uint64 vertices;
+    /// Vertex texture coordinates (UV - 2 components per vertex) (shader-location = 1)
+    public uint64 texcoords;
+    /// Vertex normal (XYZ - 3 components per vertex) (shader-location = 2)
+    public uint64 normals;
+    /// Vertex colors (RGBA - 4 components per vertex) (shader-location = 3)
+    public uint64 colors;
+    /// Vertex indices (in case vertex data comes indexed) (6 indices per quad)
+    public uint64 indices;
+    /// OpenGL Vertex Array Object id
+    public uint32 vaoId;
+    /// OpenGL Vertex Buffer Objects id (5 types of vertex data)
+    public uint32[] vboId;
+
+    public rlVertexBuffer() {
+        this.elementCount = 0;
+        this.vertices = (uint64)0;
+        this.texcoords = (uint64)0;
+        this.normals = (uint64)0;
+        this.colors = (uint64)0;
+        this.indices = (uint64)0;
+        this.vaoId = (uint32)0;
+        this.vboId = new uint32[5];
+    }
+}
+
+/// of those state-change happens (this is done in core module)
+public class rlDrawCall {
+    /// Drawing mode: LINES, TRIANGLES, QUADS
+    public int32 mode;
+    /// Number of vertex of the draw
+    public int32 vertexCount;
+    /// Number of vertex required for index alignment (LINES, TRIANGLES)
+    public int32 vertexAlignment;
+    /// Texture id to be used on the draw -> Use to create new draw call if changes
+    public uint32 textureId;
+
+    public rlDrawCall() {
+        this.mode = 0;
+        this.vertexCount = 0;
+        this.vertexAlignment = 0;
+        this.textureId = (uint32)0;
+    }
+
+    public rlDrawCall(int32 init_mode, int32 init_vertexCount, int32 init_vertexAlignment, uint32 init_textureId) {
+        this.mode = init_mode;
+        this.vertexCount = init_vertexCount;
+        this.vertexAlignment = init_vertexAlignment;
+        this.textureId = init_textureId;
+    }
+}
+
+/// rlRenderBatch type
+public class rlRenderBatch {
+    /// Number of vertex buffers (multi-buffering support)
+    public int32 bufferCount;
+    /// Current buffer tracking in case of multi-buffering
+    public int32 currentBuffer;
+    /// Dynamic buffer(s) for vertex data
+    public uint64 vertexBuffer;
+    /// Draw calls array, depends on textureId
+    public uint64 draws;
+    /// Draw calls counter
+    public int32 drawCounter;
+    /// Current depth value for next draw
+    public float32 currentDepth;
+
+    public rlRenderBatch() {
+        this.bufferCount = 0;
+        this.currentBuffer = 0;
+        this.vertexBuffer = (uint64)0;
+        this.draws = (uint64)0;
+        this.drawCounter = 0;
+        this.currentDepth = (float32)0.0;
+    }
+
+    public rlRenderBatch(int32 init_bufferCount, int32 init_currentBuffer, uint64 init_vertexBuffer, uint64 init_draws, int32 init_drawCounter, float32 init_currentDepth) {
+        this.bufferCount = init_bufferCount;
+        this.currentBuffer = init_currentBuffer;
+        this.vertexBuffer = init_vertexBuffer;
+        this.draws = init_draws;
+        this.drawCounter = init_drawCounter;
+        this.currentDepth = init_currentDepth;
+    }
+}
+
+public class float3 {
+    public float32[] v;
+
+    public float3() {
+        this.v = new float32[3];
+    }
+}
+
+public class float16 {
+    public float32[] v;
+
+    public float16() {
+        this.v = new float32[16];
+    }
+}
+
 // ===========================================================================
-// Type Aliases (Extended Subclasses)
+// Type Aliases
 // ===========================================================================
 /// Quaternion, 4 components (Vector4 alias)
-public class Quaternion extends Vector4 {
-    public Quaternion() {}
-
-    public Quaternion(float32 init_x, float32 init_y, float32 init_z, float32 init_w) : super(init_x, init_y, init_z, init_w) {}
-    public Quaternion(float64 init_x, float64 init_y, float64 init_z, float64 init_w) : super(init_x, init_y, init_z, init_w) {}
-    public static Quaternion IDENTITY = new Quaternion((float32)0.0, (float32)0.0, (float32)0.0, (float32)1.0);
-}
+alias Quaternion = Vector4;
 
 /// Texture2D, same as Texture
-public class Texture2D extends Texture {
-    public Texture2D() {}
-}
+alias Texture2D = Texture;
 
 /// TextureCubemap, same as Texture
-public class TextureCubemap extends Texture {
-    public TextureCubemap() {}
-}
+alias TextureCubemap = Texture;
 
 /// RenderTexture2D, same as RenderTexture
-public class RenderTexture2D extends RenderTexture {
-    public RenderTexture2D() {}
-}
+alias RenderTexture2D = RenderTexture;
 
 /// Camera type fallback, defaults to Camera3D
-public class Camera extends Camera3D {
-    public Camera() {}
-}
+alias Camera = Camera3D;
 
 // ===========================================================================
 // Primary Engine API (Top-Level Package Functions)
@@ -3582,6 +4165,476 @@ public native void DetachAudioStreamProcessor(AudioStream stream, uint64 process
 public native void AttachAudioMixedProcessor(uint64 processor);
 /// Detach audio stream processor from the entire audio pipeline
 public native void DetachAudioMixedProcessor(uint64 processor);
+/// Choose the current matrix to be transformed
+public native void rlMatrixMode(int32 mode);
+/// Push the current matrix to stack
+public native void rlPushMatrix();
+/// Pop latest inserted matrix from stack
+public native void rlPopMatrix();
+/// Reset current matrix to identity matrix
+public native void rlLoadIdentity();
+/// Multiply the current matrix by a translation matrix
+public native void rlTranslatef(float32 x, float32 y, float32 z);
+/// Multiply the current matrix by a rotation matrix
+public native void rlRotatef(float32 angle, float32 x, float32 y, float32 z);
+/// Multiply the current matrix by a scaling matrix
+public native void rlScalef(float32 x, float32 y, float32 z);
+/// Multiply the current matrix by another matrix
+public native void rlMultMatrixf(float32[] matf);
+public native void rlFrustum(float64 left, float64 right, float64 bottom, float64 top, float64 znear, float64 zfar);
+public native void rlOrtho(float64 left, float64 right, float64 bottom, float64 top, float64 znear, float64 zfar);
+/// Set the viewport area
+public native void rlViewport(int32 x, int32 y, int32 width, int32 height);
+/// Set clip planes distances
+public native void rlSetClipPlanes(float64 nearPlane, float64 farPlane);
+/// Get cull plane distance near
+public native float64 rlGetCullDistanceNear();
+/// Get cull plane distance far
+public native float64 rlGetCullDistanceFar();
+/// Initialize drawing mode (how to organize vertex)
+public native void rlBegin(int32 mode);
+/// Finish vertex providing
+public native void rlEnd();
+/// Define one vertex (position) - 2 int
+public native void rlVertex2i(int32 x, int32 y);
+/// Define one vertex (position) - 2 float
+public native void rlVertex2f(float32 x, float32 y);
+/// Define one vertex (position) - 3 float
+public native void rlVertex3f(float32 x, float32 y, float32 z);
+/// Define one vertex (texture coordinate) - 2 float
+public native void rlTexCoord2f(float32 x, float32 y);
+/// Define one vertex (normal) - 3 float
+public native void rlNormal3f(float32 x, float32 y, float32 z);
+/// Define one vertex (color) - 4 byte
+public native void rlColor4ub(uint8 r, uint8 g, uint8 b, uint8 a);
+/// Define one vertex (color) - 3 float
+public native void rlColor3f(float32 x, float32 y, float32 z);
+/// Define one vertex (color) - 4 float
+public native void rlColor4f(float32 x, float32 y, float32 z, float32 w);
+/// Enable vertex array (VAO, if supported)
+public native bool rlEnableVertexArray(uint32 vaoId);
+/// Disable vertex array (VAO, if supported)
+public native void rlDisableVertexArray();
+/// Enable vertex buffer (VBO)
+public native void rlEnableVertexBuffer(uint32 id);
+/// Disable vertex buffer (VBO)
+public native void rlDisableVertexBuffer();
+/// Enable vertex buffer element (VBO element)
+public native void rlEnableVertexBufferElement(uint32 id);
+/// Disable vertex buffer element (VBO element)
+public native void rlDisableVertexBufferElement();
+/// Enable vertex attribute index
+public native void rlEnableVertexAttribute(uint32 index);
+/// Disable vertex attribute index
+public native void rlDisableVertexAttribute(uint32 index);
+/// Enable attribute state pointer
+public native void rlEnableStatePointer(int32 vertexAttribType, uint64 buffer);
+/// Disable attribute state pointer
+public native void rlDisableStatePointer(int32 vertexAttribType);
+/// Select and active a texture slot
+public native void rlActiveTextureSlot(int32 slot);
+/// Enable texture
+public native void rlEnableTexture(uint32 id);
+/// Disable texture
+public native void rlDisableTexture();
+/// Enable texture cubemap
+public native void rlEnableTextureCubemap(uint32 id);
+/// Disable texture cubemap
+public native void rlDisableTextureCubemap();
+/// Set texture parameters (filter, wrap)
+public native void rlTextureParameters(uint32 id, int32 param, int32 value);
+/// Set cubemap parameters (filter, wrap)
+public native void rlCubemapParameters(uint32 id, int32 param, int32 value);
+/// Enable shader program
+public native void rlEnableShader(uint32 id);
+/// Disable shader program
+public native void rlDisableShader();
+/// Enable render texture (fbo)
+public native void rlEnableFramebuffer(uint32 id);
+/// Disable render texture (fbo), return to default framebuffer
+public native void rlDisableFramebuffer();
+/// Get the currently active render texture (fbo), 0 for default framebuffer
+public native uint32 rlGetActiveFramebuffer();
+/// Activate multiple draw color buffers
+public native void rlActiveDrawBuffers(int32 count);
+/// Blit active framebuffer to main framebuffer
+public native void rlBlitFramebuffer(int32 srcX, int32 srcY, int32 srcWidth, int32 srcHeight, int32 dstX, int32 dstY, int32 dstWidth, int32 dstHeight, int32 bufferMask);
+/// Bind framebuffer (FBO)
+public native void rlBindFramebuffer(uint32 target, uint32 framebuffer);
+/// Enable color blending
+public native void rlEnableColorBlend();
+/// Disable color blending
+public native void rlDisableColorBlend();
+/// Enable depth test
+public native void rlEnableDepthTest();
+/// Disable depth test
+public native void rlDisableDepthTest();
+/// Enable depth write
+public native void rlEnableDepthMask();
+/// Disable depth write
+public native void rlDisableDepthMask();
+/// Enable backface culling
+public native void rlEnableBackfaceCulling();
+/// Disable backface culling
+public native void rlDisableBackfaceCulling();
+/// Color mask control
+public native void rlColorMask(bool r, bool g, bool b, bool a);
+/// Set face culling mode
+public native void rlSetCullFace(int32 mode);
+/// Enable scissor test
+public native void rlEnableScissorTest();
+/// Disable scissor test
+public native void rlDisableScissorTest();
+/// Scissor test
+public native void rlScissor(int32 x, int32 y, int32 width, int32 height);
+/// Enable point mode
+public native void rlEnablePointMode();
+/// Disable point mode
+public native void rlDisablePointMode();
+/// Set the point drawing size
+public native void rlSetPointSize(float32 size);
+/// Get the point drawing size
+public native float32 rlGetPointSize();
+/// Enable wire mode
+public native void rlEnableWireMode();
+/// Disable wire mode
+public native void rlDisableWireMode();
+/// Set the line drawing width
+public native void rlSetLineWidth(float32 width);
+/// Get the line drawing width
+public native float32 rlGetLineWidth();
+/// Enable line aliasing
+public native void rlEnableSmoothLines();
+/// Disable line aliasing
+public native void rlDisableSmoothLines();
+/// Enable stereo rendering
+public native void rlEnableStereoRender();
+/// Disable stereo rendering
+public native void rlDisableStereoRender();
+/// Check if stereo render is enabled
+public native bool rlIsStereoRenderEnabled();
+/// Clear color buffer with color
+public native void rlClearColor(uint8 r, uint8 g, uint8 b, uint8 a);
+/// Clear used screen buffers (color and depth)
+public native void rlClearScreenBuffers();
+/// Check and log OpenGL error codes
+public native void rlCheckErrors();
+/// Set blending mode
+public native void rlSetBlendMode(int32 mode);
+/// Set blending mode factor and equation (using OpenGL factors)
+public native void rlSetBlendFactors(int32 glSrcFactor, int32 glDstFactor, int32 glEquation);
+/// Set blending mode factors and equations separately (using OpenGL factors)
+public native void rlSetBlendFactorsSeparate(int32 glSrcRGB, int32 glDstRGB, int32 glSrcAlpha, int32 glDstAlpha, int32 glEqRGB, int32 glEqAlpha);
+/// Initialize rlgl (buffers, shaders, textures, states)
+public native void rlglInit(int32 width, int32 height);
+/// De-initialize rlgl (buffers, shaders, textures)
+public native void rlglClose();
+/// Load OpenGL extensions (loader function required)
+public native void rlLoadExtensions(uint64 loader);
+/// Get OpenGL procedure address
+public native uint64 rlGetProcAddress(string procName);
+/// Get current OpenGL version
+public native int32 rlGetVersion();
+/// Set current framebuffer width
+public native void rlSetFramebufferWidth(int32 width);
+/// Get default framebuffer width
+public native int32 rlGetFramebufferWidth();
+/// Set current framebuffer height
+public native void rlSetFramebufferHeight(int32 height);
+/// Get default framebuffer height
+public native int32 rlGetFramebufferHeight();
+/// Get default texture id
+public native uint32 rlGetTextureIdDefault();
+/// Get default shader id
+public native uint32 rlGetShaderIdDefault();
+/// Get default shader locations
+public native uint64 rlGetShaderLocsDefault();
+/// Load a render batch system
+public native rlRenderBatch rlLoadRenderBatch(int32 numBuffers, int32 bufferElements);
+/// Unload render batch system
+public native void rlUnloadRenderBatch(rlRenderBatch batch);
+/// Draw render batch data (Update->Draw->Reset)
+public native void rlDrawRenderBatch(rlRenderBatch batch);
+/// Set the active render batch for rlgl (NULL for default internal)
+public native void rlSetRenderBatchActive(rlRenderBatch batch);
+/// Update and draw internal render batch
+public native void rlDrawRenderBatchActive();
+/// Check internal buffer overflow for a given number of vertex
+public native bool rlCheckRenderBatchLimit(int32 vCount);
+/// Set current texture for render batch and check buffers limits
+public native void rlSetTexture(uint32 id);
+/// Load vertex array (vao) if supported
+public native uint32 rlLoadVertexArray();
+/// Load a vertex buffer object
+public native uint32 rlLoadVertexBuffer(uint64 buffer, int32 size, bool dynamic);
+/// Load vertex buffer elements object
+public native uint32 rlLoadVertexBufferElement(uint64 buffer, int32 size, bool dynamic);
+/// Update vertex buffer object data on GPU buffer
+public native void rlUpdateVertexBuffer(uint32 bufferId, uint64 data, int32 dataSize, int32 offset);
+/// Update vertex buffer elements data on GPU buffer
+public native void rlUpdateVertexBufferElements(uint32 id, uint64 data, int32 dataSize, int32 offset);
+/// Unload vertex array (vao)
+public native void rlUnloadVertexArray(uint32 vaoId);
+/// Unload vertex buffer object
+public native void rlUnloadVertexBuffer(uint32 vboId);
+/// Set vertex attribute data configuration
+public native void rlSetVertexAttribute(uint32 index, int32 compSize, int32 type, bool normalized, int32 stride, int32 offset);
+/// Set vertex attribute data divisor
+public native void rlSetVertexAttributeDivisor(uint32 index, int32 divisor);
+/// Set vertex attribute default value, when attribute to provided
+public native void rlSetVertexAttributeDefault(int32 locIndex, uint64 value, int32 attribType, int32 count);
+/// Draw vertex array (currently active vao)
+public native void rlDrawVertexArray(int32 offset, int32 count);
+/// Draw vertex array elements
+public native void rlDrawVertexArrayElements(int32 offset, int32 count, uint64 buffer);
+/// Draw vertex array (currently active vao) with instancing
+public native void rlDrawVertexArrayInstanced(int32 offset, int32 count, int32 instances);
+/// Draw vertex array elements with instancing
+public native void rlDrawVertexArrayElementsInstanced(int32 offset, int32 count, uint64 buffer, int32 instances);
+/// Load texture data
+public native uint32 rlLoadTexture(uint64 data, int32 width, int32 height, int32 format, int32 mipmapCount);
+/// Load depth texture/renderbuffer (to be attached to fbo)
+public native uint32 rlLoadTextureDepth(int32 width, int32 height, bool useRenderBuffer);
+/// Load texture cubemap data
+public native uint32 rlLoadTextureCubemap(uint64 data, int32 size, int32 format, int32 mipmapCount);
+/// Update texture with new data on GPU
+public native void rlUpdateTexture(uint32 id, int32 offsetX, int32 offsetY, int32 width, int32 height, int32 format, uint64 data);
+/// Get OpenGL internal formats
+public native void rlGetGlTextureFormats(int32 format, uint32[] glInternalFormat, uint32[] glFormat, uint32[] glType);
+/// Get name string for pixel format
+public native string rlGetPixelFormatName(uint32 format);
+/// Unload texture from GPU memory
+public native void rlUnloadTexture(uint32 id);
+/// Generate mipmap data for selected texture
+public native void rlGenTextureMipmaps(uint32 id, int32 width, int32 height, int32 format, int32[] mipmaps);
+/// Read texture pixel data
+public native uint64 rlReadTexturePixels(uint32 id, int32 width, int32 height, int32 format);
+/// Read screen pixel data (color buffer)
+public native uint64 rlReadScreenPixels(int32 width, int32 height);
+/// Load an empty framebuffer
+public native uint32 rlLoadFramebuffer();
+/// Attach texture/renderbuffer to a framebuffer
+public native void rlFramebufferAttach(uint32 id, uint32 texId, int32 attachType, int32 texType, int32 mipLevel);
+/// Verify framebuffer is complete
+public native bool rlFramebufferComplete(uint32 id);
+/// Delete framebuffer from GPU
+public native void rlUnloadFramebuffer(uint32 id);
+/// Copy framebuffer pixel data to internal buffer
+public native void rlCopyFramebuffer(int32 x, int32 y, int32 width, int32 height, int32 format, uint64 pixels);
+/// Resize internal framebuffer
+public native void rlResizeFramebuffer(int32 width, int32 height);
+/// Load (compile) shader and return shader id (type: RL_VERTEX_SHADER, RL_FRAGMENT_SHADER, RL_COMPUTE_SHADER)
+public native uint32 rlLoadShader(string code, int32 type);
+/// Load shader from code strings
+public native uint32 rlLoadShaderProgram(string vsCode, string fsCode);
+/// Load shader program, using already loaded shader ids
+public native uint32 rlLoadShaderProgramEx(uint32 vsId, uint32 fsId);
+/// Load compute shader program
+public native uint32 rlLoadShaderProgramCompute(uint32 csId);
+/// Unload shader, loaded with rlLoadShader()
+public native void rlUnloadShader(uint32 id);
+/// Unload shader program
+public native void rlUnloadShaderProgram(uint32 id);
+/// Get shader location uniform, requires shader program id
+public native int32 rlGetLocationUniform(uint32 id, string uniformName);
+/// Get shader location attribute, requires shader program id
+public native int32 rlGetLocationAttrib(uint32 id, string attribName);
+/// Set shader value uniform
+public native void rlSetUniform(int32 locIndex, uint64 value, int32 uniformType, int32 count);
+/// Set shader value matrix
+public native void rlSetUniformMatrix(int32 locIndex, Matrix mat);
+/// Set shader value matrices
+public native void rlSetUniformMatrices(int32 locIndex, Matrix[] mat, int32 count);
+/// Set shader value sampler
+public native void rlSetUniformSampler(int32 locIndex, uint32 textureId);
+/// Set shader currently active (id and locations)
+public native void rlSetShader(uint32 id, int32[] locs);
+/// Dispatch compute shader (equivalent to *draw* for graphics pipeline)
+public native void rlComputeShaderDispatch(uint32 groupX, uint32 groupY, uint32 groupZ);
+/// Load shader storage buffer object (SSBO)
+public native uint32 rlLoadShaderBuffer(uint32 size, uint64 data, int32 usageHint);
+/// Unload shader storage buffer object (SSBO)
+public native void rlUnloadShaderBuffer(uint32 ssboId);
+/// Update SSBO buffer data
+public native void rlUpdateShaderBuffer(uint32 id, uint64 data, uint32 dataSize, uint32 offset);
+/// Bind SSBO buffer
+public native void rlBindShaderBuffer(uint32 id, uint32 index);
+/// Read SSBO buffer data (GPU->CPU)
+public native void rlReadShaderBuffer(uint32 id, uint64 dest, uint32 count, uint32 offset);
+/// Copy SSBO data between buffers
+public native void rlCopyShaderBuffer(uint32 destId, uint32 srcId, uint32 destOffset, uint32 srcOffset, uint32 count);
+/// Get SSBO buffer size
+public native uint32 rlGetShaderBufferSize(uint32 id);
+/// Bind image texture
+public native void rlBindImageTexture(uint32 id, uint32 index, int32 format, bool readonly);
+/// Get internal modelview matrix
+public native Matrix rlGetMatrixModelview();
+/// Get internal projection matrix
+public native Matrix rlGetMatrixProjection();
+/// Get internal accumulated transform matrix
+public native Matrix rlGetMatrixTransform();
+/// Get internal projection matrix for stereo render (selected eye)
+public native Matrix rlGetMatrixProjectionStereo(int32 eye);
+/// Get internal view offset matrix for stereo render (selected eye)
+public native Matrix rlGetMatrixViewOffsetStereo(int32 eye);
+/// Set a custom projection matrix (replaces internal projection matrix)
+public native void rlSetMatrixProjection(Matrix proj);
+/// Set a custom modelview matrix (replaces internal modelview matrix)
+public native void rlSetMatrixModelview(Matrix view);
+/// Set eyes projection matrices for stereo rendering
+public native void rlSetMatrixProjectionStereo(Matrix right, Matrix left);
+/// Set eyes view offsets matrices for stereo rendering
+public native void rlSetMatrixViewOffsetStereo(Matrix right, Matrix left);
+/// Load and draw a cube
+public native void rlLoadDrawCube();
+/// Load and draw a quad
+public native void rlLoadDrawQuad();
+public native float32 Clamp(float32 value, float32 min, float32 max);
+public native float32 Lerp(float32 start, float32 end, float32 amount);
+public native float32 Normalize(float32 value, float32 start, float32 end);
+public native float32 Remap(float32 value, float32 inputStart, float32 inputEnd, float32 outputStart, float32 outputEnd);
+public native float32 Wrap(float32 value, float32 min, float32 max);
+public native int32 FloatEquals(float32 x, float32 y);
+public native Vector2 Vector2Zero();
+public native Vector2 Vector2One();
+public native Vector2 Vector2Add(Vector2 v1, Vector2 v2);
+public native Vector2 Vector2AddValue(Vector2 v, float32 add);
+public native Vector2 Vector2Subtract(Vector2 v1, Vector2 v2);
+public native Vector2 Vector2SubtractValue(Vector2 v, float32 sub);
+public native float32 Vector2Length(Vector2 v);
+public native float32 Vector2LengthSqr(Vector2 v);
+public native float32 Vector2DotProduct(Vector2 v1, Vector2 v2);
+public native float32 Vector2CrossProduct(Vector2 v1, Vector2 v2);
+public native float32 Vector2Distance(Vector2 v1, Vector2 v2);
+public native float32 Vector2DistanceSqr(Vector2 v1, Vector2 v2);
+public native float32 Vector2Angle(Vector2 v1, Vector2 v2);
+public native float32 Vector2LineAngle(Vector2 start, Vector2 end);
+public native Vector2 Vector2Scale(Vector2 v, float32 scale);
+public native Vector2 Vector2Multiply(Vector2 v1, Vector2 v2);
+public native Vector2 Vector2Negate(Vector2 v);
+public native Vector2 Vector2Divide(Vector2 v1, Vector2 v2);
+public native Vector2 Vector2Normalize(Vector2 v);
+public native Vector2 Vector2Transform(Vector2 v, Matrix mat);
+public native Vector2 Vector2Lerp(Vector2 v1, Vector2 v2, float32 amount);
+public native Vector2 Vector2Reflect(Vector2 v, Vector2 normal);
+public native Vector2 Vector2Min(Vector2 v1, Vector2 v2);
+public native Vector2 Vector2Max(Vector2 v1, Vector2 v2);
+public native Vector2 Vector2Rotate(Vector2 v, float32 angle);
+public native Vector2 Vector2MoveTowards(Vector2 v, Vector2 target, float32 maxDistance);
+public native Vector2 Vector2Invert(Vector2 v);
+public native Vector2 Vector2Clamp(Vector2 v, Vector2 min, Vector2 max);
+public native Vector2 Vector2ClampValue(Vector2 v, float32 min, float32 max);
+public native int32 Vector2Equals(Vector2 p, Vector2 q);
+public native Vector2 Vector2Refract(Vector2 v, Vector2 n, float32 r);
+public native Vector3 Vector3Zero();
+public native Vector3 Vector3One();
+public native Vector3 Vector3Add(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3AddValue(Vector3 v, float32 add);
+public native Vector3 Vector3Subtract(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3SubtractValue(Vector3 v, float32 sub);
+public native Vector3 Vector3Scale(Vector3 v, float32 scalar);
+public native Vector3 Vector3Multiply(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3CrossProduct(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3Perpendicular(Vector3 v);
+public native float32 Vector3Length(Vector3 v);
+public native float32 Vector3LengthSqr(Vector3 v);
+public native float32 Vector3DotProduct(Vector3 v1, Vector3 v2);
+public native float32 Vector3Distance(Vector3 v1, Vector3 v2);
+public native float32 Vector3DistanceSqr(Vector3 v1, Vector3 v2);
+public native float32 Vector3Angle(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3Negate(Vector3 v);
+public native Vector3 Vector3Divide(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3Normalize(Vector3 v);
+public native Vector3 Vector3Project(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3Reject(Vector3 v1, Vector3 v2);
+public native void Vector3OrthoNormalize(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3Transform(Vector3 v, Matrix mat);
+public native Vector3 Vector3RotateByQuaternion(Vector3 v, Quaternion q);
+public native Vector3 Vector3RotateByAxisAngle(Vector3 v, Vector3 axis, float32 angle);
+public native Vector3 Vector3MoveTowards(Vector3 v, Vector3 target, float32 maxDistance);
+public native Vector3 Vector3Lerp(Vector3 v1, Vector3 v2, float32 amount);
+public native Vector3 Vector3CubicHermite(Vector3 v1, Vector3 tangent1, Vector3 v2, Vector3 tangent2, float32 amount);
+public native Vector3 Vector3Reflect(Vector3 v, Vector3 normal);
+public native Vector3 Vector3Min(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3Max(Vector3 v1, Vector3 v2);
+public native Vector3 Vector3Barycenter(Vector3 p, Vector3 a, Vector3 b, Vector3 c);
+public native Vector3 Vector3Unproject(Vector3 source, Matrix projection, Matrix view);
+public native float3 Vector3ToFloatV(Vector3 v);
+public native Vector3 Vector3Invert(Vector3 v);
+public native Vector3 Vector3Clamp(Vector3 v, Vector3 min, Vector3 max);
+public native Vector3 Vector3ClampValue(Vector3 v, float32 min, float32 max);
+public native int32 Vector3Equals(Vector3 p, Vector3 q);
+public native Vector3 Vector3Refract(Vector3 v, Vector3 n, float32 r);
+public native Vector4 Vector4Zero();
+public native Vector4 Vector4One();
+public native Vector4 Vector4Add(Vector4 v1, Vector4 v2);
+public native Vector4 Vector4AddValue(Vector4 v, float32 add);
+public native Vector4 Vector4Subtract(Vector4 v1, Vector4 v2);
+public native Vector4 Vector4SubtractValue(Vector4 v, float32 add);
+public native float32 Vector4Length(Vector4 v);
+public native float32 Vector4LengthSqr(Vector4 v);
+public native float32 Vector4DotProduct(Vector4 v1, Vector4 v2);
+public native float32 Vector4Distance(Vector4 v1, Vector4 v2);
+public native float32 Vector4DistanceSqr(Vector4 v1, Vector4 v2);
+public native Vector4 Vector4Scale(Vector4 v, float32 scale);
+public native Vector4 Vector4Multiply(Vector4 v1, Vector4 v2);
+public native Vector4 Vector4Negate(Vector4 v);
+public native Vector4 Vector4Divide(Vector4 v1, Vector4 v2);
+public native Vector4 Vector4Normalize(Vector4 v);
+public native Vector4 Vector4Min(Vector4 v1, Vector4 v2);
+public native Vector4 Vector4Max(Vector4 v1, Vector4 v2);
+public native Vector4 Vector4Lerp(Vector4 v1, Vector4 v2, float32 amount);
+public native Vector4 Vector4MoveTowards(Vector4 v, Vector4 target, float32 maxDistance);
+public native Vector4 Vector4Invert(Vector4 v);
+public native int32 Vector4Equals(Vector4 p, Vector4 q);
+public native float32 MatrixDeterminant(Matrix mat);
+public native float32 MatrixTrace(Matrix mat);
+public native Matrix MatrixTranspose(Matrix mat);
+public native Matrix MatrixInvert(Matrix mat);
+public native Matrix MatrixIdentity();
+public native Matrix MatrixAdd(Matrix left, Matrix right);
+public native Matrix MatrixSubtract(Matrix left, Matrix right);
+public native Matrix MatrixMultiply(Matrix left, Matrix right);
+public native Matrix MatrixMultiplyValue(Matrix left, float32 value);
+public native Matrix MatrixTranslate(float32 x, float32 y, float32 z);
+public native Matrix MatrixRotate(Vector3 axis, float32 angle);
+public native Matrix MatrixRotateX(float32 angle);
+public native Matrix MatrixRotateY(float32 angle);
+public native Matrix MatrixRotateZ(float32 angle);
+public native Matrix MatrixRotateXYZ(Vector3 angle);
+public native Matrix MatrixRotateZYX(Vector3 angle);
+public native Matrix MatrixScale(float32 x, float32 y, float32 z);
+public native Matrix MatrixFrustum(float64 left, float64 right, float64 bottom, float64 top, float64 nearPlane, float64 farPlane);
+public native Matrix MatrixPerspective(float64 fovY, float64 aspect, float64 nearPlane, float64 farPlane);
+public native Matrix MatrixOrtho(float64 left, float64 right, float64 bottom, float64 top, float64 nearPlane, float64 farPlane);
+public native Matrix MatrixLookAt(Vector3 eye, Vector3 target, Vector3 up);
+public native float16 MatrixToFloatV(Matrix mat);
+public native Quaternion QuaternionAdd(Quaternion q1, Quaternion q2);
+public native Quaternion QuaternionAddValue(Quaternion q, float32 add);
+public native Quaternion QuaternionSubtract(Quaternion q1, Quaternion q2);
+public native Quaternion QuaternionSubtractValue(Quaternion q, float32 sub);
+public native Quaternion QuaternionIdentity();
+public native float32 QuaternionLength(Quaternion q);
+public native Quaternion QuaternionNormalize(Quaternion q);
+public native Quaternion QuaternionInvert(Quaternion q);
+public native Quaternion QuaternionMultiply(Quaternion q1, Quaternion q2);
+public native Quaternion QuaternionScale(Quaternion q, float32 mul);
+public native Quaternion QuaternionDivide(Quaternion q1, Quaternion q2);
+public native Quaternion QuaternionLerp(Quaternion q1, Quaternion q2, float32 amount);
+public native Quaternion QuaternionNlerp(Quaternion q1, Quaternion q2, float32 amount);
+public native Quaternion QuaternionSlerp(Quaternion q1, Quaternion q2, float32 amount);
+public native Quaternion QuaternionCubicHermiteSpline(Quaternion q1, Quaternion outTangent1, Quaternion q2, Quaternion inTangent2, float32 t);
+public native Quaternion QuaternionFromVector3ToVector3(Vector3 from, Vector3 to);
+public native Quaternion QuaternionFromMatrix(Matrix mat);
+public native Matrix QuaternionToMatrix(Quaternion q);
+public native Quaternion QuaternionFromAxisAngle(Vector3 axis, float32 angle);
+public native void QuaternionToAxisAngle(Quaternion q, Vector3 outAxis, float32[] outAngle);
+public native Quaternion QuaternionFromEuler(float32 pitch, float32 yaw, float32 roll);
+public native Vector3 QuaternionToEuler(Quaternion q);
+public native Quaternion QuaternionTransform(Quaternion q, Matrix mat);
+public native int32 QuaternionEquals(Quaternion p, Quaternion q);
+public native Matrix MatrixCompose(Vector3 translation, Quaternion rotation, Vector3 scale);
+public native void MatrixDecompose(Matrix mat, Vector3 translation, Quaternion rotation, Vector3 scale);
 
 // ===========================================================================
 // Internal Vector Math Helpers

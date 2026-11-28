@@ -17,6 +17,7 @@ pub type SaveFileDataCallback = Option<unsafe extern "C" fn(file_name: *const c_
 pub type LoadFileTextCallback = Option<unsafe extern "C" fn(file_name: *const c_char) -> *const c_char>;
 pub type SaveFileTextCallback = Option<unsafe extern "C" fn(file_name: *const c_char, text: *const c_char) -> bool>;
 pub type AudioCallback = Option<unsafe extern "C" fn(buffer_data: *mut c_void, frames: c_uint)>;
+pub type rlglLoadProc = Option<unsafe extern "C" fn(name: *const c_char) -> *mut c_void>;
 
 // ===========================================================================
 // C ABI Struct Definitions & Aliases
@@ -575,6 +576,81 @@ pub struct C_AutomationEventList {
 }
 
 impl Default for C_AutomationEventList {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct C_rlVertexBuffer {
+    pub elementCount: c_int,
+    pub vertices: *mut f32,
+    pub texcoords: *mut f32,
+    pub normals: *mut f32,
+    pub colors: *mut u8,
+    pub indices: *mut c_uint,
+    pub vaoId: c_uint,
+    pub vboId: [c_uint; 5],
+}
+
+impl Default for C_rlVertexBuffer {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct C_rlDrawCall {
+    pub mode: c_int,
+    pub vertexCount: c_int,
+    pub vertexAlignment: c_int,
+    pub textureId: c_uint,
+}
+
+impl Default for C_rlDrawCall {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct C_rlRenderBatch {
+    pub bufferCount: c_int,
+    pub currentBuffer: c_int,
+    pub vertexBuffer: *mut C_rlVertexBuffer,
+    pub draws: *mut C_rlDrawCall,
+    pub drawCounter: c_int,
+    pub currentDepth: f32,
+}
+
+impl Default for C_rlRenderBatch {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct C_float3 {
+    pub v: [f32; 3],
+}
+
+impl Default for C_float3 {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct C_float16 {
+    pub v: [f32; 16],
+}
+
+impl Default for C_float16 {
     fn default() -> Self {
         unsafe { std::mem::zeroed() }
     }
@@ -1901,6 +1977,195 @@ unsafe fn unpack_automation_event_list(vm_context: *mut c_void, addr: u32) -> C_
     result
 }
 
+unsafe fn writeback_rl_vertex_buffer(vm_context: *mut c_void, addr: u32, val: &C_rlVertexBuffer) {
+    if addr == 0 { return; }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return; };
+    ctx.set_field_i32_by_index(addr, 0, val.elementCount as i32);
+    ctx.write_field_u64_by_index(addr, 1, val.vertices as usize as u64);
+    ctx.write_field_u64_by_index(addr, 2, val.texcoords as usize as u64);
+    ctx.write_field_u64_by_index(addr, 3, val.normals as usize as u64);
+    ctx.write_field_u64_by_index(addr, 4, val.colors as usize as u64);
+    ctx.write_field_u64_by_index(addr, 5, val.indices as usize as u64);
+    ctx.write_field_u64_by_index(addr, 6, val.vaoId as u64);
+    let arr_addr_7 = ctx.alloc_array(5, 0);
+    if arr_addr_7 != 0 {
+        for elem_idx in 0..5u32 {
+            ctx.array_set_u64(arr_addr_7, elem_idx, val.vboId[elem_idx as usize] as u64);
+        }
+        ctx.write_field_u64_by_index(addr, 7, arr_addr_7 as u64);
+    }
+}
+
+unsafe fn pack_rl_vertex_buffer(vm_context: *mut c_void, val: C_rlVertexBuffer) -> u32 {
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return 0; };
+    let class_vtable_id = ctx.get_class_vtable_id("rlVertexBuffer");
+    let addr = ctx.alloc_object(class_vtable_id, 8);
+    if addr > 0 {
+        writeback_rl_vertex_buffer(vm_context, addr, &val);
+    }
+    addr
+}
+
+unsafe fn unpack_rl_vertex_buffer(vm_context: *mut c_void, addr: u32) -> C_rlVertexBuffer {
+    if addr == 0 { return C_rlVertexBuffer::default(); }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return C_rlVertexBuffer::default(); };
+    let mut result = C_rlVertexBuffer::default();
+    result.elementCount = ctx.get_field_i32_by_index(addr, 0) as c_int;
+    result.vertices = ctx.read_field_u64_by_index(addr, 1) as usize as *mut f32;
+    result.texcoords = ctx.read_field_u64_by_index(addr, 2) as usize as *mut f32;
+    result.normals = ctx.read_field_u64_by_index(addr, 3) as usize as *mut f32;
+    result.colors = ctx.read_field_u64_by_index(addr, 4) as usize as *mut u8;
+    result.indices = ctx.read_field_u64_by_index(addr, 5) as usize as *mut c_uint;
+    result.vaoId = ctx.read_field_u64_by_index(addr, 6) as c_uint;
+    let arr_addr_7 = ctx.read_field_u64_by_index(addr, 7) as u32;
+    if arr_addr_7 > 0 {
+        let arr_len = ctx.array_len(arr_addr_7).min(5);
+        for elem_idx in 0..arr_len {
+            let raw_val = ctx.array_get_u64(arr_addr_7, elem_idx);
+            result.vboId[elem_idx as usize] = raw_val as c_uint;
+        }
+    }
+    result
+}
+
+unsafe fn writeback_rl_draw_call(vm_context: *mut c_void, addr: u32, val: &C_rlDrawCall) {
+    if addr == 0 { return; }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return; };
+    ctx.set_field_i32_by_index(addr, 0, val.mode as i32);
+    ctx.set_field_i32_by_index(addr, 1, val.vertexCount as i32);
+    ctx.set_field_i32_by_index(addr, 2, val.vertexAlignment as i32);
+    ctx.write_field_u64_by_index(addr, 3, val.textureId as u64);
+}
+
+unsafe fn pack_rl_draw_call(vm_context: *mut c_void, val: C_rlDrawCall) -> u32 {
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return 0; };
+    let class_vtable_id = ctx.get_class_vtable_id("rlDrawCall");
+    let addr = ctx.alloc_object(class_vtable_id, 4);
+    if addr > 0 {
+        writeback_rl_draw_call(vm_context, addr, &val);
+    }
+    addr
+}
+
+unsafe fn unpack_rl_draw_call(vm_context: *mut c_void, addr: u32) -> C_rlDrawCall {
+    if addr == 0 { return C_rlDrawCall::default(); }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return C_rlDrawCall::default(); };
+    let mut result = C_rlDrawCall::default();
+    result.mode = ctx.get_field_i32_by_index(addr, 0) as c_int;
+    result.vertexCount = ctx.get_field_i32_by_index(addr, 1) as c_int;
+    result.vertexAlignment = ctx.get_field_i32_by_index(addr, 2) as c_int;
+    result.textureId = ctx.read_field_u64_by_index(addr, 3) as c_uint;
+    result
+}
+
+unsafe fn writeback_rl_render_batch(vm_context: *mut c_void, addr: u32, val: &C_rlRenderBatch) {
+    if addr == 0 { return; }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return; };
+    ctx.set_field_i32_by_index(addr, 0, val.bufferCount as i32);
+    ctx.set_field_i32_by_index(addr, 1, val.currentBuffer as i32);
+    ctx.write_field_u64_by_index(addr, 2, val.vertexBuffer as usize as u64);
+    ctx.write_field_u64_by_index(addr, 3, val.draws as usize as u64);
+    ctx.set_field_i32_by_index(addr, 4, val.drawCounter as i32);
+    ctx.write_field_u64_by_index(addr, 5, val.currentDepth.to_bits() as u64);
+}
+
+unsafe fn pack_rl_render_batch(vm_context: *mut c_void, val: C_rlRenderBatch) -> u32 {
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return 0; };
+    let class_vtable_id = ctx.get_class_vtable_id("rlRenderBatch");
+    let addr = ctx.alloc_object(class_vtable_id, 6);
+    if addr > 0 {
+        writeback_rl_render_batch(vm_context, addr, &val);
+    }
+    addr
+}
+
+unsafe fn unpack_rl_render_batch(vm_context: *mut c_void, addr: u32) -> C_rlRenderBatch {
+    if addr == 0 { return C_rlRenderBatch::default(); }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return C_rlRenderBatch::default(); };
+    let mut result = C_rlRenderBatch::default();
+    result.bufferCount = ctx.get_field_i32_by_index(addr, 0) as c_int;
+    result.currentBuffer = ctx.get_field_i32_by_index(addr, 1) as c_int;
+    result.vertexBuffer = ctx.read_field_u64_by_index(addr, 2) as usize as *mut C_rlVertexBuffer;
+    result.draws = ctx.read_field_u64_by_index(addr, 3) as usize as *mut C_rlDrawCall;
+    result.drawCounter = ctx.get_field_i32_by_index(addr, 4) as c_int;
+    result.currentDepth = f32::from_bits(ctx.read_field_u64_by_index(addr, 5) as u32);
+    result
+}
+
+unsafe fn writeback_float3(vm_context: *mut c_void, addr: u32, val: &C_float3) {
+    if addr == 0 { return; }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return; };
+    let arr_addr_0 = ctx.alloc_array(3, 0);
+    if arr_addr_0 != 0 {
+        for elem_idx in 0..3u32 {
+            ctx.array_set_u64(arr_addr_0, elem_idx, (val.v[elem_idx as usize] as f64).to_bits());
+        }
+        ctx.write_field_u64_by_index(addr, 0, arr_addr_0 as u64);
+    }
+}
+
+unsafe fn pack_float3(vm_context: *mut c_void, val: C_float3) -> u32 {
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return 0; };
+    let class_vtable_id = ctx.get_class_vtable_id("float3");
+    let addr = ctx.alloc_object(class_vtable_id, 1);
+    if addr > 0 {
+        writeback_float3(vm_context, addr, &val);
+    }
+    addr
+}
+
+unsafe fn unpack_float3(vm_context: *mut c_void, addr: u32) -> C_float3 {
+    if addr == 0 { return C_float3::default(); }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return C_float3::default(); };
+    let mut result = C_float3::default();
+    let arr_addr_0 = ctx.read_field_u64_by_index(addr, 0) as u32;
+    if arr_addr_0 > 0 {
+        let arr_len = ctx.array_len(arr_addr_0).min(3);
+        for elem_idx in 0..arr_len {
+            let raw_val = ctx.array_get_u64(arr_addr_0, elem_idx);
+            result.v[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
+        }
+    }
+    result
+}
+
+unsafe fn writeback_float16(vm_context: *mut c_void, addr: u32, val: &C_float16) {
+    if addr == 0 { return; }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return; };
+    let arr_addr_0 = ctx.alloc_array(16, 0);
+    if arr_addr_0 != 0 {
+        for elem_idx in 0..16u32 {
+            ctx.array_set_u64(arr_addr_0, elem_idx, (val.v[elem_idx as usize] as f64).to_bits());
+        }
+        ctx.write_field_u64_by_index(addr, 0, arr_addr_0 as u64);
+    }
+}
+
+unsafe fn pack_float16(vm_context: *mut c_void, val: C_float16) -> u32 {
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return 0; };
+    let class_vtable_id = ctx.get_class_vtable_id("float16");
+    let addr = ctx.alloc_object(class_vtable_id, 1);
+    if addr > 0 {
+        writeback_float16(vm_context, addr, &val);
+    }
+    addr
+}
+
+unsafe fn unpack_float16(vm_context: *mut c_void, addr: u32) -> C_float16 {
+    if addr == 0 { return C_float16::default(); }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return C_float16::default(); };
+    let mut result = C_float16::default();
+    let arr_addr_0 = ctx.read_field_u64_by_index(addr, 0) as u32;
+    if arr_addr_0 > 0 {
+        let arr_len = ctx.array_len(arr_addr_0).min(16);
+        for elem_idx in 0..arr_len {
+            let raw_val = ctx.array_get_u64(arr_addr_0, elem_idx);
+            result.v[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
+        }
+    }
+    result
+}
+
 unsafe fn unpack_quaternion(vm_context: *mut c_void, addr: u32) -> C_Quaternion { unpack_vector4(vm_context, addr) }
 unsafe fn pack_quaternion(vm_context: *mut c_void, val: C_Quaternion) -> u32 { pack_vector4(vm_context, val) }
 unsafe fn writeback_quaternion(vm_context: *mut c_void, addr: u32, val: &C_Quaternion) { writeback_vector4(vm_context, addr, val); }
@@ -2540,6 +2805,315 @@ unsafe extern "C" {
     pub fn DetachAudioStreamProcessor(arg_0: C_AudioStream, arg_1: AudioCallback);
     pub fn AttachAudioMixedProcessor(arg_0: AudioCallback);
     pub fn DetachAudioMixedProcessor(arg_0: AudioCallback);
+    pub fn rlMatrixMode(arg_0: c_int);
+    pub fn rlPushMatrix();
+    pub fn rlPopMatrix();
+    pub fn rlLoadIdentity();
+    pub fn rlTranslatef(arg_0: f32, arg_1: f32, arg_2: f32);
+    pub fn rlRotatef(arg_0: f32, arg_1: f32, arg_2: f32, arg_3: f32);
+    pub fn rlScalef(arg_0: f32, arg_1: f32, arg_2: f32);
+    pub fn rlMultMatrixf(arg_0: *const f32);
+    pub fn rlFrustum(arg_0: f64, arg_1: f64, arg_2: f64, arg_3: f64, arg_4: f64, arg_5: f64);
+    pub fn rlOrtho(arg_0: f64, arg_1: f64, arg_2: f64, arg_3: f64, arg_4: f64, arg_5: f64);
+    pub fn rlViewport(arg_0: c_int, arg_1: c_int, arg_2: c_int, arg_3: c_int);
+    pub fn rlSetClipPlanes(arg_0: f64, arg_1: f64);
+    pub fn rlGetCullDistanceNear() -> f64;
+    pub fn rlGetCullDistanceFar() -> f64;
+    pub fn rlBegin(arg_0: c_int);
+    pub fn rlEnd();
+    pub fn rlVertex2i(arg_0: c_int, arg_1: c_int);
+    pub fn rlVertex2f(arg_0: f32, arg_1: f32);
+    pub fn rlVertex3f(arg_0: f32, arg_1: f32, arg_2: f32);
+    pub fn rlTexCoord2f(arg_0: f32, arg_1: f32);
+    pub fn rlNormal3f(arg_0: f32, arg_1: f32, arg_2: f32);
+    pub fn rlColor4ub(arg_0: u8, arg_1: u8, arg_2: u8, arg_3: u8);
+    pub fn rlColor3f(arg_0: f32, arg_1: f32, arg_2: f32);
+    pub fn rlColor4f(arg_0: f32, arg_1: f32, arg_2: f32, arg_3: f32);
+    pub fn rlEnableVertexArray(arg_0: c_uint) -> bool;
+    pub fn rlDisableVertexArray();
+    pub fn rlEnableVertexBuffer(arg_0: c_uint);
+    pub fn rlDisableVertexBuffer();
+    pub fn rlEnableVertexBufferElement(arg_0: c_uint);
+    pub fn rlDisableVertexBufferElement();
+    pub fn rlEnableVertexAttribute(arg_0: c_uint);
+    pub fn rlDisableVertexAttribute(arg_0: c_uint);
+    pub fn rlEnableStatePointer(arg_0: c_int, arg_1: *mut c_void);
+    pub fn rlDisableStatePointer(arg_0: c_int);
+    pub fn rlActiveTextureSlot(arg_0: c_int);
+    pub fn rlEnableTexture(arg_0: c_uint);
+    pub fn rlDisableTexture();
+    pub fn rlEnableTextureCubemap(arg_0: c_uint);
+    pub fn rlDisableTextureCubemap();
+    pub fn rlTextureParameters(arg_0: c_uint, arg_1: c_int, arg_2: c_int);
+    pub fn rlCubemapParameters(arg_0: c_uint, arg_1: c_int, arg_2: c_int);
+    pub fn rlEnableShader(arg_0: c_uint);
+    pub fn rlDisableShader();
+    pub fn rlEnableFramebuffer(arg_0: c_uint);
+    pub fn rlDisableFramebuffer();
+    pub fn rlGetActiveFramebuffer() -> c_uint;
+    pub fn rlActiveDrawBuffers(arg_0: c_int);
+    pub fn rlBlitFramebuffer(arg_0: c_int, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: c_int, arg_6: c_int, arg_7: c_int, arg_8: c_int);
+    pub fn rlBindFramebuffer(arg_0: c_uint, arg_1: c_uint);
+    pub fn rlEnableColorBlend();
+    pub fn rlDisableColorBlend();
+    pub fn rlEnableDepthTest();
+    pub fn rlDisableDepthTest();
+    pub fn rlEnableDepthMask();
+    pub fn rlDisableDepthMask();
+    pub fn rlEnableBackfaceCulling();
+    pub fn rlDisableBackfaceCulling();
+    pub fn rlColorMask(arg_0: bool, arg_1: bool, arg_2: bool, arg_3: bool);
+    pub fn rlSetCullFace(arg_0: c_int);
+    pub fn rlEnableScissorTest();
+    pub fn rlDisableScissorTest();
+    pub fn rlScissor(arg_0: c_int, arg_1: c_int, arg_2: c_int, arg_3: c_int);
+    pub fn rlEnablePointMode();
+    pub fn rlDisablePointMode();
+    pub fn rlSetPointSize(arg_0: f32);
+    pub fn rlGetPointSize() -> f32;
+    pub fn rlEnableWireMode();
+    pub fn rlDisableWireMode();
+    pub fn rlSetLineWidth(arg_0: f32);
+    pub fn rlGetLineWidth() -> f32;
+    pub fn rlEnableSmoothLines();
+    pub fn rlDisableSmoothLines();
+    pub fn rlEnableStereoRender();
+    pub fn rlDisableStereoRender();
+    pub fn rlIsStereoRenderEnabled() -> bool;
+    pub fn rlClearColor(arg_0: u8, arg_1: u8, arg_2: u8, arg_3: u8);
+    pub fn rlClearScreenBuffers();
+    pub fn rlCheckErrors();
+    pub fn rlSetBlendMode(arg_0: c_int);
+    pub fn rlSetBlendFactors(arg_0: c_int, arg_1: c_int, arg_2: c_int);
+    pub fn rlSetBlendFactorsSeparate(arg_0: c_int, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: c_int);
+    pub fn rlglInit(arg_0: c_int, arg_1: c_int);
+    pub fn rlglClose();
+    pub fn rlLoadExtensions(arg_0: *mut c_void);
+    pub fn rlGetProcAddress(arg_0: *const c_char) -> *mut c_void;
+    pub fn rlGetVersion() -> c_int;
+    pub fn rlSetFramebufferWidth(arg_0: c_int);
+    pub fn rlGetFramebufferWidth() -> c_int;
+    pub fn rlSetFramebufferHeight(arg_0: c_int);
+    pub fn rlGetFramebufferHeight() -> c_int;
+    pub fn rlGetTextureIdDefault() -> c_uint;
+    pub fn rlGetShaderIdDefault() -> c_uint;
+    pub fn rlGetShaderLocsDefault() -> *mut c_int;
+    pub fn rlLoadRenderBatch(arg_0: c_int, arg_1: c_int) -> C_rlRenderBatch;
+    pub fn rlUnloadRenderBatch(arg_0: C_rlRenderBatch);
+    pub fn rlDrawRenderBatch(arg_0: *mut C_rlRenderBatch);
+    pub fn rlSetRenderBatchActive(arg_0: *mut C_rlRenderBatch);
+    pub fn rlDrawRenderBatchActive();
+    pub fn rlCheckRenderBatchLimit(arg_0: c_int) -> bool;
+    pub fn rlSetTexture(arg_0: c_uint);
+    pub fn rlLoadVertexArray() -> c_uint;
+    pub fn rlLoadVertexBuffer(arg_0: *mut c_void, arg_1: c_int, arg_2: bool) -> c_uint;
+    pub fn rlLoadVertexBufferElement(arg_0: *mut c_void, arg_1: c_int, arg_2: bool) -> c_uint;
+    pub fn rlUpdateVertexBuffer(arg_0: c_uint, arg_1: *mut c_void, arg_2: c_int, arg_3: c_int);
+    pub fn rlUpdateVertexBufferElements(arg_0: c_uint, arg_1: *mut c_void, arg_2: c_int, arg_3: c_int);
+    pub fn rlUnloadVertexArray(arg_0: c_uint);
+    pub fn rlUnloadVertexBuffer(arg_0: c_uint);
+    pub fn rlSetVertexAttribute(arg_0: c_uint, arg_1: c_int, arg_2: c_int, arg_3: bool, arg_4: c_int, arg_5: c_int);
+    pub fn rlSetVertexAttributeDivisor(arg_0: c_uint, arg_1: c_int);
+    pub fn rlSetVertexAttributeDefault(arg_0: c_int, arg_1: *mut c_void, arg_2: c_int, arg_3: c_int);
+    pub fn rlDrawVertexArray(arg_0: c_int, arg_1: c_int);
+    pub fn rlDrawVertexArrayElements(arg_0: c_int, arg_1: c_int, arg_2: *mut c_void);
+    pub fn rlDrawVertexArrayInstanced(arg_0: c_int, arg_1: c_int, arg_2: c_int);
+    pub fn rlDrawVertexArrayElementsInstanced(arg_0: c_int, arg_1: c_int, arg_2: *mut c_void, arg_3: c_int);
+    pub fn rlLoadTexture(arg_0: *mut c_void, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: c_int) -> c_uint;
+    pub fn rlLoadTextureDepth(arg_0: c_int, arg_1: c_int, arg_2: bool) -> c_uint;
+    pub fn rlLoadTextureCubemap(arg_0: *mut c_void, arg_1: c_int, arg_2: c_int, arg_3: c_int) -> c_uint;
+    pub fn rlUpdateTexture(arg_0: c_uint, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: c_int, arg_6: *mut c_void);
+    pub fn rlGetGlTextureFormats(arg_0: c_int, arg_1: *mut c_uint, arg_2: *mut c_uint, arg_3: *mut c_uint);
+    pub fn rlGetPixelFormatName(arg_0: c_uint) -> *const c_char;
+    pub fn rlUnloadTexture(arg_0: c_uint);
+    pub fn rlGenTextureMipmaps(arg_0: c_uint, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: *mut c_int);
+    pub fn rlReadTexturePixels(arg_0: c_uint, arg_1: c_int, arg_2: c_int, arg_3: c_int) -> *mut c_void;
+    pub fn rlReadScreenPixels(arg_0: c_int, arg_1: c_int) -> *mut u8;
+    pub fn rlLoadFramebuffer() -> c_uint;
+    pub fn rlFramebufferAttach(arg_0: c_uint, arg_1: c_uint, arg_2: c_int, arg_3: c_int, arg_4: c_int);
+    pub fn rlFramebufferComplete(arg_0: c_uint) -> bool;
+    pub fn rlUnloadFramebuffer(arg_0: c_uint);
+    pub fn rlCopyFramebuffer(arg_0: c_int, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: *mut c_void);
+    pub fn rlResizeFramebuffer(arg_0: c_int, arg_1: c_int);
+    pub fn rlLoadShader(arg_0: *const c_char, arg_1: c_int) -> c_uint;
+    pub fn rlLoadShaderProgram(arg_0: *const c_char, arg_1: *const c_char) -> c_uint;
+    pub fn rlLoadShaderProgramEx(arg_0: c_uint, arg_1: c_uint) -> c_uint;
+    pub fn rlLoadShaderProgramCompute(arg_0: c_uint) -> c_uint;
+    pub fn rlUnloadShader(arg_0: c_uint);
+    pub fn rlUnloadShaderProgram(arg_0: c_uint);
+    pub fn rlGetLocationUniform(arg_0: c_uint, arg_1: *const c_char) -> c_int;
+    pub fn rlGetLocationAttrib(arg_0: c_uint, arg_1: *const c_char) -> c_int;
+    pub fn rlSetUniform(arg_0: c_int, arg_1: *mut c_void, arg_2: c_int, arg_3: c_int);
+    pub fn rlSetUniformMatrix(arg_0: c_int, arg_1: C_Matrix);
+    pub fn rlSetUniformMatrices(arg_0: c_int, arg_1: *const C_Matrix, arg_2: c_int);
+    pub fn rlSetUniformSampler(arg_0: c_int, arg_1: c_uint);
+    pub fn rlSetShader(arg_0: c_uint, arg_1: *mut c_int);
+    pub fn rlComputeShaderDispatch(arg_0: c_uint, arg_1: c_uint, arg_2: c_uint);
+    pub fn rlLoadShaderBuffer(arg_0: c_uint, arg_1: *mut c_void, arg_2: c_int) -> c_uint;
+    pub fn rlUnloadShaderBuffer(arg_0: c_uint);
+    pub fn rlUpdateShaderBuffer(arg_0: c_uint, arg_1: *mut c_void, arg_2: c_uint, arg_3: c_uint);
+    pub fn rlBindShaderBuffer(arg_0: c_uint, arg_1: c_uint);
+    pub fn rlReadShaderBuffer(arg_0: c_uint, arg_1: *mut c_void, arg_2: c_uint, arg_3: c_uint);
+    pub fn rlCopyShaderBuffer(arg_0: c_uint, arg_1: c_uint, arg_2: c_uint, arg_3: c_uint, arg_4: c_uint);
+    pub fn rlGetShaderBufferSize(arg_0: c_uint) -> c_uint;
+    pub fn rlBindImageTexture(arg_0: c_uint, arg_1: c_uint, arg_2: c_int, arg_3: bool);
+    pub fn rlGetMatrixModelview() -> C_Matrix;
+    pub fn rlGetMatrixProjection() -> C_Matrix;
+    pub fn rlGetMatrixTransform() -> C_Matrix;
+    pub fn rlGetMatrixProjectionStereo(arg_0: c_int) -> C_Matrix;
+    pub fn rlGetMatrixViewOffsetStereo(arg_0: c_int) -> C_Matrix;
+    pub fn rlSetMatrixProjection(arg_0: C_Matrix);
+    pub fn rlSetMatrixModelview(arg_0: C_Matrix);
+    pub fn rlSetMatrixProjectionStereo(arg_0: C_Matrix, arg_1: C_Matrix);
+    pub fn rlSetMatrixViewOffsetStereo(arg_0: C_Matrix, arg_1: C_Matrix);
+    pub fn rlLoadDrawCube();
+    pub fn rlLoadDrawQuad();
+    pub fn Clamp(arg_0: f32, arg_1: f32, arg_2: f32) -> f32;
+    pub fn Lerp(arg_0: f32, arg_1: f32, arg_2: f32) -> f32;
+    pub fn Normalize(arg_0: f32, arg_1: f32, arg_2: f32) -> f32;
+    pub fn Remap(arg_0: f32, arg_1: f32, arg_2: f32, arg_3: f32, arg_4: f32) -> f32;
+    pub fn Wrap(arg_0: f32, arg_1: f32, arg_2: f32) -> f32;
+    pub fn FloatEquals(arg_0: f32, arg_1: f32) -> c_int;
+    pub fn Vector2Zero() -> C_Vector2;
+    pub fn Vector2One() -> C_Vector2;
+    pub fn Vector2Add(arg_0: C_Vector2, arg_1: C_Vector2) -> C_Vector2;
+    pub fn Vector2AddValue(arg_0: C_Vector2, arg_1: f32) -> C_Vector2;
+    pub fn Vector2Subtract(arg_0: C_Vector2, arg_1: C_Vector2) -> C_Vector2;
+    pub fn Vector2SubtractValue(arg_0: C_Vector2, arg_1: f32) -> C_Vector2;
+    pub fn Vector2Length(arg_0: C_Vector2) -> f32;
+    pub fn Vector2LengthSqr(arg_0: C_Vector2) -> f32;
+    pub fn Vector2DotProduct(arg_0: C_Vector2, arg_1: C_Vector2) -> f32;
+    pub fn Vector2CrossProduct(arg_0: C_Vector2, arg_1: C_Vector2) -> f32;
+    pub fn Vector2Distance(arg_0: C_Vector2, arg_1: C_Vector2) -> f32;
+    pub fn Vector2DistanceSqr(arg_0: C_Vector2, arg_1: C_Vector2) -> f32;
+    pub fn Vector2Angle(arg_0: C_Vector2, arg_1: C_Vector2) -> f32;
+    pub fn Vector2LineAngle(arg_0: C_Vector2, arg_1: C_Vector2) -> f32;
+    pub fn Vector2Scale(arg_0: C_Vector2, arg_1: f32) -> C_Vector2;
+    pub fn Vector2Multiply(arg_0: C_Vector2, arg_1: C_Vector2) -> C_Vector2;
+    pub fn Vector2Negate(arg_0: C_Vector2) -> C_Vector2;
+    pub fn Vector2Divide(arg_0: C_Vector2, arg_1: C_Vector2) -> C_Vector2;
+    pub fn Vector2Normalize(arg_0: C_Vector2) -> C_Vector2;
+    pub fn Vector2Transform(arg_0: C_Vector2, arg_1: C_Matrix) -> C_Vector2;
+    pub fn Vector2Lerp(arg_0: C_Vector2, arg_1: C_Vector2, arg_2: f32) -> C_Vector2;
+    pub fn Vector2Reflect(arg_0: C_Vector2, arg_1: C_Vector2) -> C_Vector2;
+    pub fn Vector2Min(arg_0: C_Vector2, arg_1: C_Vector2) -> C_Vector2;
+    pub fn Vector2Max(arg_0: C_Vector2, arg_1: C_Vector2) -> C_Vector2;
+    pub fn Vector2Rotate(arg_0: C_Vector2, arg_1: f32) -> C_Vector2;
+    pub fn Vector2MoveTowards(arg_0: C_Vector2, arg_1: C_Vector2, arg_2: f32) -> C_Vector2;
+    pub fn Vector2Invert(arg_0: C_Vector2) -> C_Vector2;
+    pub fn Vector2Clamp(arg_0: C_Vector2, arg_1: C_Vector2, arg_2: C_Vector2) -> C_Vector2;
+    pub fn Vector2ClampValue(arg_0: C_Vector2, arg_1: f32, arg_2: f32) -> C_Vector2;
+    pub fn Vector2Equals(arg_0: C_Vector2, arg_1: C_Vector2) -> c_int;
+    pub fn Vector2Refract(arg_0: C_Vector2, arg_1: C_Vector2, arg_2: f32) -> C_Vector2;
+    pub fn Vector3Zero() -> C_Vector3;
+    pub fn Vector3One() -> C_Vector3;
+    pub fn Vector3Add(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3AddValue(arg_0: C_Vector3, arg_1: f32) -> C_Vector3;
+    pub fn Vector3Subtract(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3SubtractValue(arg_0: C_Vector3, arg_1: f32) -> C_Vector3;
+    pub fn Vector3Scale(arg_0: C_Vector3, arg_1: f32) -> C_Vector3;
+    pub fn Vector3Multiply(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3CrossProduct(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3Perpendicular(arg_0: C_Vector3) -> C_Vector3;
+    pub fn Vector3Length(arg_0: C_Vector3) -> f32;
+    pub fn Vector3LengthSqr(arg_0: C_Vector3) -> f32;
+    pub fn Vector3DotProduct(arg_0: C_Vector3, arg_1: C_Vector3) -> f32;
+    pub fn Vector3Distance(arg_0: C_Vector3, arg_1: C_Vector3) -> f32;
+    pub fn Vector3DistanceSqr(arg_0: C_Vector3, arg_1: C_Vector3) -> f32;
+    pub fn Vector3Angle(arg_0: C_Vector3, arg_1: C_Vector3) -> f32;
+    pub fn Vector3Negate(arg_0: C_Vector3) -> C_Vector3;
+    pub fn Vector3Divide(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3Normalize(arg_0: C_Vector3) -> C_Vector3;
+    pub fn Vector3Project(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3Reject(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3OrthoNormalize(arg_0: *mut C_Vector3, arg_1: *mut C_Vector3);
+    pub fn Vector3Transform(arg_0: C_Vector3, arg_1: C_Matrix) -> C_Vector3;
+    pub fn Vector3RotateByQuaternion(arg_0: C_Vector3, arg_1: C_Vector4) -> C_Vector3;
+    pub fn Vector3RotateByAxisAngle(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: f32) -> C_Vector3;
+    pub fn Vector3MoveTowards(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: f32) -> C_Vector3;
+    pub fn Vector3Lerp(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: f32) -> C_Vector3;
+    pub fn Vector3CubicHermite(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: C_Vector3, arg_3: C_Vector3, arg_4: f32) -> C_Vector3;
+    pub fn Vector3Reflect(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3Min(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3Max(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector3;
+    pub fn Vector3Barycenter(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: C_Vector3, arg_3: C_Vector3) -> C_Vector3;
+    pub fn Vector3Unproject(arg_0: C_Vector3, arg_1: C_Matrix, arg_2: C_Matrix) -> C_Vector3;
+    pub fn Vector3ToFloatV(arg_0: C_Vector3) -> C_float3;
+    pub fn Vector3Invert(arg_0: C_Vector3) -> C_Vector3;
+    pub fn Vector3Clamp(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: C_Vector3) -> C_Vector3;
+    pub fn Vector3ClampValue(arg_0: C_Vector3, arg_1: f32, arg_2: f32) -> C_Vector3;
+    pub fn Vector3Equals(arg_0: C_Vector3, arg_1: C_Vector3) -> c_int;
+    pub fn Vector3Refract(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: f32) -> C_Vector3;
+    pub fn Vector4Zero() -> C_Vector4;
+    pub fn Vector4One() -> C_Vector4;
+    pub fn Vector4Add(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn Vector4AddValue(arg_0: C_Vector4, arg_1: f32) -> C_Vector4;
+    pub fn Vector4Subtract(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn Vector4SubtractValue(arg_0: C_Vector4, arg_1: f32) -> C_Vector4;
+    pub fn Vector4Length(arg_0: C_Vector4) -> f32;
+    pub fn Vector4LengthSqr(arg_0: C_Vector4) -> f32;
+    pub fn Vector4DotProduct(arg_0: C_Vector4, arg_1: C_Vector4) -> f32;
+    pub fn Vector4Distance(arg_0: C_Vector4, arg_1: C_Vector4) -> f32;
+    pub fn Vector4DistanceSqr(arg_0: C_Vector4, arg_1: C_Vector4) -> f32;
+    pub fn Vector4Scale(arg_0: C_Vector4, arg_1: f32) -> C_Vector4;
+    pub fn Vector4Multiply(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn Vector4Negate(arg_0: C_Vector4) -> C_Vector4;
+    pub fn Vector4Divide(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn Vector4Normalize(arg_0: C_Vector4) -> C_Vector4;
+    pub fn Vector4Min(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn Vector4Max(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn Vector4Lerp(arg_0: C_Vector4, arg_1: C_Vector4, arg_2: f32) -> C_Vector4;
+    pub fn Vector4MoveTowards(arg_0: C_Vector4, arg_1: C_Vector4, arg_2: f32) -> C_Vector4;
+    pub fn Vector4Invert(arg_0: C_Vector4) -> C_Vector4;
+    pub fn Vector4Equals(arg_0: C_Vector4, arg_1: C_Vector4) -> c_int;
+    pub fn MatrixDeterminant(arg_0: C_Matrix) -> f32;
+    pub fn MatrixTrace(arg_0: C_Matrix) -> f32;
+    pub fn MatrixTranspose(arg_0: C_Matrix) -> C_Matrix;
+    pub fn MatrixInvert(arg_0: C_Matrix) -> C_Matrix;
+    pub fn MatrixIdentity() -> C_Matrix;
+    pub fn MatrixAdd(arg_0: C_Matrix, arg_1: C_Matrix) -> C_Matrix;
+    pub fn MatrixSubtract(arg_0: C_Matrix, arg_1: C_Matrix) -> C_Matrix;
+    pub fn MatrixMultiply(arg_0: C_Matrix, arg_1: C_Matrix) -> C_Matrix;
+    pub fn MatrixMultiplyValue(arg_0: C_Matrix, arg_1: f32) -> C_Matrix;
+    pub fn MatrixTranslate(arg_0: f32, arg_1: f32, arg_2: f32) -> C_Matrix;
+    pub fn MatrixRotate(arg_0: C_Vector3, arg_1: f32) -> C_Matrix;
+    pub fn MatrixRotateX(arg_0: f32) -> C_Matrix;
+    pub fn MatrixRotateY(arg_0: f32) -> C_Matrix;
+    pub fn MatrixRotateZ(arg_0: f32) -> C_Matrix;
+    pub fn MatrixRotateXYZ(arg_0: C_Vector3) -> C_Matrix;
+    pub fn MatrixRotateZYX(arg_0: C_Vector3) -> C_Matrix;
+    pub fn MatrixScale(arg_0: f32, arg_1: f32, arg_2: f32) -> C_Matrix;
+    pub fn MatrixFrustum(arg_0: f64, arg_1: f64, arg_2: f64, arg_3: f64, arg_4: f64, arg_5: f64) -> C_Matrix;
+    pub fn MatrixPerspective(arg_0: f64, arg_1: f64, arg_2: f64, arg_3: f64) -> C_Matrix;
+    pub fn MatrixOrtho(arg_0: f64, arg_1: f64, arg_2: f64, arg_3: f64, arg_4: f64, arg_5: f64) -> C_Matrix;
+    pub fn MatrixLookAt(arg_0: C_Vector3, arg_1: C_Vector3, arg_2: C_Vector3) -> C_Matrix;
+    pub fn MatrixToFloatV(arg_0: C_Matrix) -> C_float16;
+    pub fn QuaternionAdd(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn QuaternionAddValue(arg_0: C_Vector4, arg_1: f32) -> C_Vector4;
+    pub fn QuaternionSubtract(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn QuaternionSubtractValue(arg_0: C_Vector4, arg_1: f32) -> C_Vector4;
+    pub fn QuaternionIdentity() -> C_Vector4;
+    pub fn QuaternionLength(arg_0: C_Vector4) -> f32;
+    pub fn QuaternionNormalize(arg_0: C_Vector4) -> C_Vector4;
+    pub fn QuaternionInvert(arg_0: C_Vector4) -> C_Vector4;
+    pub fn QuaternionMultiply(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn QuaternionScale(arg_0: C_Vector4, arg_1: f32) -> C_Vector4;
+    pub fn QuaternionDivide(arg_0: C_Vector4, arg_1: C_Vector4) -> C_Vector4;
+    pub fn QuaternionLerp(arg_0: C_Vector4, arg_1: C_Vector4, arg_2: f32) -> C_Vector4;
+    pub fn QuaternionNlerp(arg_0: C_Vector4, arg_1: C_Vector4, arg_2: f32) -> C_Vector4;
+    pub fn QuaternionSlerp(arg_0: C_Vector4, arg_1: C_Vector4, arg_2: f32) -> C_Vector4;
+    pub fn QuaternionCubicHermiteSpline(arg_0: C_Vector4, arg_1: C_Vector4, arg_2: C_Vector4, arg_3: C_Vector4, arg_4: f32) -> C_Vector4;
+    pub fn QuaternionFromVector3ToVector3(arg_0: C_Vector3, arg_1: C_Vector3) -> C_Vector4;
+    pub fn QuaternionFromMatrix(arg_0: C_Matrix) -> C_Vector4;
+    pub fn QuaternionToMatrix(arg_0: C_Vector4) -> C_Matrix;
+    pub fn QuaternionFromAxisAngle(arg_0: C_Vector3, arg_1: f32) -> C_Vector4;
+    pub fn QuaternionToAxisAngle(arg_0: C_Vector4, arg_1: *mut C_Vector3, arg_2: *mut f32);
+    pub fn QuaternionFromEuler(arg_0: f32, arg_1: f32, arg_2: f32) -> C_Vector4;
+    pub fn QuaternionToEuler(arg_0: C_Vector4) -> C_Vector3;
+    pub fn QuaternionTransform(arg_0: C_Vector4, arg_1: C_Matrix) -> C_Vector4;
+    pub fn QuaternionEquals(arg_0: C_Vector4, arg_1: C_Vector4) -> c_int;
+    pub fn MatrixCompose(arg_0: C_Vector3, arg_1: C_Vector4, arg_2: C_Vector3) -> C_Matrix;
+    pub fn MatrixDecompose(arg_0: C_Matrix, arg_1: *mut C_Vector3, arg_2: *mut C_Vector4, arg_3: *mut C_Vector3);
 }
 
 // ===========================================================================
@@ -14832,6 +15406,5121 @@ pub unsafe extern "C-unwind" fn Raylib_DetachAudioMixedProcessor(
     SolixCValue::null()
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlMatrixMode(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlMatrixMode expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlMatrixMode((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlPushMatrix(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlPushMatrix();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlPopMatrix(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlPopMatrix();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadIdentity(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlLoadIdentity();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlTranslatef(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlTranslatef expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlTranslatef((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlRotatef(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlRotatef expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlRotatef((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32, (*args.add(3)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlScalef(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlScalef expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlScalef((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlMultMatrixf(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlMultMatrixf expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let arr_addr_0 = (*args.add(0)).as_ref();
+    let mut prim_vec_0: Vec<f32> = Vec::new();
+    if arr_addr_0 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_0);
+            prim_vec_0.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let raw_val = ctx.array_get_u64(arr_addr_0, elem_idx);
+                prim_vec_0.push(if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 });
+            }
+        }
+    }
+    rlMultMatrixf(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() });
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlFrustum(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 6 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlFrustum expected 6 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlFrustum((*args.add(0)).as_f64(), (*args.add(1)).as_f64(), (*args.add(2)).as_f64(), (*args.add(3)).as_f64(), (*args.add(4)).as_f64(), (*args.add(5)).as_f64());
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlOrtho(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 6 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlOrtho expected 6 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlOrtho((*args.add(0)).as_f64(), (*args.add(1)).as_f64(), (*args.add(2)).as_f64(), (*args.add(3)).as_f64(), (*args.add(4)).as_f64(), (*args.add(5)).as_f64());
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlViewport(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlViewport expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlViewport((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetClipPlanes(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetClipPlanes expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetClipPlanes((*args.add(0)).as_f64(), (*args.add(1)).as_f64());
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetCullDistanceNear(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetCullDistanceNear();
+    SolixCValue::from_f64(call_result)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetCullDistanceFar(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetCullDistanceFar();
+    SolixCValue::from_f64(call_result)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlBegin(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlBegin expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlBegin((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnd(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnd();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlVertex2i(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlVertex2i expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlVertex2i((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlVertex2f(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlVertex2f expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlVertex2f((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlVertex3f(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlVertex3f expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlVertex3f((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlTexCoord2f(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlTexCoord2f expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlTexCoord2f((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlNormal3f(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlNormal3f expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlNormal3f((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlColor4ub(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlColor4ub expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlColor4ub((*args.add(0)).payload as u8, (*args.add(1)).payload as u8, (*args.add(2)).payload as u8, (*args.add(3)).payload as u8);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlColor3f(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlColor3f expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlColor3f((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlColor4f(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlColor4f expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlColor4f((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32, (*args.add(3)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableVertexArray(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableVertexArray expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlEnableVertexArray((*args.add(0)).payload as c_uint);
+    SolixCValue::from_bool(call_result)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableVertexArray(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableVertexArray();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableVertexBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableVertexBuffer expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableVertexBuffer((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableVertexBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableVertexBuffer();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableVertexBufferElement(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableVertexBufferElement expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableVertexBufferElement((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableVertexBufferElement(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableVertexBufferElement();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableVertexAttribute(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableVertexAttribute expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableVertexAttribute((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableVertexAttribute(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlDisableVertexAttribute expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlDisableVertexAttribute((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableStatePointer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableStatePointer expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableStatePointer((*args.add(0)).as_i32() as c_int, (*args.add(1)).payload as usize as *mut c_void);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableStatePointer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlDisableStatePointer expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlDisableStatePointer((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlActiveTextureSlot(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlActiveTextureSlot expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlActiveTextureSlot((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableTexture(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableTexture expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableTexture((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableTexture(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableTexture();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableTextureCubemap(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableTextureCubemap expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableTextureCubemap((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableTextureCubemap(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableTextureCubemap();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlTextureParameters(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlTextureParameters expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlTextureParameters((*args.add(0)).payload as c_uint, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlCubemapParameters(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlCubemapParameters expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlCubemapParameters((*args.add(0)).payload as c_uint, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableShader(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableShader expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableShader((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableShader(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableShader();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlEnableFramebuffer expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlEnableFramebuffer((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableFramebuffer();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetActiveFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetActiveFramebuffer();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlActiveDrawBuffers(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlActiveDrawBuffers expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlActiveDrawBuffers((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlBlitFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 9 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlBlitFramebuffer expected 9 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlBlitFramebuffer((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int, (*args.add(4)).as_i32() as c_int, (*args.add(5)).as_i32() as c_int, (*args.add(6)).as_i32() as c_int, (*args.add(7)).as_i32() as c_int, (*args.add(8)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlBindFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlBindFramebuffer expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlBindFramebuffer((*args.add(0)).payload as c_uint, (*args.add(1)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableColorBlend(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableColorBlend();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableColorBlend(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableColorBlend();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableDepthTest(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableDepthTest();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableDepthTest(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableDepthTest();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableDepthMask(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableDepthMask();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableDepthMask(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableDepthMask();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableBackfaceCulling(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableBackfaceCulling();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableBackfaceCulling(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableBackfaceCulling();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlColorMask(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlColorMask expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlColorMask((*args.add(0)).as_bool(), (*args.add(1)).as_bool(), (*args.add(2)).as_bool(), (*args.add(3)).as_bool());
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetCullFace(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetCullFace expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetCullFace((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableScissorTest(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableScissorTest();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableScissorTest(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableScissorTest();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlScissor(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlScissor expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlScissor((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnablePointMode(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnablePointMode();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisablePointMode(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisablePointMode();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetPointSize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetPointSize expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetPointSize((*args.add(0)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetPointSize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetPointSize();
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableWireMode(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableWireMode();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableWireMode(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableWireMode();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetLineWidth(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetLineWidth expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetLineWidth((*args.add(0)).as_f64() as f32);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetLineWidth(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetLineWidth();
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableSmoothLines(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableSmoothLines();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableSmoothLines(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableSmoothLines();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlEnableStereoRender(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlEnableStereoRender();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDisableStereoRender(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDisableStereoRender();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlIsStereoRenderEnabled(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlIsStereoRenderEnabled();
+    SolixCValue::from_bool(call_result)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlClearColor(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlClearColor expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlClearColor((*args.add(0)).payload as u8, (*args.add(1)).payload as u8, (*args.add(2)).payload as u8, (*args.add(3)).payload as u8);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlClearScreenBuffers(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlClearScreenBuffers();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlCheckErrors(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlCheckErrors();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetBlendMode(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetBlendMode expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetBlendMode((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetBlendFactors(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetBlendFactors expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetBlendFactors((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetBlendFactorsSeparate(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 6 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetBlendFactorsSeparate expected 6 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetBlendFactorsSeparate((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int, (*args.add(4)).as_i32() as c_int, (*args.add(5)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlglInit(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlglInit expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlglInit((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlglClose(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlglClose();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadExtensions(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadExtensions expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlLoadExtensions((*args.add(0)).payload as usize as *mut c_void);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetProcAddress(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetProcAddress expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let str_addr_0 = (*args.add(0)).as_ref();
+    let str_keepalive_0: Option<CString> = if let Some(ctx) = SolixVmContext::validate(vm_context) {
+        ctx.read_string(str_addr_0).and_then(|decoded_str| CString::new(decoded_str).ok())
+    } else {
+        None
+    };
+    let str_ptr_0 = str_keepalive_0.as_ref().map_or(c"".as_ptr(), |c_string| c_string.as_ptr());
+    let call_result = rlGetProcAddress(str_ptr_0);
+    SolixCValue::from_i64(call_result as usize as i64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetVersion(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetVersion();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetFramebufferWidth(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetFramebufferWidth expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetFramebufferWidth((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetFramebufferWidth(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetFramebufferWidth();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetFramebufferHeight(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetFramebufferHeight expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetFramebufferHeight((*args.add(0)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetFramebufferHeight(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetFramebufferHeight();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetTextureIdDefault(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetTextureIdDefault();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetShaderIdDefault(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetShaderIdDefault();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetShaderLocsDefault(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetShaderLocsDefault();
+    SolixCValue::from_i64(call_result as usize as i64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadRenderBatch(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadRenderBatch expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadRenderBatch((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::from_ref(pack_rl_render_batch(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadRenderBatch(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadRenderBatch expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadRenderBatch(unpack_rl_render_batch(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDrawRenderBatch(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlDrawRenderBatch expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let rl_render_batch_addr_0 = (*args.add(0)).as_ref();
+    let mut rl_render_batch_mut_0 = unpack_rl_render_batch(vm_context, rl_render_batch_addr_0);
+    rlDrawRenderBatch(&mut rl_render_batch_mut_0);
+    writeback_rl_render_batch(vm_context, rl_render_batch_addr_0, &rl_render_batch_mut_0);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetRenderBatchActive(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetRenderBatchActive expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let rl_render_batch_addr_0 = (*args.add(0)).as_ref();
+    let mut rl_render_batch_mut_0 = unpack_rl_render_batch(vm_context, rl_render_batch_addr_0);
+    rlSetRenderBatchActive(&mut rl_render_batch_mut_0);
+    writeback_rl_render_batch(vm_context, rl_render_batch_addr_0, &rl_render_batch_mut_0);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDrawRenderBatchActive(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlDrawRenderBatchActive();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlCheckRenderBatchLimit(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlCheckRenderBatchLimit expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlCheckRenderBatchLimit((*args.add(0)).as_i32() as c_int);
+    SolixCValue::from_bool(call_result)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetTexture(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetTexture expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetTexture((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadVertexArray(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlLoadVertexArray();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadVertexBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadVertexBuffer expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadVertexBuffer((*args.add(0)).payload as usize as *mut c_void, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_bool());
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadVertexBufferElement(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadVertexBufferElement expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadVertexBufferElement((*args.add(0)).payload as usize as *mut c_void, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_bool());
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUpdateVertexBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUpdateVertexBuffer expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUpdateVertexBuffer((*args.add(0)).payload as c_uint, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUpdateVertexBufferElements(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUpdateVertexBufferElements expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUpdateVertexBufferElements((*args.add(0)).payload as c_uint, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadVertexArray(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadVertexArray expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadVertexArray((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadVertexBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadVertexBuffer expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadVertexBuffer((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetVertexAttribute(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 6 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetVertexAttribute expected 6 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetVertexAttribute((*args.add(0)).payload as c_uint, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_bool(), (*args.add(4)).as_i32() as c_int, (*args.add(5)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetVertexAttributeDivisor(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetVertexAttributeDivisor expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetVertexAttributeDivisor((*args.add(0)).payload as c_uint, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetVertexAttributeDefault(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetVertexAttributeDefault expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetVertexAttributeDefault((*args.add(0)).as_i32() as c_int, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDrawVertexArray(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlDrawVertexArray expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlDrawVertexArray((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDrawVertexArrayElements(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlDrawVertexArrayElements expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlDrawVertexArrayElements((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).payload as usize as *mut c_void);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDrawVertexArrayInstanced(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlDrawVertexArrayInstanced expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlDrawVertexArrayInstanced((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlDrawVertexArrayElementsInstanced(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlDrawVertexArrayElementsInstanced expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlDrawVertexArrayElementsInstanced((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).payload as usize as *mut c_void, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadTexture(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 5 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadTexture expected 5 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadTexture((*args.add(0)).payload as usize as *mut c_void, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int, (*args.add(4)).as_i32() as c_int);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadTextureDepth(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadTextureDepth expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadTextureDepth((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_bool());
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadTextureCubemap(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadTextureCubemap expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadTextureCubemap((*args.add(0)).payload as usize as *mut c_void, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUpdateTexture(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 7 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUpdateTexture expected 7 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUpdateTexture((*args.add(0)).payload as c_uint, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int, (*args.add(4)).as_i32() as c_int, (*args.add(5)).as_i32() as c_int, (*args.add(6)).payload as usize as *mut c_void);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetGlTextureFormats(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetGlTextureFormats expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let arr_addr_1 = (*args.add(1)).as_ref();
+    let mut prim_vec_1: Vec<c_uint> = Vec::new();
+    if arr_addr_1 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_1);
+            prim_vec_1.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let raw_val = ctx.array_get_u64(arr_addr_1, elem_idx);
+                prim_vec_1.push(raw_val as c_uint);
+            }
+        }
+    }
+    let arr_addr_2 = (*args.add(2)).as_ref();
+    let mut prim_vec_2: Vec<c_uint> = Vec::new();
+    if arr_addr_2 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_2);
+            prim_vec_2.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let raw_val = ctx.array_get_u64(arr_addr_2, elem_idx);
+                prim_vec_2.push(raw_val as c_uint);
+            }
+        }
+    }
+    let arr_addr_3 = (*args.add(3)).as_ref();
+    let mut prim_vec_3: Vec<c_uint> = Vec::new();
+    if arr_addr_3 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_3);
+            prim_vec_3.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let raw_val = ctx.array_get_u64(arr_addr_3, elem_idx);
+                prim_vec_3.push(raw_val as c_uint);
+            }
+        }
+    }
+    rlGetGlTextureFormats((*args.add(0)).as_i32() as c_int, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() }, if arr_addr_3 > 0 { prim_vec_3.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_1);
+            for elem_idx in 0..total_count {
+                let updated_elem = prim_vec_1[elem_idx as usize];
+                ctx.array_set_u64(arr_addr_1, elem_idx, updated_elem as u64);
+            }
+        }
+    }
+    if arr_addr_2 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_2);
+            for elem_idx in 0..total_count {
+                let updated_elem = prim_vec_2[elem_idx as usize];
+                ctx.array_set_u64(arr_addr_2, elem_idx, updated_elem as u64);
+            }
+        }
+    }
+    if arr_addr_3 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_3);
+            for elem_idx in 0..total_count {
+                let updated_elem = prim_vec_3[elem_idx as usize];
+                ctx.array_set_u64(arr_addr_3, elem_idx, updated_elem as u64);
+            }
+        }
+    }
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetPixelFormatName(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetPixelFormatName expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlGetPixelFormatName((*args.add(0)).payload as c_uint);
+    if call_result.is_null() { return SolixCValue::null(); }
+    let Some(ctx) = SolixVmContext::validate(vm_context) else { return SolixCValue::null(); };
+    let c_str = CStr::from_ptr(call_result);
+    let sanitized_str = c_str.to_string_lossy();
+    let addr = ctx.alloc_string(sanitized_str.as_ref());
+    if addr == 0 { return SolixCValue::null(); }
+    SolixCValue::from_ref(addr)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadTexture(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadTexture expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadTexture((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGenTextureMipmaps(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 5 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGenTextureMipmaps expected 5 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let arr_addr_4 = (*args.add(4)).as_ref();
+    let mut prim_vec_4: Vec<c_int> = Vec::new();
+    if arr_addr_4 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_4);
+            prim_vec_4.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let raw_val = ctx.array_get_u64(arr_addr_4, elem_idx);
+                prim_vec_4.push(raw_val as c_int);
+            }
+        }
+    }
+    rlGenTextureMipmaps((*args.add(0)).payload as c_uint, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int, if arr_addr_4 > 0 { prim_vec_4.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_4 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_4);
+            for elem_idx in 0..total_count {
+                let updated_elem = prim_vec_4[elem_idx as usize];
+                ctx.array_set_u64(arr_addr_4, elem_idx, updated_elem as u64);
+            }
+        }
+    }
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlReadTexturePixels(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlReadTexturePixels expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlReadTexturePixels((*args.add(0)).payload as c_uint, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::from_i64(call_result as usize as i64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlReadScreenPixels(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlReadScreenPixels expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlReadScreenPixels((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::from_i64(call_result as usize as i64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlLoadFramebuffer();
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlFramebufferAttach(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 5 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlFramebufferAttach expected 5 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlFramebufferAttach((*args.add(0)).payload as c_uint, (*args.add(1)).payload as c_uint, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int, (*args.add(4)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlFramebufferComplete(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlFramebufferComplete expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlFramebufferComplete((*args.add(0)).payload as c_uint);
+    SolixCValue::from_bool(call_result)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadFramebuffer expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadFramebuffer((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlCopyFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 6 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlCopyFramebuffer expected 6 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlCopyFramebuffer((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int, (*args.add(4)).as_i32() as c_int, (*args.add(5)).payload as usize as *mut c_void);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlResizeFramebuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlResizeFramebuffer expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlResizeFramebuffer((*args.add(0)).as_i32() as c_int, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadShader(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadShader expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let str_addr_0 = (*args.add(0)).as_ref();
+    let str_keepalive_0: Option<CString> = if let Some(ctx) = SolixVmContext::validate(vm_context) {
+        ctx.read_string(str_addr_0).and_then(|decoded_str| CString::new(decoded_str).ok())
+    } else {
+        None
+    };
+    let str_ptr_0 = str_keepalive_0.as_ref().map_or(c"".as_ptr(), |c_string| c_string.as_ptr());
+    let call_result = rlLoadShader(str_ptr_0, (*args.add(1)).as_i32() as c_int);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadShaderProgram(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadShaderProgram expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let str_addr_0 = (*args.add(0)).as_ref();
+    let str_keepalive_0: Option<CString> = if let Some(ctx) = SolixVmContext::validate(vm_context) {
+        ctx.read_string(str_addr_0).and_then(|decoded_str| CString::new(decoded_str).ok())
+    } else {
+        None
+    };
+    let str_ptr_0 = str_keepalive_0.as_ref().map_or(c"".as_ptr(), |c_string| c_string.as_ptr());
+    let str_addr_1 = (*args.add(1)).as_ref();
+    let str_keepalive_1: Option<CString> = if let Some(ctx) = SolixVmContext::validate(vm_context) {
+        ctx.read_string(str_addr_1).and_then(|decoded_str| CString::new(decoded_str).ok())
+    } else {
+        None
+    };
+    let str_ptr_1 = str_keepalive_1.as_ref().map_or(c"".as_ptr(), |c_string| c_string.as_ptr());
+    let call_result = rlLoadShaderProgram(str_ptr_0, str_ptr_1);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadShaderProgramEx(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadShaderProgramEx expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadShaderProgramEx((*args.add(0)).payload as c_uint, (*args.add(1)).payload as c_uint);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadShaderProgramCompute(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadShaderProgramCompute expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadShaderProgramCompute((*args.add(0)).payload as c_uint);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadShader(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadShader expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadShader((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadShaderProgram(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadShaderProgram expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadShaderProgram((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetLocationUniform(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetLocationUniform expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let str_addr_1 = (*args.add(1)).as_ref();
+    let str_keepalive_1: Option<CString> = if let Some(ctx) = SolixVmContext::validate(vm_context) {
+        ctx.read_string(str_addr_1).and_then(|decoded_str| CString::new(decoded_str).ok())
+    } else {
+        None
+    };
+    let str_ptr_1 = str_keepalive_1.as_ref().map_or(c"".as_ptr(), |c_string| c_string.as_ptr());
+    let call_result = rlGetLocationUniform((*args.add(0)).payload as c_uint, str_ptr_1);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetLocationAttrib(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetLocationAttrib expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let str_addr_1 = (*args.add(1)).as_ref();
+    let str_keepalive_1: Option<CString> = if let Some(ctx) = SolixVmContext::validate(vm_context) {
+        ctx.read_string(str_addr_1).and_then(|decoded_str| CString::new(decoded_str).ok())
+    } else {
+        None
+    };
+    let str_ptr_1 = str_keepalive_1.as_ref().map_or(c"".as_ptr(), |c_string| c_string.as_ptr());
+    let call_result = rlGetLocationAttrib((*args.add(0)).payload as c_uint, str_ptr_1);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetUniform(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetUniform expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetUniform((*args.add(0)).as_i32() as c_int, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetUniformMatrix(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetUniformMatrix expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetUniformMatrix((*args.add(0)).as_i32() as c_int, unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetUniformMatrices(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetUniformMatrices expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let arr_addr_1 = (*args.add(1)).as_ref();
+    let mut struct_vec_1: Vec<C_Matrix> = Vec::new();
+    if arr_addr_1 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_1);
+            struct_vec_1.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let child_addr = ctx.array_get_u64(arr_addr_1, elem_idx) as u32;
+                struct_vec_1.push(unpack_matrix(vm_context, child_addr));
+            }
+        }
+    }
+    rlSetUniformMatrices((*args.add(0)).as_i32() as c_int, if arr_addr_1 > 0 { struct_vec_1.as_ptr() } else { std::ptr::null() }, (*args.add(2)).as_i32() as c_int);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetUniformSampler(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetUniformSampler expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetUniformSampler((*args.add(0)).as_i32() as c_int, (*args.add(1)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetShader(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetShader expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let arr_addr_1 = (*args.add(1)).as_ref();
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_1);
+            prim_vec_1.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let raw_val = ctx.array_get_u64(arr_addr_1, elem_idx);
+                prim_vec_1.push(raw_val as c_int);
+            }
+        }
+    }
+    rlSetShader((*args.add(0)).payload as c_uint, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_1);
+            for elem_idx in 0..total_count {
+                let updated_elem = prim_vec_1[elem_idx as usize];
+                ctx.array_set_u64(arr_addr_1, elem_idx, updated_elem as u64);
+            }
+        }
+    }
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlComputeShaderDispatch(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlComputeShaderDispatch expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlComputeShaderDispatch((*args.add(0)).payload as c_uint, (*args.add(1)).payload as c_uint, (*args.add(2)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadShaderBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlLoadShaderBuffer expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlLoadShaderBuffer((*args.add(0)).payload as c_uint, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).as_i32() as c_int);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUnloadShaderBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUnloadShaderBuffer expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUnloadShaderBuffer((*args.add(0)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlUpdateShaderBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlUpdateShaderBuffer expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlUpdateShaderBuffer((*args.add(0)).payload as c_uint, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).payload as c_uint, (*args.add(3)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlBindShaderBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlBindShaderBuffer expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlBindShaderBuffer((*args.add(0)).payload as c_uint, (*args.add(1)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlReadShaderBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlReadShaderBuffer expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlReadShaderBuffer((*args.add(0)).payload as c_uint, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).payload as c_uint, (*args.add(3)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlCopyShaderBuffer(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 5 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlCopyShaderBuffer expected 5 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlCopyShaderBuffer((*args.add(0)).payload as c_uint, (*args.add(1)).payload as c_uint, (*args.add(2)).payload as c_uint, (*args.add(3)).payload as c_uint, (*args.add(4)).payload as c_uint);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetShaderBufferSize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetShaderBufferSize expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlGetShaderBufferSize((*args.add(0)).payload as c_uint);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlBindImageTexture(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlBindImageTexture expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlBindImageTexture((*args.add(0)).payload as c_uint, (*args.add(1)).payload as c_uint, (*args.add(2)).as_i32() as c_int, (*args.add(3)).as_bool());
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetMatrixModelview(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetMatrixModelview();
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetMatrixProjection(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetMatrixProjection();
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetMatrixTransform(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = rlGetMatrixTransform();
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetMatrixProjectionStereo(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetMatrixProjectionStereo expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlGetMatrixProjectionStereo((*args.add(0)).as_i32() as c_int);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlGetMatrixViewOffsetStereo(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlGetMatrixViewOffsetStereo expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = rlGetMatrixViewOffsetStereo((*args.add(0)).as_i32() as c_int);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetMatrixProjection(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetMatrixProjection expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetMatrixProjection(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetMatrixModelview(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetMatrixModelview expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetMatrixModelview(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetMatrixProjectionStereo(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetMatrixProjectionStereo expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetMatrixProjectionStereo(unpack_matrix(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlSetMatrixViewOffsetStereo(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "rlSetMatrixViewOffsetStereo expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    rlSetMatrixViewOffsetStereo(unpack_matrix(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadDrawCube(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlLoadDrawCube();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_rlLoadDrawQuad(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    rlLoadDrawQuad();
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Clamp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Clamp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Clamp((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Lerp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Lerp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Lerp((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Normalize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Normalize expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Normalize((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Remap(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 5 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Remap expected 5 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Remap((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32, (*args.add(3)).as_f64() as f32, (*args.add(4)).as_f64() as f32);
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Wrap(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Wrap expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Wrap((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_FloatEquals(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "FloatEquals expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = FloatEquals((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Zero(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = Vector2Zero();
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2One(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = Vector2One();
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Add(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Add expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Add(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2AddValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2AddValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2AddValue(unpack_vector2(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Subtract(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Subtract expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Subtract(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2SubtractValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2SubtractValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2SubtractValue(unpack_vector2(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Length(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Length expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Length(unpack_vector2(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2LengthSqr(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2LengthSqr expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2LengthSqr(unpack_vector2(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2DotProduct(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2DotProduct expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2DotProduct(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2CrossProduct(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2CrossProduct expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2CrossProduct(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Distance(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Distance expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Distance(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2DistanceSqr(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2DistanceSqr expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2DistanceSqr(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Angle(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Angle expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Angle(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2LineAngle(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2LineAngle expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2LineAngle(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Scale(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Scale expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Scale(unpack_vector2(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Multiply(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Multiply expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Multiply(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Negate(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Negate expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Negate(unpack_vector2(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Divide(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Divide expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Divide(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Normalize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Normalize expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Normalize(unpack_vector2(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Transform(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Transform expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Transform(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Lerp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Lerp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Lerp(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Reflect(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Reflect expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Reflect(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Min(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Min expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Min(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Max(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Max expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Max(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Rotate(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Rotate expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Rotate(unpack_vector2(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2MoveTowards(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2MoveTowards expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2MoveTowards(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Invert(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Invert expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Invert(unpack_vector2(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Clamp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Clamp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Clamp(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()), unpack_vector2(vm_context, (*args.add(2)).as_ref()));
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2ClampValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2ClampValue expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2ClampValue(unpack_vector2(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Equals(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Equals expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Equals(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector2Refract(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector2Refract expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector2Refract(unpack_vector2(vm_context, (*args.add(0)).as_ref()), unpack_vector2(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector2(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Zero(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = Vector3Zero();
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3One(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = Vector3One();
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Add(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Add expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Add(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3AddValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3AddValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3AddValue(unpack_vector3(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Subtract(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Subtract expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Subtract(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3SubtractValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3SubtractValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3SubtractValue(unpack_vector3(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Scale(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Scale expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Scale(unpack_vector3(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Multiply(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Multiply expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Multiply(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3CrossProduct(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3CrossProduct expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3CrossProduct(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Perpendicular(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Perpendicular expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Perpendicular(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Length(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Length expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Length(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3LengthSqr(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3LengthSqr expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3LengthSqr(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3DotProduct(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3DotProduct expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3DotProduct(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Distance(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Distance expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Distance(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3DistanceSqr(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3DistanceSqr expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3DistanceSqr(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Angle(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Angle expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Angle(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Negate(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Negate expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Negate(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Divide(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Divide expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Divide(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Normalize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Normalize expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Normalize(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Project(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Project expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Project(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Reject(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Reject expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Reject(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3OrthoNormalize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3OrthoNormalize expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let vector3_addr_0 = (*args.add(0)).as_ref();
+    let mut vector3_mut_0 = unpack_vector3(vm_context, vector3_addr_0);
+    let vector3_addr_1 = (*args.add(1)).as_ref();
+    let mut vector3_mut_1 = unpack_vector3(vm_context, vector3_addr_1);
+    Vector3OrthoNormalize(&mut vector3_mut_0, &mut vector3_mut_1);
+    writeback_vector3(vm_context, vector3_addr_0, &vector3_mut_0);
+    writeback_vector3(vm_context, vector3_addr_1, &vector3_mut_1);
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Transform(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Transform expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Transform(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3RotateByQuaternion(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3RotateByQuaternion expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3RotateByQuaternion(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3RotateByAxisAngle(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3RotateByAxisAngle expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3RotateByAxisAngle(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3MoveTowards(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3MoveTowards expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3MoveTowards(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Lerp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Lerp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Lerp(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3CubicHermite(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 5 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3CubicHermite expected 5 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3CubicHermite(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), unpack_vector3(vm_context, (*args.add(2)).as_ref()), unpack_vector3(vm_context, (*args.add(3)).as_ref()), (*args.add(4)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Reflect(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Reflect expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Reflect(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Min(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Min expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Min(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Max(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Max expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Max(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Barycenter(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Barycenter expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Barycenter(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), unpack_vector3(vm_context, (*args.add(2)).as_ref()), unpack_vector3(vm_context, (*args.add(3)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Unproject(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Unproject expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Unproject(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()), unpack_matrix(vm_context, (*args.add(2)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3ToFloatV(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3ToFloatV expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3ToFloatV(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_float3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Invert(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Invert expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Invert(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Clamp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Clamp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Clamp(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), unpack_vector3(vm_context, (*args.add(2)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3ClampValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3ClampValue expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3ClampValue(unpack_vector3(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Equals(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Equals expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Equals(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector3Refract(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector3Refract expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector3Refract(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Zero(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = Vector4Zero();
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4One(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = Vector4One();
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Add(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Add expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Add(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4AddValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4AddValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4AddValue(unpack_vector4(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Subtract(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Subtract expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Subtract(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4SubtractValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4SubtractValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4SubtractValue(unpack_vector4(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Length(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Length expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Length(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4LengthSqr(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4LengthSqr expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4LengthSqr(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4DotProduct(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4DotProduct expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4DotProduct(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Distance(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Distance expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Distance(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4DistanceSqr(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4DistanceSqr expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4DistanceSqr(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Scale(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Scale expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Scale(unpack_vector4(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Multiply(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Multiply expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Multiply(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Negate(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Negate expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Negate(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Divide(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Divide expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Divide(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Normalize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Normalize expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Normalize(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Min(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Min expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Min(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Max(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Max expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Max(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Lerp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Lerp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Lerp(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4MoveTowards(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4MoveTowards expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4MoveTowards(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Invert(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Invert expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Invert(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_Vector4Equals(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "Vector4Equals expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = Vector4Equals(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixDeterminant(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixDeterminant expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixDeterminant(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixTrace(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixTrace expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixTrace(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixTranspose(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixTranspose expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixTranspose(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixInvert(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixInvert expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixInvert(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixIdentity(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = MatrixIdentity();
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixAdd(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixAdd expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixAdd(unpack_matrix(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixSubtract(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixSubtract expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixSubtract(unpack_matrix(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixMultiply(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixMultiply expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixMultiply(unpack_matrix(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixMultiplyValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixMultiplyValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixMultiplyValue(unpack_matrix(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixTranslate(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixTranslate expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixTranslate((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixRotate(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixRotate expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixRotate(unpack_vector3(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixRotateX(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixRotateX expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixRotateX((*args.add(0)).as_f64() as f32);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixRotateY(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixRotateY expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixRotateY((*args.add(0)).as_f64() as f32);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixRotateZ(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixRotateZ expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixRotateZ((*args.add(0)).as_f64() as f32);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixRotateXYZ(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixRotateXYZ expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixRotateXYZ(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixRotateZYX(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixRotateZYX expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixRotateZYX(unpack_vector3(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixScale(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixScale expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixScale((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixFrustum(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 6 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixFrustum expected 6 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixFrustum((*args.add(0)).as_f64(), (*args.add(1)).as_f64(), (*args.add(2)).as_f64(), (*args.add(3)).as_f64(), (*args.add(4)).as_f64(), (*args.add(5)).as_f64());
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixPerspective(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixPerspective expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixPerspective((*args.add(0)).as_f64(), (*args.add(1)).as_f64(), (*args.add(2)).as_f64(), (*args.add(3)).as_f64());
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixOrtho(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 6 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixOrtho expected 6 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixOrtho((*args.add(0)).as_f64(), (*args.add(1)).as_f64(), (*args.add(2)).as_f64(), (*args.add(3)).as_f64(), (*args.add(4)).as_f64(), (*args.add(5)).as_f64());
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixLookAt(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixLookAt expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixLookAt(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()), unpack_vector3(vm_context, (*args.add(2)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixToFloatV(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixToFloatV expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixToFloatV(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_float16(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionAdd(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionAdd expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionAdd(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionAddValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionAddValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionAddValue(unpack_vector4(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionSubtract(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionSubtract expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionSubtract(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionSubtractValue(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionSubtractValue expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionSubtractValue(unpack_vector4(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionIdentity(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let call_result = QuaternionIdentity();
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionLength(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionLength expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionLength(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_f64(call_result as f64)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionNormalize(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionNormalize expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionNormalize(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionInvert(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionInvert expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionInvert(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionMultiply(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionMultiply expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionMultiply(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionScale(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionScale expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionScale(unpack_vector4(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionDivide(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionDivide expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionDivide(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionLerp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionLerp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionLerp(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionNlerp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionNlerp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionNlerp(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionSlerp(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionSlerp expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionSlerp(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()), (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionCubicHermiteSpline(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 5 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionCubicHermiteSpline expected 5 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionCubicHermiteSpline(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()), unpack_vector4(vm_context, (*args.add(2)).as_ref()), unpack_vector4(vm_context, (*args.add(3)).as_ref()), (*args.add(4)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionFromVector3ToVector3(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionFromVector3ToVector3 expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionFromVector3ToVector3(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector3(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionFromMatrix(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionFromMatrix expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionFromMatrix(unpack_matrix(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionToMatrix(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionToMatrix expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionToMatrix(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionFromAxisAngle(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionFromAxisAngle expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionFromAxisAngle(unpack_vector3(vm_context, (*args.add(0)).as_ref()), (*args.add(1)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionToAxisAngle(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionToAxisAngle expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let vector3_addr_1 = (*args.add(1)).as_ref();
+    let mut vector3_mut_1 = unpack_vector3(vm_context, vector3_addr_1);
+    let arr_addr_2 = (*args.add(2)).as_ref();
+    let mut prim_vec_2: Vec<f32> = Vec::new();
+    if arr_addr_2 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_2);
+            prim_vec_2.reserve_exact(total_count as usize);
+            for elem_idx in 0..total_count {
+                let raw_val = ctx.array_get_u64(arr_addr_2, elem_idx);
+                prim_vec_2.push(if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 });
+            }
+        }
+    }
+    QuaternionToAxisAngle(unpack_vector4(vm_context, (*args.add(0)).as_ref()), &mut vector3_mut_1, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    writeback_vector3(vm_context, vector3_addr_1, &vector3_mut_1);
+    if arr_addr_2 > 0 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            let total_count = ctx.array_len(arr_addr_2);
+            for elem_idx in 0..total_count {
+                let updated_elem = prim_vec_2[elem_idx as usize];
+                ctx.array_set_u64(arr_addr_2, elem_idx, (updated_elem as f64).to_bits());
+            }
+        }
+    }
+    SolixCValue::null()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionFromEuler(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionFromEuler expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionFromEuler((*args.add(0)).as_f64() as f32, (*args.add(1)).as_f64() as f32, (*args.add(2)).as_f64() as f32);
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionToEuler(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 1 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionToEuler expected 1 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionToEuler(unpack_vector4(vm_context, (*args.add(0)).as_ref()));
+    SolixCValue::from_ref(pack_vector3(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionTransform(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionTransform expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionTransform(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_matrix(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_ref(pack_vector4(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_QuaternionEquals(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 2 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "QuaternionEquals expected 2 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = QuaternionEquals(unpack_vector4(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()));
+    SolixCValue::from_i32(call_result as i32)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixCompose(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 3 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixCompose expected 3 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let call_result = MatrixCompose(unpack_vector3(vm_context, (*args.add(0)).as_ref()), unpack_vector4(vm_context, (*args.add(1)).as_ref()), unpack_vector3(vm_context, (*args.add(2)).as_ref()));
+    SolixCValue::from_ref(pack_matrix(vm_context, call_result))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C-unwind" fn Raylib_MatrixDecompose(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if args.is_null() || (arg_count as usize) < 4 {
+        if let Some(ctx) = SolixVmContext::validate(vm_context) {
+            ctx.set_error(out_error, "MatrixDecompose expected 4 arguments");
+        }
+        return SolixCValue::null();
+    }
+    let vector3_addr_1 = (*args.add(1)).as_ref();
+    let mut vector3_mut_1 = unpack_vector3(vm_context, vector3_addr_1);
+    let vector4_addr_2 = (*args.add(2)).as_ref();
+    let mut vector4_mut_2 = unpack_vector4(vm_context, vector4_addr_2);
+    let vector3_addr_3 = (*args.add(3)).as_ref();
+    let mut vector3_mut_3 = unpack_vector3(vm_context, vector3_addr_3);
+    MatrixDecompose(unpack_matrix(vm_context, (*args.add(0)).as_ref()), &mut vector3_mut_1, &mut vector4_mut_2, &mut vector3_mut_3);
+    writeback_vector3(vm_context, vector3_addr_1, &vector3_mut_1);
+    writeback_vector4(vm_context, vector4_addr_2, &vector4_mut_2);
+    writeback_vector3(vm_context, vector3_addr_3, &vector3_mut_3);
+    SolixCValue::null()
+}
+
 // ===========================================================================
 // Native Symbol Dynamic Registration Hook
 // ===========================================================================
@@ -16074,5 +21763,623 @@ solix_export! {
     "AttachAudioMixedProcessor" => Raylib_AttachAudioMixedProcessor,
     "raylib::DetachAudioMixedProcessor" => Raylib_DetachAudioMixedProcessor,
     "DetachAudioMixedProcessor" => Raylib_DetachAudioMixedProcessor,
+    "raylib::rlMatrixMode" => Raylib_rlMatrixMode,
+    "rlMatrixMode" => Raylib_rlMatrixMode,
+    "raylib::rlPushMatrix" => Raylib_rlPushMatrix,
+    "rlPushMatrix" => Raylib_rlPushMatrix,
+    "raylib::rlPopMatrix" => Raylib_rlPopMatrix,
+    "rlPopMatrix" => Raylib_rlPopMatrix,
+    "raylib::rlLoadIdentity" => Raylib_rlLoadIdentity,
+    "rlLoadIdentity" => Raylib_rlLoadIdentity,
+    "raylib::rlTranslatef" => Raylib_rlTranslatef,
+    "rlTranslatef" => Raylib_rlTranslatef,
+    "raylib::rlRotatef" => Raylib_rlRotatef,
+    "rlRotatef" => Raylib_rlRotatef,
+    "raylib::rlScalef" => Raylib_rlScalef,
+    "rlScalef" => Raylib_rlScalef,
+    "raylib::rlMultMatrixf" => Raylib_rlMultMatrixf,
+    "rlMultMatrixf" => Raylib_rlMultMatrixf,
+    "raylib::rlFrustum" => Raylib_rlFrustum,
+    "rlFrustum" => Raylib_rlFrustum,
+    "raylib::rlOrtho" => Raylib_rlOrtho,
+    "rlOrtho" => Raylib_rlOrtho,
+    "raylib::rlViewport" => Raylib_rlViewport,
+    "rlViewport" => Raylib_rlViewport,
+    "raylib::rlSetClipPlanes" => Raylib_rlSetClipPlanes,
+    "rlSetClipPlanes" => Raylib_rlSetClipPlanes,
+    "raylib::rlGetCullDistanceNear" => Raylib_rlGetCullDistanceNear,
+    "rlGetCullDistanceNear" => Raylib_rlGetCullDistanceNear,
+    "raylib::rlGetCullDistanceFar" => Raylib_rlGetCullDistanceFar,
+    "rlGetCullDistanceFar" => Raylib_rlGetCullDistanceFar,
+    "raylib::rlBegin" => Raylib_rlBegin,
+    "rlBegin" => Raylib_rlBegin,
+    "raylib::rlEnd" => Raylib_rlEnd,
+    "rlEnd" => Raylib_rlEnd,
+    "raylib::rlVertex2i" => Raylib_rlVertex2i,
+    "rlVertex2i" => Raylib_rlVertex2i,
+    "raylib::rlVertex2f" => Raylib_rlVertex2f,
+    "rlVertex2f" => Raylib_rlVertex2f,
+    "raylib::rlVertex3f" => Raylib_rlVertex3f,
+    "rlVertex3f" => Raylib_rlVertex3f,
+    "raylib::rlTexCoord2f" => Raylib_rlTexCoord2f,
+    "rlTexCoord2f" => Raylib_rlTexCoord2f,
+    "raylib::rlNormal3f" => Raylib_rlNormal3f,
+    "rlNormal3f" => Raylib_rlNormal3f,
+    "raylib::rlColor4ub" => Raylib_rlColor4ub,
+    "rlColor4ub" => Raylib_rlColor4ub,
+    "raylib::rlColor3f" => Raylib_rlColor3f,
+    "rlColor3f" => Raylib_rlColor3f,
+    "raylib::rlColor4f" => Raylib_rlColor4f,
+    "rlColor4f" => Raylib_rlColor4f,
+    "raylib::rlEnableVertexArray" => Raylib_rlEnableVertexArray,
+    "rlEnableVertexArray" => Raylib_rlEnableVertexArray,
+    "raylib::rlDisableVertexArray" => Raylib_rlDisableVertexArray,
+    "rlDisableVertexArray" => Raylib_rlDisableVertexArray,
+    "raylib::rlEnableVertexBuffer" => Raylib_rlEnableVertexBuffer,
+    "rlEnableVertexBuffer" => Raylib_rlEnableVertexBuffer,
+    "raylib::rlDisableVertexBuffer" => Raylib_rlDisableVertexBuffer,
+    "rlDisableVertexBuffer" => Raylib_rlDisableVertexBuffer,
+    "raylib::rlEnableVertexBufferElement" => Raylib_rlEnableVertexBufferElement,
+    "rlEnableVertexBufferElement" => Raylib_rlEnableVertexBufferElement,
+    "raylib::rlDisableVertexBufferElement" => Raylib_rlDisableVertexBufferElement,
+    "rlDisableVertexBufferElement" => Raylib_rlDisableVertexBufferElement,
+    "raylib::rlEnableVertexAttribute" => Raylib_rlEnableVertexAttribute,
+    "rlEnableVertexAttribute" => Raylib_rlEnableVertexAttribute,
+    "raylib::rlDisableVertexAttribute" => Raylib_rlDisableVertexAttribute,
+    "rlDisableVertexAttribute" => Raylib_rlDisableVertexAttribute,
+    "raylib::rlEnableStatePointer" => Raylib_rlEnableStatePointer,
+    "rlEnableStatePointer" => Raylib_rlEnableStatePointer,
+    "raylib::rlDisableStatePointer" => Raylib_rlDisableStatePointer,
+    "rlDisableStatePointer" => Raylib_rlDisableStatePointer,
+    "raylib::rlActiveTextureSlot" => Raylib_rlActiveTextureSlot,
+    "rlActiveTextureSlot" => Raylib_rlActiveTextureSlot,
+    "raylib::rlEnableTexture" => Raylib_rlEnableTexture,
+    "rlEnableTexture" => Raylib_rlEnableTexture,
+    "raylib::rlDisableTexture" => Raylib_rlDisableTexture,
+    "rlDisableTexture" => Raylib_rlDisableTexture,
+    "raylib::rlEnableTextureCubemap" => Raylib_rlEnableTextureCubemap,
+    "rlEnableTextureCubemap" => Raylib_rlEnableTextureCubemap,
+    "raylib::rlDisableTextureCubemap" => Raylib_rlDisableTextureCubemap,
+    "rlDisableTextureCubemap" => Raylib_rlDisableTextureCubemap,
+    "raylib::rlTextureParameters" => Raylib_rlTextureParameters,
+    "rlTextureParameters" => Raylib_rlTextureParameters,
+    "raylib::rlCubemapParameters" => Raylib_rlCubemapParameters,
+    "rlCubemapParameters" => Raylib_rlCubemapParameters,
+    "raylib::rlEnableShader" => Raylib_rlEnableShader,
+    "rlEnableShader" => Raylib_rlEnableShader,
+    "raylib::rlDisableShader" => Raylib_rlDisableShader,
+    "rlDisableShader" => Raylib_rlDisableShader,
+    "raylib::rlEnableFramebuffer" => Raylib_rlEnableFramebuffer,
+    "rlEnableFramebuffer" => Raylib_rlEnableFramebuffer,
+    "raylib::rlDisableFramebuffer" => Raylib_rlDisableFramebuffer,
+    "rlDisableFramebuffer" => Raylib_rlDisableFramebuffer,
+    "raylib::rlGetActiveFramebuffer" => Raylib_rlGetActiveFramebuffer,
+    "rlGetActiveFramebuffer" => Raylib_rlGetActiveFramebuffer,
+    "raylib::rlActiveDrawBuffers" => Raylib_rlActiveDrawBuffers,
+    "rlActiveDrawBuffers" => Raylib_rlActiveDrawBuffers,
+    "raylib::rlBlitFramebuffer" => Raylib_rlBlitFramebuffer,
+    "rlBlitFramebuffer" => Raylib_rlBlitFramebuffer,
+    "raylib::rlBindFramebuffer" => Raylib_rlBindFramebuffer,
+    "rlBindFramebuffer" => Raylib_rlBindFramebuffer,
+    "raylib::rlEnableColorBlend" => Raylib_rlEnableColorBlend,
+    "rlEnableColorBlend" => Raylib_rlEnableColorBlend,
+    "raylib::rlDisableColorBlend" => Raylib_rlDisableColorBlend,
+    "rlDisableColorBlend" => Raylib_rlDisableColorBlend,
+    "raylib::rlEnableDepthTest" => Raylib_rlEnableDepthTest,
+    "rlEnableDepthTest" => Raylib_rlEnableDepthTest,
+    "raylib::rlDisableDepthTest" => Raylib_rlDisableDepthTest,
+    "rlDisableDepthTest" => Raylib_rlDisableDepthTest,
+    "raylib::rlEnableDepthMask" => Raylib_rlEnableDepthMask,
+    "rlEnableDepthMask" => Raylib_rlEnableDepthMask,
+    "raylib::rlDisableDepthMask" => Raylib_rlDisableDepthMask,
+    "rlDisableDepthMask" => Raylib_rlDisableDepthMask,
+    "raylib::rlEnableBackfaceCulling" => Raylib_rlEnableBackfaceCulling,
+    "rlEnableBackfaceCulling" => Raylib_rlEnableBackfaceCulling,
+    "raylib::rlDisableBackfaceCulling" => Raylib_rlDisableBackfaceCulling,
+    "rlDisableBackfaceCulling" => Raylib_rlDisableBackfaceCulling,
+    "raylib::rlColorMask" => Raylib_rlColorMask,
+    "rlColorMask" => Raylib_rlColorMask,
+    "raylib::rlSetCullFace" => Raylib_rlSetCullFace,
+    "rlSetCullFace" => Raylib_rlSetCullFace,
+    "raylib::rlEnableScissorTest" => Raylib_rlEnableScissorTest,
+    "rlEnableScissorTest" => Raylib_rlEnableScissorTest,
+    "raylib::rlDisableScissorTest" => Raylib_rlDisableScissorTest,
+    "rlDisableScissorTest" => Raylib_rlDisableScissorTest,
+    "raylib::rlScissor" => Raylib_rlScissor,
+    "rlScissor" => Raylib_rlScissor,
+    "raylib::rlEnablePointMode" => Raylib_rlEnablePointMode,
+    "rlEnablePointMode" => Raylib_rlEnablePointMode,
+    "raylib::rlDisablePointMode" => Raylib_rlDisablePointMode,
+    "rlDisablePointMode" => Raylib_rlDisablePointMode,
+    "raylib::rlSetPointSize" => Raylib_rlSetPointSize,
+    "rlSetPointSize" => Raylib_rlSetPointSize,
+    "raylib::rlGetPointSize" => Raylib_rlGetPointSize,
+    "rlGetPointSize" => Raylib_rlGetPointSize,
+    "raylib::rlEnableWireMode" => Raylib_rlEnableWireMode,
+    "rlEnableWireMode" => Raylib_rlEnableWireMode,
+    "raylib::rlDisableWireMode" => Raylib_rlDisableWireMode,
+    "rlDisableWireMode" => Raylib_rlDisableWireMode,
+    "raylib::rlSetLineWidth" => Raylib_rlSetLineWidth,
+    "rlSetLineWidth" => Raylib_rlSetLineWidth,
+    "raylib::rlGetLineWidth" => Raylib_rlGetLineWidth,
+    "rlGetLineWidth" => Raylib_rlGetLineWidth,
+    "raylib::rlEnableSmoothLines" => Raylib_rlEnableSmoothLines,
+    "rlEnableSmoothLines" => Raylib_rlEnableSmoothLines,
+    "raylib::rlDisableSmoothLines" => Raylib_rlDisableSmoothLines,
+    "rlDisableSmoothLines" => Raylib_rlDisableSmoothLines,
+    "raylib::rlEnableStereoRender" => Raylib_rlEnableStereoRender,
+    "rlEnableStereoRender" => Raylib_rlEnableStereoRender,
+    "raylib::rlDisableStereoRender" => Raylib_rlDisableStereoRender,
+    "rlDisableStereoRender" => Raylib_rlDisableStereoRender,
+    "raylib::rlIsStereoRenderEnabled" => Raylib_rlIsStereoRenderEnabled,
+    "rlIsStereoRenderEnabled" => Raylib_rlIsStereoRenderEnabled,
+    "raylib::rlClearColor" => Raylib_rlClearColor,
+    "rlClearColor" => Raylib_rlClearColor,
+    "raylib::rlClearScreenBuffers" => Raylib_rlClearScreenBuffers,
+    "rlClearScreenBuffers" => Raylib_rlClearScreenBuffers,
+    "raylib::rlCheckErrors" => Raylib_rlCheckErrors,
+    "rlCheckErrors" => Raylib_rlCheckErrors,
+    "raylib::rlSetBlendMode" => Raylib_rlSetBlendMode,
+    "rlSetBlendMode" => Raylib_rlSetBlendMode,
+    "raylib::rlSetBlendFactors" => Raylib_rlSetBlendFactors,
+    "rlSetBlendFactors" => Raylib_rlSetBlendFactors,
+    "raylib::rlSetBlendFactorsSeparate" => Raylib_rlSetBlendFactorsSeparate,
+    "rlSetBlendFactorsSeparate" => Raylib_rlSetBlendFactorsSeparate,
+    "raylib::rlglInit" => Raylib_rlglInit,
+    "rlglInit" => Raylib_rlglInit,
+    "raylib::rlglClose" => Raylib_rlglClose,
+    "rlglClose" => Raylib_rlglClose,
+    "raylib::rlLoadExtensions" => Raylib_rlLoadExtensions,
+    "rlLoadExtensions" => Raylib_rlLoadExtensions,
+    "raylib::rlGetProcAddress" => Raylib_rlGetProcAddress,
+    "rlGetProcAddress" => Raylib_rlGetProcAddress,
+    "raylib::rlGetVersion" => Raylib_rlGetVersion,
+    "rlGetVersion" => Raylib_rlGetVersion,
+    "raylib::rlSetFramebufferWidth" => Raylib_rlSetFramebufferWidth,
+    "rlSetFramebufferWidth" => Raylib_rlSetFramebufferWidth,
+    "raylib::rlGetFramebufferWidth" => Raylib_rlGetFramebufferWidth,
+    "rlGetFramebufferWidth" => Raylib_rlGetFramebufferWidth,
+    "raylib::rlSetFramebufferHeight" => Raylib_rlSetFramebufferHeight,
+    "rlSetFramebufferHeight" => Raylib_rlSetFramebufferHeight,
+    "raylib::rlGetFramebufferHeight" => Raylib_rlGetFramebufferHeight,
+    "rlGetFramebufferHeight" => Raylib_rlGetFramebufferHeight,
+    "raylib::rlGetTextureIdDefault" => Raylib_rlGetTextureIdDefault,
+    "rlGetTextureIdDefault" => Raylib_rlGetTextureIdDefault,
+    "raylib::rlGetShaderIdDefault" => Raylib_rlGetShaderIdDefault,
+    "rlGetShaderIdDefault" => Raylib_rlGetShaderIdDefault,
+    "raylib::rlGetShaderLocsDefault" => Raylib_rlGetShaderLocsDefault,
+    "rlGetShaderLocsDefault" => Raylib_rlGetShaderLocsDefault,
+    "raylib::rlLoadRenderBatch" => Raylib_rlLoadRenderBatch,
+    "rlLoadRenderBatch" => Raylib_rlLoadRenderBatch,
+    "raylib::rlUnloadRenderBatch" => Raylib_rlUnloadRenderBatch,
+    "rlUnloadRenderBatch" => Raylib_rlUnloadRenderBatch,
+    "raylib::rlDrawRenderBatch" => Raylib_rlDrawRenderBatch,
+    "rlDrawRenderBatch" => Raylib_rlDrawRenderBatch,
+    "raylib::rlSetRenderBatchActive" => Raylib_rlSetRenderBatchActive,
+    "rlSetRenderBatchActive" => Raylib_rlSetRenderBatchActive,
+    "raylib::rlDrawRenderBatchActive" => Raylib_rlDrawRenderBatchActive,
+    "rlDrawRenderBatchActive" => Raylib_rlDrawRenderBatchActive,
+    "raylib::rlCheckRenderBatchLimit" => Raylib_rlCheckRenderBatchLimit,
+    "rlCheckRenderBatchLimit" => Raylib_rlCheckRenderBatchLimit,
+    "raylib::rlSetTexture" => Raylib_rlSetTexture,
+    "rlSetTexture" => Raylib_rlSetTexture,
+    "raylib::rlLoadVertexArray" => Raylib_rlLoadVertexArray,
+    "rlLoadVertexArray" => Raylib_rlLoadVertexArray,
+    "raylib::rlLoadVertexBuffer" => Raylib_rlLoadVertexBuffer,
+    "rlLoadVertexBuffer" => Raylib_rlLoadVertexBuffer,
+    "raylib::rlLoadVertexBufferElement" => Raylib_rlLoadVertexBufferElement,
+    "rlLoadVertexBufferElement" => Raylib_rlLoadVertexBufferElement,
+    "raylib::rlUpdateVertexBuffer" => Raylib_rlUpdateVertexBuffer,
+    "rlUpdateVertexBuffer" => Raylib_rlUpdateVertexBuffer,
+    "raylib::rlUpdateVertexBufferElements" => Raylib_rlUpdateVertexBufferElements,
+    "rlUpdateVertexBufferElements" => Raylib_rlUpdateVertexBufferElements,
+    "raylib::rlUnloadVertexArray" => Raylib_rlUnloadVertexArray,
+    "rlUnloadVertexArray" => Raylib_rlUnloadVertexArray,
+    "raylib::rlUnloadVertexBuffer" => Raylib_rlUnloadVertexBuffer,
+    "rlUnloadVertexBuffer" => Raylib_rlUnloadVertexBuffer,
+    "raylib::rlSetVertexAttribute" => Raylib_rlSetVertexAttribute,
+    "rlSetVertexAttribute" => Raylib_rlSetVertexAttribute,
+    "raylib::rlSetVertexAttributeDivisor" => Raylib_rlSetVertexAttributeDivisor,
+    "rlSetVertexAttributeDivisor" => Raylib_rlSetVertexAttributeDivisor,
+    "raylib::rlSetVertexAttributeDefault" => Raylib_rlSetVertexAttributeDefault,
+    "rlSetVertexAttributeDefault" => Raylib_rlSetVertexAttributeDefault,
+    "raylib::rlDrawVertexArray" => Raylib_rlDrawVertexArray,
+    "rlDrawVertexArray" => Raylib_rlDrawVertexArray,
+    "raylib::rlDrawVertexArrayElements" => Raylib_rlDrawVertexArrayElements,
+    "rlDrawVertexArrayElements" => Raylib_rlDrawVertexArrayElements,
+    "raylib::rlDrawVertexArrayInstanced" => Raylib_rlDrawVertexArrayInstanced,
+    "rlDrawVertexArrayInstanced" => Raylib_rlDrawVertexArrayInstanced,
+    "raylib::rlDrawVertexArrayElementsInstanced" => Raylib_rlDrawVertexArrayElementsInstanced,
+    "rlDrawVertexArrayElementsInstanced" => Raylib_rlDrawVertexArrayElementsInstanced,
+    "raylib::rlLoadTexture" => Raylib_rlLoadTexture,
+    "rlLoadTexture" => Raylib_rlLoadTexture,
+    "raylib::rlLoadTextureDepth" => Raylib_rlLoadTextureDepth,
+    "rlLoadTextureDepth" => Raylib_rlLoadTextureDepth,
+    "raylib::rlLoadTextureCubemap" => Raylib_rlLoadTextureCubemap,
+    "rlLoadTextureCubemap" => Raylib_rlLoadTextureCubemap,
+    "raylib::rlUpdateTexture" => Raylib_rlUpdateTexture,
+    "rlUpdateTexture" => Raylib_rlUpdateTexture,
+    "raylib::rlGetGlTextureFormats" => Raylib_rlGetGlTextureFormats,
+    "rlGetGlTextureFormats" => Raylib_rlGetGlTextureFormats,
+    "raylib::rlGetPixelFormatName" => Raylib_rlGetPixelFormatName,
+    "rlGetPixelFormatName" => Raylib_rlGetPixelFormatName,
+    "raylib::rlUnloadTexture" => Raylib_rlUnloadTexture,
+    "rlUnloadTexture" => Raylib_rlUnloadTexture,
+    "raylib::rlGenTextureMipmaps" => Raylib_rlGenTextureMipmaps,
+    "rlGenTextureMipmaps" => Raylib_rlGenTextureMipmaps,
+    "raylib::rlReadTexturePixels" => Raylib_rlReadTexturePixels,
+    "rlReadTexturePixels" => Raylib_rlReadTexturePixels,
+    "raylib::rlReadScreenPixels" => Raylib_rlReadScreenPixels,
+    "rlReadScreenPixels" => Raylib_rlReadScreenPixels,
+    "raylib::rlLoadFramebuffer" => Raylib_rlLoadFramebuffer,
+    "rlLoadFramebuffer" => Raylib_rlLoadFramebuffer,
+    "raylib::rlFramebufferAttach" => Raylib_rlFramebufferAttach,
+    "rlFramebufferAttach" => Raylib_rlFramebufferAttach,
+    "raylib::rlFramebufferComplete" => Raylib_rlFramebufferComplete,
+    "rlFramebufferComplete" => Raylib_rlFramebufferComplete,
+    "raylib::rlUnloadFramebuffer" => Raylib_rlUnloadFramebuffer,
+    "rlUnloadFramebuffer" => Raylib_rlUnloadFramebuffer,
+    "raylib::rlCopyFramebuffer" => Raylib_rlCopyFramebuffer,
+    "rlCopyFramebuffer" => Raylib_rlCopyFramebuffer,
+    "raylib::rlResizeFramebuffer" => Raylib_rlResizeFramebuffer,
+    "rlResizeFramebuffer" => Raylib_rlResizeFramebuffer,
+    "raylib::rlLoadShader" => Raylib_rlLoadShader,
+    "rlLoadShader" => Raylib_rlLoadShader,
+    "raylib::rlLoadShaderProgram" => Raylib_rlLoadShaderProgram,
+    "rlLoadShaderProgram" => Raylib_rlLoadShaderProgram,
+    "raylib::rlLoadShaderProgramEx" => Raylib_rlLoadShaderProgramEx,
+    "rlLoadShaderProgramEx" => Raylib_rlLoadShaderProgramEx,
+    "raylib::rlLoadShaderProgramCompute" => Raylib_rlLoadShaderProgramCompute,
+    "rlLoadShaderProgramCompute" => Raylib_rlLoadShaderProgramCompute,
+    "raylib::rlUnloadShader" => Raylib_rlUnloadShader,
+    "rlUnloadShader" => Raylib_rlUnloadShader,
+    "raylib::rlUnloadShaderProgram" => Raylib_rlUnloadShaderProgram,
+    "rlUnloadShaderProgram" => Raylib_rlUnloadShaderProgram,
+    "raylib::rlGetLocationUniform" => Raylib_rlGetLocationUniform,
+    "rlGetLocationUniform" => Raylib_rlGetLocationUniform,
+    "raylib::rlGetLocationAttrib" => Raylib_rlGetLocationAttrib,
+    "rlGetLocationAttrib" => Raylib_rlGetLocationAttrib,
+    "raylib::rlSetUniform" => Raylib_rlSetUniform,
+    "rlSetUniform" => Raylib_rlSetUniform,
+    "raylib::rlSetUniformMatrix" => Raylib_rlSetUniformMatrix,
+    "rlSetUniformMatrix" => Raylib_rlSetUniformMatrix,
+    "raylib::rlSetUniformMatrices" => Raylib_rlSetUniformMatrices,
+    "rlSetUniformMatrices" => Raylib_rlSetUniformMatrices,
+    "raylib::rlSetUniformSampler" => Raylib_rlSetUniformSampler,
+    "rlSetUniformSampler" => Raylib_rlSetUniformSampler,
+    "raylib::rlSetShader" => Raylib_rlSetShader,
+    "rlSetShader" => Raylib_rlSetShader,
+    "raylib::rlComputeShaderDispatch" => Raylib_rlComputeShaderDispatch,
+    "rlComputeShaderDispatch" => Raylib_rlComputeShaderDispatch,
+    "raylib::rlLoadShaderBuffer" => Raylib_rlLoadShaderBuffer,
+    "rlLoadShaderBuffer" => Raylib_rlLoadShaderBuffer,
+    "raylib::rlUnloadShaderBuffer" => Raylib_rlUnloadShaderBuffer,
+    "rlUnloadShaderBuffer" => Raylib_rlUnloadShaderBuffer,
+    "raylib::rlUpdateShaderBuffer" => Raylib_rlUpdateShaderBuffer,
+    "rlUpdateShaderBuffer" => Raylib_rlUpdateShaderBuffer,
+    "raylib::rlBindShaderBuffer" => Raylib_rlBindShaderBuffer,
+    "rlBindShaderBuffer" => Raylib_rlBindShaderBuffer,
+    "raylib::rlReadShaderBuffer" => Raylib_rlReadShaderBuffer,
+    "rlReadShaderBuffer" => Raylib_rlReadShaderBuffer,
+    "raylib::rlCopyShaderBuffer" => Raylib_rlCopyShaderBuffer,
+    "rlCopyShaderBuffer" => Raylib_rlCopyShaderBuffer,
+    "raylib::rlGetShaderBufferSize" => Raylib_rlGetShaderBufferSize,
+    "rlGetShaderBufferSize" => Raylib_rlGetShaderBufferSize,
+    "raylib::rlBindImageTexture" => Raylib_rlBindImageTexture,
+    "rlBindImageTexture" => Raylib_rlBindImageTexture,
+    "raylib::rlGetMatrixModelview" => Raylib_rlGetMatrixModelview,
+    "rlGetMatrixModelview" => Raylib_rlGetMatrixModelview,
+    "raylib::rlGetMatrixProjection" => Raylib_rlGetMatrixProjection,
+    "rlGetMatrixProjection" => Raylib_rlGetMatrixProjection,
+    "raylib::rlGetMatrixTransform" => Raylib_rlGetMatrixTransform,
+    "rlGetMatrixTransform" => Raylib_rlGetMatrixTransform,
+    "raylib::rlGetMatrixProjectionStereo" => Raylib_rlGetMatrixProjectionStereo,
+    "rlGetMatrixProjectionStereo" => Raylib_rlGetMatrixProjectionStereo,
+    "raylib::rlGetMatrixViewOffsetStereo" => Raylib_rlGetMatrixViewOffsetStereo,
+    "rlGetMatrixViewOffsetStereo" => Raylib_rlGetMatrixViewOffsetStereo,
+    "raylib::rlSetMatrixProjection" => Raylib_rlSetMatrixProjection,
+    "rlSetMatrixProjection" => Raylib_rlSetMatrixProjection,
+    "raylib::rlSetMatrixModelview" => Raylib_rlSetMatrixModelview,
+    "rlSetMatrixModelview" => Raylib_rlSetMatrixModelview,
+    "raylib::rlSetMatrixProjectionStereo" => Raylib_rlSetMatrixProjectionStereo,
+    "rlSetMatrixProjectionStereo" => Raylib_rlSetMatrixProjectionStereo,
+    "raylib::rlSetMatrixViewOffsetStereo" => Raylib_rlSetMatrixViewOffsetStereo,
+    "rlSetMatrixViewOffsetStereo" => Raylib_rlSetMatrixViewOffsetStereo,
+    "raylib::rlLoadDrawCube" => Raylib_rlLoadDrawCube,
+    "rlLoadDrawCube" => Raylib_rlLoadDrawCube,
+    "raylib::rlLoadDrawQuad" => Raylib_rlLoadDrawQuad,
+    "rlLoadDrawQuad" => Raylib_rlLoadDrawQuad,
+    "raylib::Clamp" => Raylib_Clamp,
+    "Clamp" => Raylib_Clamp,
+    "raylib::Lerp" => Raylib_Lerp,
+    "Lerp" => Raylib_Lerp,
+    "raylib::Normalize" => Raylib_Normalize,
+    "Normalize" => Raylib_Normalize,
+    "raylib::Remap" => Raylib_Remap,
+    "Remap" => Raylib_Remap,
+    "raylib::Wrap" => Raylib_Wrap,
+    "Wrap" => Raylib_Wrap,
+    "raylib::FloatEquals" => Raylib_FloatEquals,
+    "FloatEquals" => Raylib_FloatEquals,
+    "raylib::Vector2Zero" => Raylib_Vector2Zero,
+    "Vector2Zero" => Raylib_Vector2Zero,
+    "raylib::Vector2One" => Raylib_Vector2One,
+    "Vector2One" => Raylib_Vector2One,
+    "raylib::Vector2Add" => Raylib_Vector2Add,
+    "Vector2Add" => Raylib_Vector2Add,
+    "raylib::Vector2AddValue" => Raylib_Vector2AddValue,
+    "Vector2AddValue" => Raylib_Vector2AddValue,
+    "raylib::Vector2Subtract" => Raylib_Vector2Subtract,
+    "Vector2Subtract" => Raylib_Vector2Subtract,
+    "raylib::Vector2SubtractValue" => Raylib_Vector2SubtractValue,
+    "Vector2SubtractValue" => Raylib_Vector2SubtractValue,
+    "raylib::Vector2Length" => Raylib_Vector2Length,
+    "Vector2Length" => Raylib_Vector2Length,
+    "raylib::Vector2LengthSqr" => Raylib_Vector2LengthSqr,
+    "Vector2LengthSqr" => Raylib_Vector2LengthSqr,
+    "raylib::Vector2DotProduct" => Raylib_Vector2DotProduct,
+    "Vector2DotProduct" => Raylib_Vector2DotProduct,
+    "raylib::Vector2CrossProduct" => Raylib_Vector2CrossProduct,
+    "Vector2CrossProduct" => Raylib_Vector2CrossProduct,
+    "raylib::Vector2Distance" => Raylib_Vector2Distance,
+    "Vector2Distance" => Raylib_Vector2Distance,
+    "raylib::Vector2DistanceSqr" => Raylib_Vector2DistanceSqr,
+    "Vector2DistanceSqr" => Raylib_Vector2DistanceSqr,
+    "raylib::Vector2Angle" => Raylib_Vector2Angle,
+    "Vector2Angle" => Raylib_Vector2Angle,
+    "raylib::Vector2LineAngle" => Raylib_Vector2LineAngle,
+    "Vector2LineAngle" => Raylib_Vector2LineAngle,
+    "raylib::Vector2Scale" => Raylib_Vector2Scale,
+    "Vector2Scale" => Raylib_Vector2Scale,
+    "raylib::Vector2Multiply" => Raylib_Vector2Multiply,
+    "Vector2Multiply" => Raylib_Vector2Multiply,
+    "raylib::Vector2Negate" => Raylib_Vector2Negate,
+    "Vector2Negate" => Raylib_Vector2Negate,
+    "raylib::Vector2Divide" => Raylib_Vector2Divide,
+    "Vector2Divide" => Raylib_Vector2Divide,
+    "raylib::Vector2Normalize" => Raylib_Vector2Normalize,
+    "Vector2Normalize" => Raylib_Vector2Normalize,
+    "raylib::Vector2Transform" => Raylib_Vector2Transform,
+    "Vector2Transform" => Raylib_Vector2Transform,
+    "raylib::Vector2Lerp" => Raylib_Vector2Lerp,
+    "Vector2Lerp" => Raylib_Vector2Lerp,
+    "raylib::Vector2Reflect" => Raylib_Vector2Reflect,
+    "Vector2Reflect" => Raylib_Vector2Reflect,
+    "raylib::Vector2Min" => Raylib_Vector2Min,
+    "Vector2Min" => Raylib_Vector2Min,
+    "raylib::Vector2Max" => Raylib_Vector2Max,
+    "Vector2Max" => Raylib_Vector2Max,
+    "raylib::Vector2Rotate" => Raylib_Vector2Rotate,
+    "Vector2Rotate" => Raylib_Vector2Rotate,
+    "raylib::Vector2MoveTowards" => Raylib_Vector2MoveTowards,
+    "Vector2MoveTowards" => Raylib_Vector2MoveTowards,
+    "raylib::Vector2Invert" => Raylib_Vector2Invert,
+    "Vector2Invert" => Raylib_Vector2Invert,
+    "raylib::Vector2Clamp" => Raylib_Vector2Clamp,
+    "Vector2Clamp" => Raylib_Vector2Clamp,
+    "raylib::Vector2ClampValue" => Raylib_Vector2ClampValue,
+    "Vector2ClampValue" => Raylib_Vector2ClampValue,
+    "raylib::Vector2Equals" => Raylib_Vector2Equals,
+    "Vector2Equals" => Raylib_Vector2Equals,
+    "raylib::Vector2Refract" => Raylib_Vector2Refract,
+    "Vector2Refract" => Raylib_Vector2Refract,
+    "raylib::Vector3Zero" => Raylib_Vector3Zero,
+    "Vector3Zero" => Raylib_Vector3Zero,
+    "raylib::Vector3One" => Raylib_Vector3One,
+    "Vector3One" => Raylib_Vector3One,
+    "raylib::Vector3Add" => Raylib_Vector3Add,
+    "Vector3Add" => Raylib_Vector3Add,
+    "raylib::Vector3AddValue" => Raylib_Vector3AddValue,
+    "Vector3AddValue" => Raylib_Vector3AddValue,
+    "raylib::Vector3Subtract" => Raylib_Vector3Subtract,
+    "Vector3Subtract" => Raylib_Vector3Subtract,
+    "raylib::Vector3SubtractValue" => Raylib_Vector3SubtractValue,
+    "Vector3SubtractValue" => Raylib_Vector3SubtractValue,
+    "raylib::Vector3Scale" => Raylib_Vector3Scale,
+    "Vector3Scale" => Raylib_Vector3Scale,
+    "raylib::Vector3Multiply" => Raylib_Vector3Multiply,
+    "Vector3Multiply" => Raylib_Vector3Multiply,
+    "raylib::Vector3CrossProduct" => Raylib_Vector3CrossProduct,
+    "Vector3CrossProduct" => Raylib_Vector3CrossProduct,
+    "raylib::Vector3Perpendicular" => Raylib_Vector3Perpendicular,
+    "Vector3Perpendicular" => Raylib_Vector3Perpendicular,
+    "raylib::Vector3Length" => Raylib_Vector3Length,
+    "Vector3Length" => Raylib_Vector3Length,
+    "raylib::Vector3LengthSqr" => Raylib_Vector3LengthSqr,
+    "Vector3LengthSqr" => Raylib_Vector3LengthSqr,
+    "raylib::Vector3DotProduct" => Raylib_Vector3DotProduct,
+    "Vector3DotProduct" => Raylib_Vector3DotProduct,
+    "raylib::Vector3Distance" => Raylib_Vector3Distance,
+    "Vector3Distance" => Raylib_Vector3Distance,
+    "raylib::Vector3DistanceSqr" => Raylib_Vector3DistanceSqr,
+    "Vector3DistanceSqr" => Raylib_Vector3DistanceSqr,
+    "raylib::Vector3Angle" => Raylib_Vector3Angle,
+    "Vector3Angle" => Raylib_Vector3Angle,
+    "raylib::Vector3Negate" => Raylib_Vector3Negate,
+    "Vector3Negate" => Raylib_Vector3Negate,
+    "raylib::Vector3Divide" => Raylib_Vector3Divide,
+    "Vector3Divide" => Raylib_Vector3Divide,
+    "raylib::Vector3Normalize" => Raylib_Vector3Normalize,
+    "Vector3Normalize" => Raylib_Vector3Normalize,
+    "raylib::Vector3Project" => Raylib_Vector3Project,
+    "Vector3Project" => Raylib_Vector3Project,
+    "raylib::Vector3Reject" => Raylib_Vector3Reject,
+    "Vector3Reject" => Raylib_Vector3Reject,
+    "raylib::Vector3OrthoNormalize" => Raylib_Vector3OrthoNormalize,
+    "Vector3OrthoNormalize" => Raylib_Vector3OrthoNormalize,
+    "raylib::Vector3Transform" => Raylib_Vector3Transform,
+    "Vector3Transform" => Raylib_Vector3Transform,
+    "raylib::Vector3RotateByQuaternion" => Raylib_Vector3RotateByQuaternion,
+    "Vector3RotateByQuaternion" => Raylib_Vector3RotateByQuaternion,
+    "raylib::Vector3RotateByAxisAngle" => Raylib_Vector3RotateByAxisAngle,
+    "Vector3RotateByAxisAngle" => Raylib_Vector3RotateByAxisAngle,
+    "raylib::Vector3MoveTowards" => Raylib_Vector3MoveTowards,
+    "Vector3MoveTowards" => Raylib_Vector3MoveTowards,
+    "raylib::Vector3Lerp" => Raylib_Vector3Lerp,
+    "Vector3Lerp" => Raylib_Vector3Lerp,
+    "raylib::Vector3CubicHermite" => Raylib_Vector3CubicHermite,
+    "Vector3CubicHermite" => Raylib_Vector3CubicHermite,
+    "raylib::Vector3Reflect" => Raylib_Vector3Reflect,
+    "Vector3Reflect" => Raylib_Vector3Reflect,
+    "raylib::Vector3Min" => Raylib_Vector3Min,
+    "Vector3Min" => Raylib_Vector3Min,
+    "raylib::Vector3Max" => Raylib_Vector3Max,
+    "Vector3Max" => Raylib_Vector3Max,
+    "raylib::Vector3Barycenter" => Raylib_Vector3Barycenter,
+    "Vector3Barycenter" => Raylib_Vector3Barycenter,
+    "raylib::Vector3Unproject" => Raylib_Vector3Unproject,
+    "Vector3Unproject" => Raylib_Vector3Unproject,
+    "raylib::Vector3ToFloatV" => Raylib_Vector3ToFloatV,
+    "Vector3ToFloatV" => Raylib_Vector3ToFloatV,
+    "raylib::Vector3Invert" => Raylib_Vector3Invert,
+    "Vector3Invert" => Raylib_Vector3Invert,
+    "raylib::Vector3Clamp" => Raylib_Vector3Clamp,
+    "Vector3Clamp" => Raylib_Vector3Clamp,
+    "raylib::Vector3ClampValue" => Raylib_Vector3ClampValue,
+    "Vector3ClampValue" => Raylib_Vector3ClampValue,
+    "raylib::Vector3Equals" => Raylib_Vector3Equals,
+    "Vector3Equals" => Raylib_Vector3Equals,
+    "raylib::Vector3Refract" => Raylib_Vector3Refract,
+    "Vector3Refract" => Raylib_Vector3Refract,
+    "raylib::Vector4Zero" => Raylib_Vector4Zero,
+    "Vector4Zero" => Raylib_Vector4Zero,
+    "raylib::Vector4One" => Raylib_Vector4One,
+    "Vector4One" => Raylib_Vector4One,
+    "raylib::Vector4Add" => Raylib_Vector4Add,
+    "Vector4Add" => Raylib_Vector4Add,
+    "raylib::Vector4AddValue" => Raylib_Vector4AddValue,
+    "Vector4AddValue" => Raylib_Vector4AddValue,
+    "raylib::Vector4Subtract" => Raylib_Vector4Subtract,
+    "Vector4Subtract" => Raylib_Vector4Subtract,
+    "raylib::Vector4SubtractValue" => Raylib_Vector4SubtractValue,
+    "Vector4SubtractValue" => Raylib_Vector4SubtractValue,
+    "raylib::Vector4Length" => Raylib_Vector4Length,
+    "Vector4Length" => Raylib_Vector4Length,
+    "raylib::Vector4LengthSqr" => Raylib_Vector4LengthSqr,
+    "Vector4LengthSqr" => Raylib_Vector4LengthSqr,
+    "raylib::Vector4DotProduct" => Raylib_Vector4DotProduct,
+    "Vector4DotProduct" => Raylib_Vector4DotProduct,
+    "raylib::Vector4Distance" => Raylib_Vector4Distance,
+    "Vector4Distance" => Raylib_Vector4Distance,
+    "raylib::Vector4DistanceSqr" => Raylib_Vector4DistanceSqr,
+    "Vector4DistanceSqr" => Raylib_Vector4DistanceSqr,
+    "raylib::Vector4Scale" => Raylib_Vector4Scale,
+    "Vector4Scale" => Raylib_Vector4Scale,
+    "raylib::Vector4Multiply" => Raylib_Vector4Multiply,
+    "Vector4Multiply" => Raylib_Vector4Multiply,
+    "raylib::Vector4Negate" => Raylib_Vector4Negate,
+    "Vector4Negate" => Raylib_Vector4Negate,
+    "raylib::Vector4Divide" => Raylib_Vector4Divide,
+    "Vector4Divide" => Raylib_Vector4Divide,
+    "raylib::Vector4Normalize" => Raylib_Vector4Normalize,
+    "Vector4Normalize" => Raylib_Vector4Normalize,
+    "raylib::Vector4Min" => Raylib_Vector4Min,
+    "Vector4Min" => Raylib_Vector4Min,
+    "raylib::Vector4Max" => Raylib_Vector4Max,
+    "Vector4Max" => Raylib_Vector4Max,
+    "raylib::Vector4Lerp" => Raylib_Vector4Lerp,
+    "Vector4Lerp" => Raylib_Vector4Lerp,
+    "raylib::Vector4MoveTowards" => Raylib_Vector4MoveTowards,
+    "Vector4MoveTowards" => Raylib_Vector4MoveTowards,
+    "raylib::Vector4Invert" => Raylib_Vector4Invert,
+    "Vector4Invert" => Raylib_Vector4Invert,
+    "raylib::Vector4Equals" => Raylib_Vector4Equals,
+    "Vector4Equals" => Raylib_Vector4Equals,
+    "raylib::MatrixDeterminant" => Raylib_MatrixDeterminant,
+    "MatrixDeterminant" => Raylib_MatrixDeterminant,
+    "raylib::MatrixTrace" => Raylib_MatrixTrace,
+    "MatrixTrace" => Raylib_MatrixTrace,
+    "raylib::MatrixTranspose" => Raylib_MatrixTranspose,
+    "MatrixTranspose" => Raylib_MatrixTranspose,
+    "raylib::MatrixInvert" => Raylib_MatrixInvert,
+    "MatrixInvert" => Raylib_MatrixInvert,
+    "raylib::MatrixIdentity" => Raylib_MatrixIdentity,
+    "MatrixIdentity" => Raylib_MatrixIdentity,
+    "raylib::MatrixAdd" => Raylib_MatrixAdd,
+    "MatrixAdd" => Raylib_MatrixAdd,
+    "raylib::MatrixSubtract" => Raylib_MatrixSubtract,
+    "MatrixSubtract" => Raylib_MatrixSubtract,
+    "raylib::MatrixMultiply" => Raylib_MatrixMultiply,
+    "MatrixMultiply" => Raylib_MatrixMultiply,
+    "raylib::MatrixMultiplyValue" => Raylib_MatrixMultiplyValue,
+    "MatrixMultiplyValue" => Raylib_MatrixMultiplyValue,
+    "raylib::MatrixTranslate" => Raylib_MatrixTranslate,
+    "MatrixTranslate" => Raylib_MatrixTranslate,
+    "raylib::MatrixRotate" => Raylib_MatrixRotate,
+    "MatrixRotate" => Raylib_MatrixRotate,
+    "raylib::MatrixRotateX" => Raylib_MatrixRotateX,
+    "MatrixRotateX" => Raylib_MatrixRotateX,
+    "raylib::MatrixRotateY" => Raylib_MatrixRotateY,
+    "MatrixRotateY" => Raylib_MatrixRotateY,
+    "raylib::MatrixRotateZ" => Raylib_MatrixRotateZ,
+    "MatrixRotateZ" => Raylib_MatrixRotateZ,
+    "raylib::MatrixRotateXYZ" => Raylib_MatrixRotateXYZ,
+    "MatrixRotateXYZ" => Raylib_MatrixRotateXYZ,
+    "raylib::MatrixRotateZYX" => Raylib_MatrixRotateZYX,
+    "MatrixRotateZYX" => Raylib_MatrixRotateZYX,
+    "raylib::MatrixScale" => Raylib_MatrixScale,
+    "MatrixScale" => Raylib_MatrixScale,
+    "raylib::MatrixFrustum" => Raylib_MatrixFrustum,
+    "MatrixFrustum" => Raylib_MatrixFrustum,
+    "raylib::MatrixPerspective" => Raylib_MatrixPerspective,
+    "MatrixPerspective" => Raylib_MatrixPerspective,
+    "raylib::MatrixOrtho" => Raylib_MatrixOrtho,
+    "MatrixOrtho" => Raylib_MatrixOrtho,
+    "raylib::MatrixLookAt" => Raylib_MatrixLookAt,
+    "MatrixLookAt" => Raylib_MatrixLookAt,
+    "raylib::MatrixToFloatV" => Raylib_MatrixToFloatV,
+    "MatrixToFloatV" => Raylib_MatrixToFloatV,
+    "raylib::QuaternionAdd" => Raylib_QuaternionAdd,
+    "QuaternionAdd" => Raylib_QuaternionAdd,
+    "raylib::QuaternionAddValue" => Raylib_QuaternionAddValue,
+    "QuaternionAddValue" => Raylib_QuaternionAddValue,
+    "raylib::QuaternionSubtract" => Raylib_QuaternionSubtract,
+    "QuaternionSubtract" => Raylib_QuaternionSubtract,
+    "raylib::QuaternionSubtractValue" => Raylib_QuaternionSubtractValue,
+    "QuaternionSubtractValue" => Raylib_QuaternionSubtractValue,
+    "raylib::QuaternionIdentity" => Raylib_QuaternionIdentity,
+    "QuaternionIdentity" => Raylib_QuaternionIdentity,
+    "raylib::QuaternionLength" => Raylib_QuaternionLength,
+    "QuaternionLength" => Raylib_QuaternionLength,
+    "raylib::QuaternionNormalize" => Raylib_QuaternionNormalize,
+    "QuaternionNormalize" => Raylib_QuaternionNormalize,
+    "raylib::QuaternionInvert" => Raylib_QuaternionInvert,
+    "QuaternionInvert" => Raylib_QuaternionInvert,
+    "raylib::QuaternionMultiply" => Raylib_QuaternionMultiply,
+    "QuaternionMultiply" => Raylib_QuaternionMultiply,
+    "raylib::QuaternionScale" => Raylib_QuaternionScale,
+    "QuaternionScale" => Raylib_QuaternionScale,
+    "raylib::QuaternionDivide" => Raylib_QuaternionDivide,
+    "QuaternionDivide" => Raylib_QuaternionDivide,
+    "raylib::QuaternionLerp" => Raylib_QuaternionLerp,
+    "QuaternionLerp" => Raylib_QuaternionLerp,
+    "raylib::QuaternionNlerp" => Raylib_QuaternionNlerp,
+    "QuaternionNlerp" => Raylib_QuaternionNlerp,
+    "raylib::QuaternionSlerp" => Raylib_QuaternionSlerp,
+    "QuaternionSlerp" => Raylib_QuaternionSlerp,
+    "raylib::QuaternionCubicHermiteSpline" => Raylib_QuaternionCubicHermiteSpline,
+    "QuaternionCubicHermiteSpline" => Raylib_QuaternionCubicHermiteSpline,
+    "raylib::QuaternionFromVector3ToVector3" => Raylib_QuaternionFromVector3ToVector3,
+    "QuaternionFromVector3ToVector3" => Raylib_QuaternionFromVector3ToVector3,
+    "raylib::QuaternionFromMatrix" => Raylib_QuaternionFromMatrix,
+    "QuaternionFromMatrix" => Raylib_QuaternionFromMatrix,
+    "raylib::QuaternionToMatrix" => Raylib_QuaternionToMatrix,
+    "QuaternionToMatrix" => Raylib_QuaternionToMatrix,
+    "raylib::QuaternionFromAxisAngle" => Raylib_QuaternionFromAxisAngle,
+    "QuaternionFromAxisAngle" => Raylib_QuaternionFromAxisAngle,
+    "raylib::QuaternionToAxisAngle" => Raylib_QuaternionToAxisAngle,
+    "QuaternionToAxisAngle" => Raylib_QuaternionToAxisAngle,
+    "raylib::QuaternionFromEuler" => Raylib_QuaternionFromEuler,
+    "QuaternionFromEuler" => Raylib_QuaternionFromEuler,
+    "raylib::QuaternionToEuler" => Raylib_QuaternionToEuler,
+    "QuaternionToEuler" => Raylib_QuaternionToEuler,
+    "raylib::QuaternionTransform" => Raylib_QuaternionTransform,
+    "QuaternionTransform" => Raylib_QuaternionTransform,
+    "raylib::QuaternionEquals" => Raylib_QuaternionEquals,
+    "QuaternionEquals" => Raylib_QuaternionEquals,
+    "raylib::MatrixCompose" => Raylib_MatrixCompose,
+    "MatrixCompose" => Raylib_MatrixCompose,
+    "raylib::MatrixDecompose" => Raylib_MatrixDecompose,
+    "MatrixDecompose" => Raylib_MatrixDecompose,
 }
 
