@@ -94,7 +94,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 - **Source Module**: [`crates/solix-runtime/src/vm/engine.rs`](../../crates/solix-runtime/src/vm/engine.rs)
 - **Output**: Execution output, exit status, and memory telemetry.
 - **Responsibilities**:
-  - Dispatches register instructions via direct loop matching.
+  - Dispatches register instructions via direct loop matching with frame-cached constant pool pointers and flat `Vec` monomorphic inline-cache slots.
   - Manages call frame activation records with sliding register windows.
   - Operates byte-addressed heap memory with segregated free-list allocation.
   - Enforces deterministic ARC reclamation with zero memory leaks.
