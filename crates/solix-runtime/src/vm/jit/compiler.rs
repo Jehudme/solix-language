@@ -433,14 +433,6 @@ fn infer_signature_and_types(compiled_fn: &CompiledFunction) -> Option<InferredF
                         return None;
                     }
                 }
-                OpCode::EqString | OpCode::NeqString | OpCode::EqRef | OpCode::NeqRef => {
-                    if !set_reg(&mut reg_types, inst.dst(), RegType::I32)
-                        || !set_reg(&mut reg_types, inst.src1(), RegType::Ref)
-                        || !set_reg(&mut reg_types, inst.src2(), RegType::Ref)
-                    {
-                        return None;
-                    }
-                }
                 OpCode::Return => {
                     has_return = true;
                 }
@@ -468,11 +460,41 @@ fn infer_signature_and_types(compiled_fn: &CompiledFunction) -> Option<InferredF
         return None;
     }
 
+    let param_count = compiled_fn.param_count as usize;
+    if reg_types[..param_count].iter().any(Option::is_none) {
+        return None;
+    }
+    for inst in &compiled_fn.instructions {
+        let opcode = OpCode::from_raw_u8(inst.raw_opcode())?;
+        match opcode {
+            OpCode::ReturnValue
+                if reg_types
+                    .get(inst.dst() as usize)
+                    .copied()
+                    .flatten()
+                    .is_none() =>
+            {
+                return None;
+            }
+            OpCode::CallDirect | OpCode::TailCallDirect => {
+                let arg_base = inst.arg_base() as usize;
+                let arg_count = inst.arg_count() as usize;
+                if arg_base + arg_count > reg_types.len()
+                    || reg_types[arg_base..arg_base + arg_count]
+                        .iter()
+                        .any(Option::is_none)
+                {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+
     let resolved_regs: Vec<RegType> = reg_types
         .into_iter()
         .map(|slot| slot.unwrap_or(RegType::I32))
         .collect();
-    let param_count = compiled_fn.param_count as usize;
     let param_types = resolved_regs[..param_count].to_vec();
 
     Some(InferredFunctionTypes {

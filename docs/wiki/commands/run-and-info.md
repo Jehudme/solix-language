@@ -26,6 +26,7 @@ solix run source <file.slx> [options] [-- [guest_args...]]
 * `--cycle-budget-us <microseconds>`: Optional incremental time budget per collection step in microseconds.
 * `-v, --verbose`: Prints VM execution summary and heap statistics upon completion.
 * `--safe`: Executes in defensive safe mode with bounds checking and invariant assertions.
+* `--jit <mode>`: Controls the Cranelift JIT compiler (`tiered`, `eager`, or `off`) [default: `tiered`]. Automatically disabled at compile time on `wasm32` and non-`x86_64`/`aarch64` targets.
 * `--metrics [<format>]`: Prints runtime execution telemetry and memory profiling (`text` or `json`).
 * `--no-verify`: Bypasses dependency and native library cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`).
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
