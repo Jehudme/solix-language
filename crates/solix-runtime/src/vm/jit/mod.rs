@@ -644,12 +644,16 @@ unsafe extern "C" fn rt_call_slow(
     }
 
     let ret_raw = if ret_type_code < 4 {
-        match value_to_jit_bits(vm.last_return_value, RegType::from_code(ret_type_code)) {
-            Ok(bits) => bits,
-            Err(trap) => {
-                vm.register_stack.truncate(arg_start);
-                ctx.set_trap(trap);
-                return 1;
+        if matches!(vm.last_return_value, Value::Null) {
+            0
+        } else {
+            match value_to_jit_bits(vm.last_return_value, RegType::from_code(ret_type_code)) {
+                Ok(bits) => bits,
+                Err(trap) => {
+                    vm.register_stack.truncate(arg_start);
+                    ctx.set_trap(trap);
+                    return 1;
+                }
             }
         }
     } else {

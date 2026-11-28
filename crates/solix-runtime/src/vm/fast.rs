@@ -2687,10 +2687,15 @@ impl VirtualMachine {
             )
         };
         let code_span = self.func_code[caller_func_id];
+        if caller_dst == u16::MAX {
+            self.last_return_value = call_result;
+        }
         // SAFETY: caller_reg_base_offset is within register_stack and caller_dst within frame window.
         let caller_reg_base = unsafe {
             let ptr = self.register_stack.as_mut_ptr().add(caller_reg_base_offset);
-            *ptr.add(caller_dst as usize) = call_result;
+            if caller_dst != u16::MAX {
+                *ptr.add(caller_dst as usize) = call_result;
+            }
             ptr
         };
         Ok((

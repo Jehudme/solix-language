@@ -39,7 +39,8 @@ solix run <binaries...> [options] [-- [guest_args...]]
 | `--cycle-budget-us <us>` | | Integer | None | Optional per-pause microsecond time budget for incremental cycle collection steps. |
 | `--verbose` | `-v` | Flag | `false` | Prints VM execution statistics and memory report upon process completion. |
 | `--safe` | | Flag | `false` | Executes in safe mode with defensive invariant validation and strict bounds checking. |
-| `--metrics [<format>]` | | Optional String | None (`text` if flag only) | Prints runtime execution telemetry and memory statistics formatted as `text` or `json` (enables per-instruction telemetry tracking via `RuntimeOptions::with_metrics_tracking(true)`, and reports guest-only `active_guest_objects()` leaks excluding immortal constant-pool strings). |
+| `--jit <mode>` | | String | `"tiered"` | Controls the Cranelift JIT compiler (`tiered`, `eager`, or `off`). Target-gated at compile time via `solix-runtime`'s `jit` feature (`default = ["jit"]`), automatically disabled on `wasm32` and non-`x86_64`/`aarch64` targets. |
+| `--metrics [<format>]` | | Optional String | None (`text` if flag only) | Prints runtime execution telemetry and memory statistics formatted as `text` or `json` (enables per-instruction telemetry tracking via `RuntimeOptions::with_metrics_tracking(true)`, includes `jit_compiled_functions` and `jit_compile_time_ns`, and reports guest-only `active_guest_objects()` leaks excluding immortal constant-pool strings). |
 | `--no-verify` | | Flag | `false` | Bypasses dependency and native library cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
 | `-- [guest_args...]` | | Strings | `[]` | Arguments passed directly to the guest application entry point. |
