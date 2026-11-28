@@ -243,7 +243,7 @@ fn read_i32_slow(val_ref: &Value) -> Result<i32, VmTrap> {
 }
 
 #[inline(always)]
-fn read_i32_fast(val_ref: &Value) -> Result<i32, VmTrap> {
+pub(crate) fn read_i32_fast(val_ref: &Value) -> Result<i32, VmTrap> {
     if let Value::I32(num_val) = *val_ref {
         Ok(num_val)
     } else {
@@ -262,7 +262,7 @@ fn read_i64_slow(val_ref: &Value) -> Result<i64, VmTrap> {
 }
 
 #[inline(always)]
-fn read_i64_fast(val_ref: &Value) -> Result<i64, VmTrap> {
+pub(crate) fn read_i64_fast(val_ref: &Value) -> Result<i64, VmTrap> {
     if let Value::I64(num_val) = *val_ref {
         Ok(num_val)
     } else {
@@ -312,7 +312,7 @@ fn read_f64_slow(val_ref: &Value) -> Result<f64, VmTrap> {
 }
 
 #[inline(always)]
-fn read_f64_fast(val_ref: &Value) -> Result<f64, VmTrap> {
+pub(crate) fn read_f64_fast(val_ref: &Value) -> Result<f64, VmTrap> {
     if let Value::F64(float_val) = *val_ref {
         Ok(float_val)
     } else {
@@ -447,7 +447,7 @@ fn to_primitive_u64_cold(val: &Value) -> u64 {
 }
 
 #[inline(never)]
-fn alloc_object_trap(
+pub(crate) fn alloc_object_trap(
     heap: &mut crate::memory::VirtualHeap,
     payload_size: usize,
     tag: BlockTag,
@@ -461,7 +461,7 @@ fn alloc_object_trap(
 }
 
 #[inline(never)]
-fn alloc_array_trap(
+pub(crate) fn alloc_array_trap(
     heap: &mut crate::memory::VirtualHeap,
     array_len: usize,
     elem_size: usize,
@@ -488,7 +488,10 @@ fn alloc_array_trap(
 }
 
 #[inline(never)]
-fn array_length_trap(heap: &crate::memory::VirtualHeap, arr_addr: u32) -> Result<u32, VmTrap> {
+pub(crate) fn array_length_trap(
+    heap: &crate::memory::VirtualHeap,
+    arr_addr: u32,
+) -> Result<u32, VmTrap> {
     let header = heap.read_header(arr_addr).map_err(VmTrap::from_error)?;
     if header.tag == BlockTag::String {
         Ok(header.size)
@@ -1748,7 +1751,7 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
 }
 
 #[inline(always)]
-fn inc_ref_inline(
+pub(crate) fn inc_ref_inline(
     heap: &mut crate::memory::VirtualHeap,
     addr: u32,
     cycle_collector_enabled: bool,
@@ -2039,12 +2042,12 @@ fn write_heap_u64_fast(heap_buf: &mut [u8], addr: u32, word_val: u64) {
 
 impl VirtualMachine {
     #[inline(always)]
-    fn current_frame_fast(&self) -> Result<&CallFrame, VmTrap> {
+    pub(crate) fn current_frame_fast(&self) -> Result<&CallFrame, VmTrap> {
         self.call_frames.last().ok_or_else(VmTrap::null_reference)
     }
 
     #[inline(always)]
-    fn current_frame_mut_fast(&mut self) -> Result<&mut CallFrame, VmTrap> {
+    pub(crate) fn current_frame_mut_fast(&mut self) -> Result<&mut CallFrame, VmTrap> {
         self.call_frames
             .last_mut()
             .ok_or_else(VmTrap::null_reference)
@@ -2149,7 +2152,7 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn release_reference_cold(&mut self, addr: u32) -> Result<(), VmTrap> {
+    pub(crate) fn release_reference_cold(&mut self, addr: u32) -> Result<(), VmTrap> {
         self.release_reference(addr).map_err(VmTrap::from_error)
     }
 
@@ -3609,7 +3612,7 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn dispatch_call_slow(
+    pub(crate) fn dispatch_call_slow(
         &mut self,
         global_func_id: u32,
         caller_dst: u16,
@@ -3654,6 +3657,17 @@ impl VirtualMachine {
         &mut self,
         target_depth: usize,
     ) -> Result<(), RuntimeError> {
+        #[cfg(all(
+            feature = "jit",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            not(target_family = "wasm")
+        ))]
+        if !SINGLE_STEP
+            && self.jit_mode != crate::options::JitMode::Off
+            && let Some(jit_result) = crate::vm::jit::try_run_entry_jit(self, target_depth)
+        {
+            return jit_result.map_err(VmTrap::into_inner);
+        }
         if SINGLE_STEP {
             self.run_fast_trap::<true, true>(target_depth)
                 .map_err(VmTrap::into_inner)
@@ -3666,7 +3680,7 @@ impl VirtualMachine {
         }
     }
 
-    fn run_fast_trap<const SINGLE_STEP: bool, const TRACK_METRICS: bool>(
+    pub(crate) fn run_fast_trap<const SINGLE_STEP: bool, const TRACK_METRICS: bool>(
         &mut self,
         target_depth: usize,
     ) -> Result<(), VmTrap> {
@@ -6308,6 +6322,30 @@ impl VirtualMachine {
             let caller_reg_base = caller_frame.register_base as usize;
             let caller_frame_end = caller_reg_base + caller_frame.register_count as usize;
             let caller_arg_start = caller_reg_base + call_arg_base;
+
+            #[cfg(all(
+                feature = "jit",
+                any(target_arch = "x86_64", target_arch = "aarch64"),
+                not(target_family = "wasm")
+            ))]
+            if !SINGLE_STEP
+                && self.jit_mode != crate::options::JitMode::Off
+                && call_closure_addr == 0
+                && let Some(jit_ok) = crate::vm::jit::try_invoke_jit(
+                    self,
+                    call_func_id,
+                    call_dst,
+                    caller_arg_start,
+                    call_arg_count,
+                )
+            {
+                jit_ok?;
+                if TRACK_METRICS {
+                    self.peak_call_stack_depth =
+                        self.peak_call_stack_depth.max(self.call_frames.len() + 1);
+                }
+                continue 'dispatch_loop;
+            }
 
             let num_regs = (span.num_registers as usize).max(call_arg_count);
             let (new_reg_base, needs_arg_copy) =

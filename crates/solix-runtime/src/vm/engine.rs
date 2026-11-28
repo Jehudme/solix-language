@@ -25,6 +25,10 @@ pub struct VmTelemetry {
     pub native_calls_count: u64,
     /// Total count of dynamically quickened instructions.
     pub quickened_instructions_count: u64,
+    /// Total count of functions compiled to native code by Cranelift JIT.
+    pub jit_compiled_functions: u64,
+    /// Cumulative time spent compiling functions in Cranelift JIT (nanoseconds).
+    pub jit_compile_time_ns: u64,
 }
 
 /// Compact 32-byte cached instruction slice and frame metadata header (`shl $5` indexing).
@@ -126,6 +130,15 @@ pub struct VirtualMachine {
     pub arc_elided_ops_count: u64,
     /// Monomorphic call site inline caches mapping (function_id, pc) to expected vtable and target.
     pub monomorphic_call_caches: Vec<Vec<Option<MonomorphicCallSite>>>,
+    /// Cranelift JIT execution mode (`Off`, `Tiered`, `Eager`).
+    pub jit_mode: crate::options::JitMode,
+    /// Lazily initialized Cranelift JIT engine (only present on supported native JIT targets).
+    #[cfg(all(
+        feature = "jit",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(target_family = "wasm")
+    ))]
+    pub(crate) jit_engine: Option<Box<crate::vm::jit::JitEngine>>,
 }
 
 /// Inline cache record for a quickened monomorphic call site.
@@ -208,6 +221,7 @@ impl VirtualMachine {
         let safe_mode = context.options.safe_mode;
         let track_metrics = context.options.track_metrics;
         let output_sink = context.options.output_sink.clone();
+        let jit_mode = context.options.jit_mode;
 
         Ok(Self {
             context,
@@ -245,6 +259,13 @@ impl VirtualMachine {
             arc_cycle_collector_time_micros: 0,
             arc_elided_ops_count: 0,
             monomorphic_call_caches: Vec::new(),
+            jit_mode,
+            #[cfg(all(
+                feature = "jit",
+                any(target_arch = "x86_64", target_arch = "aarch64"),
+                not(target_family = "wasm")
+            ))]
+            jit_engine: None,
         })
     }
 
@@ -1213,12 +1234,30 @@ impl VirtualMachine {
     /// Returns the live telemetry metrics of the virtual machine execution.
     #[must_use]
     pub fn telemetry(&self) -> VmTelemetry {
+        #[cfg(all(
+            feature = "jit",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            not(target_family = "wasm")
+        ))]
+        let (jit_compiled_functions, jit_compile_time_ns) = self
+            .jit_engine
+            .as_ref()
+            .map_or((0, 0), |jit| (jit.compiled_count, jit.compile_time_ns));
+        #[cfg(not(all(
+            feature = "jit",
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            not(target_family = "wasm")
+        )))]
+        let (jit_compiled_functions, jit_compile_time_ns) = (0, 0);
+
         VmTelemetry {
             pure_execution_time_ns: self.pure_execution_time_ns,
             instructions_dispatched: self.instructions_dispatched,
             peak_call_stack_depth: self.peak_call_stack_depth,
             native_calls_count: self.native_calls_count,
             quickened_instructions_count: self.quickened_instructions_count,
+            jit_compiled_functions,
+            jit_compile_time_ns,
         }
     }
 

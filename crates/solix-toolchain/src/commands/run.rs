@@ -152,6 +152,7 @@ pub fn execute_run_package(args: RunPackageArgs) -> Result<i32> {
         cycle_budget_us: args.cycle_budget_us,
         verbose: args.verbose,
         safe: args.safe,
+        jit: "tiered".to_string(),
         metrics: args.metrics,
         metrics_json: args.metrics_json,
         args: args.args,
@@ -182,6 +183,7 @@ pub fn execute_run_source(args: RunSourceArgs) -> Result<i32> {
         cycle_budget_us: args.cycle_budget_us,
         verbose: args.verbose,
         safe: args.safe,
+        jit: "tiered".to_string(),
         metrics: args.metrics,
         metrics_json: args.metrics_json,
         args: args.args,
@@ -231,6 +233,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 cycle_budget_us: args.cycle_budget_us,
                 pkg_dir: args.pkg_dir,
                 safe: args.safe,
+                jit: args.jit,
                 verbose: args.verbose,
                 metrics: args.metrics,
                 metrics_json: args.metrics_json,
@@ -265,6 +268,12 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
     let is_text_metrics = args.metrics.as_deref() == Some("text");
 
+    let jit_mode = match args.jit.as_str() {
+        "off" => solix_runtime::JitMode::Off,
+        "eager" => solix_runtime::JitMode::Eager,
+        _ => solix_runtime::JitMode::Tiered,
+    };
+
     let mut runtime_options = RuntimeOptions::new()
         .with_heap_size(heap_size)
         .with_max_call_stack_depth(args.max_stack)
@@ -272,6 +281,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .with_cycle_threshold(args.cycle_threshold)
         .with_args(args.args)
         .with_safe_mode(args.safe)
+        .with_jit_mode(jit_mode)
         .with_metrics_tracking(is_json_metrics || is_text_metrics)
         .with_solver(solver.clone())
         .with_native_function("println", builtin_println)
@@ -760,6 +770,8 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     instructions_dispatched: vm_telemetry.instructions_dispatched,
                     peak_stack_depth: vm_telemetry.peak_call_stack_depth,
                     quickened_calls: vm_telemetry.quickened_instructions_count,
+                    jit_compiled_functions: vm_telemetry.jit_compiled_functions,
+                    jit_compile_time_ns: vm_telemetry.jit_compile_time_ns,
                 },
             };
             let json_output = serde_json::to_string_pretty(&report)
@@ -816,6 +828,14 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             println!(
                 "  Quickened Instructions  : {}",
                 vm_telemetry.quickened_instructions_count
+            );
+            println!(
+                "  JIT Compiled Functions  : {}",
+                vm_telemetry.jit_compiled_functions
+            );
+            println!(
+                "  JIT Compile Time        : {:.2} ms",
+                vm_telemetry.jit_compile_time_ns as f64 / 1_000_000.0
             );
         }
     }

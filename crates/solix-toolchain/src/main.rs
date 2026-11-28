@@ -34,6 +34,7 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
         cycle_budget_us: None,
         verbose: false,
         safe: false,
+        jit: "tiered".to_string(),
         metrics: None,
         metrics_json: false,
         args: Vec::new(),
@@ -84,6 +85,10 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
                 "--cycle-budget-us" => {
                     run_args.cycle_budget_us = Some(flag_val.parse().ok()?);
                 }
+                "--jit" => match flag_val {
+                    "off" | "tiered" | "eager" => run_args.jit = flag_val.to_string(),
+                    _ => return None,
+                },
                 "--metrics" => match flag_val {
                     "text" | "json" => run_args.metrics = Some(flag_val.to_string()),
                     _ => return None,
@@ -128,6 +133,13 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
             "--max-stack" => {
                 let next_val = os_args.next()?;
                 run_args.max_stack = next_val.to_str()?.parse().ok()?;
+            }
+            "--jit" => {
+                let next_val = os_args.next()?.into_string().ok()?;
+                match next_val.as_str() {
+                    "off" | "tiered" | "eager" => run_args.jit = next_val,
+                    _ => return None,
+                }
             }
             "--cycle-collector" => {
                 let next_val = os_args.next()?.into_string().ok()?;
