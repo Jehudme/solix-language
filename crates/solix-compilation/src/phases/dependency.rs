@@ -12,9 +12,9 @@ use crate::manifest::manifest_to_source;
 use crate::phases::lexing::Span;
 use crate::phases::phase::CompilationPhase;
 use miette::SourceSpan;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use solix_common::bytecode::BinaryProgram;
 use solix_common::solver::{DependencyRequirement, PackageVersion, SolverError};
-use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::collections::VecDeque;
 
 /// Dependency resolution compilation phase running before lexical analysis.
@@ -323,6 +323,19 @@ fn ingest_package_api_source(
     });
 
     if !program.export_manifest.exported_ast_bytes.is_empty() {
+        if let Some(mut lazy_ast) = try_deserialize_indexed_ast(
+            &program.export_manifest.exported_ast_bytes,
+            package_name,
+            context,
+        ) {
+            if !has_binary {
+                context.options.dependency_binaries.push(program);
+            }
+            lazy_ast.source_id = source_id;
+            context.ast[source_id as usize] = Some(lazy_ast);
+            return Ok(());
+        }
+
         let deserialized_result = bincode::deserialize::<
             crate::phases::parser::statements::ProgramAst,
         >(&program.export_manifest.exported_ast_bytes)
@@ -628,10 +641,7 @@ fn collect_identifiers_from_slice(slice: &str, target_set: &mut HashSet<String>)
     }
 }
 
-fn collect_user_identifiers(
-    context: &CompilationContext,
-    target_set: &mut HashSet<String>,
-) {
+fn collect_user_identifiers(context: &CompilationContext, target_set: &mut HashSet<String>) {
     use crate::phases::lexing::TokenKind;
     for (source_idx, source_text) in context.sources.iter().enumerate() {
         if u16::try_from(source_idx).is_ok_and(|id| context.is_external_source(id)) {
@@ -695,16 +705,11 @@ fn scan_raw_source_imports(
     }
 }
 
-fn selectively_prune_ast(
-    ast: &mut crate::phases::parser::statements::ProgramAst,
+fn collect_needed_seed_symbols(
     package_name: &str,
     context: &CompilationContext,
-    source_text: &str,
-) {
-    use crate::phases::parser::statements::{ClassMember, Declaration};
-
+) -> Option<HashSet<String>> {
     let mut has_wildcard_import = false;
-    let imported_namespaces: HashSet<String> = HashSet::default();
     let mut imported_symbols = HashSet::default();
     let mut has_any_package_import = false;
 
@@ -748,7 +753,7 @@ fn selectively_prune_ast(
     }
 
     if !has_any_package_import {
-        return;
+        return None;
     }
 
     let mut needed_symbols = imported_symbols;
@@ -758,6 +763,98 @@ fn selectively_prune_ast(
     needed_symbols.insert("String".to_string());
     needed_symbols.insert("IStringable".to_string());
     needed_symbols.insert("Object".to_string());
+    Some(needed_symbols)
+}
+
+fn try_deserialize_indexed_ast(
+    bytes: &[u8],
+    package_name: &str,
+    context: &CompilationContext,
+) -> Option<crate::phases::parser::statements::ProgramAst> {
+    use crate::phases::export_api::{INDEXED_AST_MAGIC, IndexedAstHeader};
+    use crate::phases::parser::statements::ProgramAst;
+    use crate::phases::parser::statements::declarations::Declaration;
+
+    if !bytes.starts_with(INDEXED_AST_MAGIC) || bytes.len() < INDEXED_AST_MAGIC.len() + 4 {
+        return None;
+    }
+    let len_start = INDEXED_AST_MAGIC.len();
+    let len_bytes: [u8; 4] = bytes[len_start..len_start + 4].try_into().ok()?;
+    let header_len = u32::from_le_bytes(len_bytes) as usize;
+    let header_start = len_start + 4;
+    let header_end = header_start.checked_add(header_len)?;
+    if header_end > bytes.len() {
+        return None;
+    }
+    let header: IndexedAstHeader = bincode::deserialize(&bytes[header_start..header_end]).ok()?;
+    let decl_blobs = &bytes[header_end..];
+
+    let needed_opt = collect_needed_seed_symbols(package_name, context);
+    let mut selected = vec![false; header.entries.len()];
+    if let Some(mut needed_symbols) = needed_opt {
+        let core_namespace_prefix = format!("{package_name}::core");
+        loop {
+            let size_before = needed_symbols.len();
+            for (entry_idx, entry) in header.entries.iter().enumerate() {
+                if selected[entry_idx] {
+                    continue;
+                }
+                let is_needed = entry.always_keep
+                    || needed_symbols.contains(&entry.simple_name)
+                    || needed_symbols.contains(&entry.qualified_name)
+                    || entry.namespace.starts_with(&core_namespace_prefix);
+                if is_needed {
+                    selected[entry_idx] = true;
+                    for referenced in &entry.referenced_names {
+                        needed_symbols.insert(referenced.clone());
+                    }
+                }
+            }
+            if needed_symbols.len() == size_before {
+                break;
+            }
+        }
+    } else {
+        selected.fill(true);
+    }
+
+    let mut declarations = Vec::new();
+    for (entry_idx, entry) in header.entries.iter().enumerate() {
+        if !selected[entry_idx] {
+            continue;
+        }
+        let start = entry.byte_offset as usize;
+        let end = start.checked_add(entry.byte_len as usize)?;
+        if end > decl_blobs.len() {
+            return None;
+        }
+        let decl: Declaration = bincode::deserialize(&decl_blobs[start..end]).ok()?;
+        declarations.push(decl);
+    }
+
+    Some(ProgramAst {
+        source_id: header.source_id,
+        span: header.span,
+        package: header.package,
+        imports: header.imports,
+        aliases: header.aliases,
+        declarations,
+        root_statements: Vec::new(),
+    })
+}
+
+fn selectively_prune_ast(
+    ast: &mut crate::phases::parser::statements::ProgramAst,
+    package_name: &str,
+    context: &CompilationContext,
+    source_text: &str,
+) {
+    use crate::phases::parser::statements::{ClassMember, Declaration};
+
+    let imported_namespaces: HashSet<String> = HashSet::default();
+    let Some(mut needed_symbols) = collect_needed_seed_symbols(package_name, context) else {
+        return;
+    };
 
     let core_namespace_prefix = format!("{package_name}::core");
 

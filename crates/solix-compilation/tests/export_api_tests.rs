@@ -373,3 +373,72 @@ public class Main {
         "Removed Raylib:: wrapper and snake_case duplicates must be rejected"
     );
 }
+
+#[test]
+fn test_indexed_slxast01_lazy_deserialization_prunes_unused_declarations() {
+    let mut lib_source = String::from("package biglib;\n\n");
+    for idx in 0..20 {
+        lib_source.push_str(&format!(
+            "public class Widget{idx} {{ public int32 value = {idx}; public Widget{idx}() {{}} }}\n"
+        ));
+    }
+
+    let lib_options = CompilationOptions::new()
+        .with_package_metadata("biglib", "1.0.0", "Large Library")
+        .with_source("Widgets.slx", &lib_source);
+    let mut lib_context = CompilationContext::new(lib_options);
+    let mut lib_pipeline = CompilationPipeline::standard();
+    assert!(
+        lib_pipeline.execute(&mut lib_context).is_ok(),
+        "Large library compilation must succeed"
+    );
+
+    let lib_program = lib_context
+        .emission_artifacts
+        .expect("Emission artifacts must exist")
+        .program;
+    assert!(
+        lib_program
+            .export_manifest
+            .exported_ast_bytes
+            .starts_with(solix_compilation::phases::export_api::INDEXED_AST_MAGIC),
+        "Libraries with >= 16 exported declarations must emit SLXAST01 indexed AST bytes"
+    );
+
+    let consumer_source = r#"
+package client;
+
+import biglib.*;
+
+public class Main {
+    public static int32 main() {
+        Widget3 widget = new Widget3();
+        return widget.value;
+    }
+}
+"#;
+    let consumer_options = CompilationOptions::new()
+        .with_source("Main.slx", consumer_source)
+        .with_dependency_binary(lib_program);
+    let mut consumer_context = CompilationContext::new(consumer_options);
+    let mut consumer_pipeline = CompilationPipeline::standard();
+    let consumer_result = consumer_pipeline.execute(&mut consumer_context);
+    assert!(
+        consumer_result.is_ok(),
+        "Consumer compiling against SLXAST01 indexed AST must succeed: {consumer_result:?}"
+    );
+
+    let dep_source_id = consumer_context
+        .source_names
+        .iter()
+        .position(|name| name.contains("biglib"))
+        .expect("biglib external source must exist");
+    let dep_ast = consumer_context.ast[dep_source_id]
+        .as_ref()
+        .expect("biglib AST must be present");
+    assert!(
+        dep_ast.declarations.len() < 10,
+        "Lazy SLXAST01 deserialization should retain only Widget3 and skip unused widgets (got {})",
+        dep_ast.declarations.len()
+    );
+}

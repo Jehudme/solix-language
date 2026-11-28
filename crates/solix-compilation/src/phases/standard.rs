@@ -58,17 +58,16 @@ impl CompilationPhase for LexerPhase {
 
         if pending_indices.len() >= PARALLEL_FRONTEND_THRESHOLD {
             let sources = &context.sources;
-            let mut results: Vec<(usize, Result<Vec<crate::phases::lexing::Token>, Vec<crate::LexingError>>)> =
-                pending_indices
-                    .par_iter()
-                    .map(|&source_index| {
-                        let source_id = source_index as u16;
-                        (
-                            source_index,
-                            crate::phases::lexing::lex_source(source_id, &sources[source_index]),
-                        )
-                    })
-                    .collect();
+            let mut results: Vec<_> = pending_indices
+                .par_iter()
+                .map(|&source_index| {
+                    let source_id = source_index as u16;
+                    (
+                        source_index,
+                        crate::phases::lexing::lex_source(source_id, &sources[source_index]),
+                    )
+                })
+                .collect();
             results.sort_by_key(|(source_index, _)| *source_index);
             for (source_index, outcome) in results {
                 let source_id = source_index as u16;
@@ -87,8 +86,7 @@ impl CompilationPhase for LexerPhase {
         } else {
             for source_index in pending_indices {
                 let source_id = source_index as u16;
-                match crate::phases::lexing::lex_source(source_id, &context.sources[source_index])
-                {
+                match crate::phases::lexing::lex_source(source_id, &context.sources[source_index]) {
                     Ok(tokens) => {
                         context.tokens[source_index] = tokens;
                     }
@@ -158,13 +156,7 @@ impl CompilationPhase for ParserPhase {
         if pending_indices.len() >= PARALLEL_FRONTEND_THRESHOLD {
             let sources = &context.sources;
             let tokens_slice = &context.tokens;
-            let mut results: Vec<(
-                usize,
-                Result<
-                    crate::phases::parser::statements::ProgramAst,
-                    Vec<crate::ParsingError>,
-                >,
-            )> = pending_indices
+            let mut results: Vec<_> = pending_indices
                 .par_iter()
                 .map(|&source_index| {
                     let source_id = source_index as u16;
