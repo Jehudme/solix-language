@@ -5,9 +5,13 @@
 use super::phase::CompilationPhase;
 use crate::CompilationContext::CompilationContext;
 use crate::CompilationDiagnostic;
+use rayon::prelude::*;
 
 pub use super::dependency::DependencyResolutionPhase;
 pub use super::optimizer::{AstInlinerPhase, BytecodeOptimizerPhase};
+
+/// Minimum pending source file count before engaging `rayon` parallelism in lexing/parsing.
+const PARALLEL_FRONTEND_THRESHOLD: usize = 4;
 
 /// Lexical analysis phase tokenizing all registered sources in the context.
 #[derive(Debug, Default, Clone)]
@@ -34,30 +38,63 @@ impl CompilationPhase for LexerPhase {
 
         let mut accumulated_diagnostics = Vec::new();
 
-        for (source_index, source_text) in context.sources.iter().enumerate() {
-            let Ok(source_id) = u16::try_from(source_index) else {
+        let mut pending_indices = Vec::new();
+        for source_index in 0..sources_count {
+            if u16::try_from(source_index).is_err() {
                 accumulated_diagnostics.push(CompilationDiagnostic::from(
                     crate::LexingError::source_limit_exceeded(),
                 ));
                 return Err(accumulated_diagnostics);
-            };
+            }
             if context
                 .ast
                 .get(source_index)
                 .and_then(|ast_option| ast_option.as_ref())
-                .is_some()
+                .is_none()
             {
-                continue;
+                pending_indices.push(source_index);
             }
+        }
 
-            match crate::phases::lexing::lex_source(source_id, source_text) {
-                Ok(tokens) => {
-                    context.tokens[source_index] = tokens;
+        if pending_indices.len() >= PARALLEL_FRONTEND_THRESHOLD {
+            let sources = &context.sources;
+            let mut results: Vec<_> = pending_indices
+                .par_iter()
+                .map(|&source_index| {
+                    let source_id = source_index as u16;
+                    (
+                        source_index,
+                        crate::phases::lexing::lex_source(source_id, &sources[source_index]),
+                    )
+                })
+                .collect();
+            results.sort_by_key(|(source_index, _)| *source_index);
+            for (source_index, outcome) in results {
+                let source_id = source_index as u16;
+                match outcome {
+                    Ok(tokens) => {
+                        context.tokens[source_index] = tokens;
+                    }
+                    Err(errors) => {
+                        for error in errors {
+                            accumulated_diagnostics
+                                .push(CompilationDiagnostic::from(error).with_source_id(source_id));
+                        }
+                    }
                 }
-                Err(errors) => {
-                    for error in errors {
-                        accumulated_diagnostics
-                            .push(CompilationDiagnostic::from(error).with_source_id(source_id));
+            }
+        } else {
+            for source_index in pending_indices {
+                let source_id = source_index as u16;
+                match crate::phases::lexing::lex_source(source_id, &context.sources[source_index]) {
+                    Ok(tokens) => {
+                        context.tokens[source_index] = tokens;
+                    }
+                    Err(errors) => {
+                        for error in errors {
+                            accumulated_diagnostics
+                                .push(CompilationDiagnostic::from(error).with_source_id(source_id));
+                        }
                     }
                 }
             }
@@ -96,38 +133,86 @@ impl CompilationPhase for ParserPhase {
 
         let mut accumulated_diagnostics = Vec::new();
 
-        for (source_index, source_text) in context.sources.iter().enumerate() {
-            let Ok(source_id) = u16::try_from(source_index) else {
+        let mut pending_indices = Vec::new();
+        for source_index in 0..sources_count {
+            if u16::try_from(source_index).is_err() {
                 accumulated_diagnostics.push(CompilationDiagnostic::from(
                     crate::ParsingError::SourceLimitExceeded {
                         span: miette::SourceSpan::from((0usize, 0usize)),
                     },
                 ));
                 return Err(accumulated_diagnostics);
-            };
+            }
             if context
                 .ast
                 .get(source_index)
                 .and_then(|ast_option| ast_option.as_ref())
-                .is_some()
+                .is_none()
             {
-                continue;
+                pending_indices.push(source_index);
             }
-            let tokens = context
-                .tokens
-                .get(source_index)
-                .map(|tok_vec| tok_vec.as_slice())
-                .unwrap_or(&[]);
+        }
 
-            match crate::phases::parser::parse_source(source_id, tokens, source_text) {
-                Ok(ast) => {
-                    context.ast[source_index] = Some(ast);
+        if pending_indices.len() >= PARALLEL_FRONTEND_THRESHOLD {
+            let sources = &context.sources;
+            let tokens_slice = &context.tokens;
+            let mut results: Vec<_> = pending_indices
+                .par_iter()
+                .map(|&source_index| {
+                    let source_id = source_index as u16;
+                    let tokens = tokens_slice
+                        .get(source_index)
+                        .map(|tok_vec| tok_vec.as_slice())
+                        .unwrap_or(&[]);
+                    (
+                        source_index,
+                        crate::phases::parser::parse_source(
+                            source_id,
+                            tokens,
+                            &sources[source_index],
+                        ),
+                    )
+                })
+                .collect();
+            results.sort_by_key(|(source_index, _)| *source_index);
+            for (source_index, outcome) in results {
+                let source_id = source_index as u16;
+                match outcome {
+                    Ok(ast) => {
+                        context.ast[source_index] = Some(ast);
+                    }
+                    Err(errors) => {
+                        context.ast[source_index] = None;
+                        for error in errors {
+                            accumulated_diagnostics
+                                .push(CompilationDiagnostic::from(error).with_source_id(source_id));
+                        }
+                    }
                 }
-                Err(errors) => {
-                    context.ast[source_index] = None;
-                    for error in errors {
-                        accumulated_diagnostics
-                            .push(CompilationDiagnostic::from(error).with_source_id(source_id));
+            }
+        } else {
+            for source_index in pending_indices {
+                let source_id = source_index as u16;
+                let tokens = context
+                    .tokens
+                    .get(source_index)
+                    .map(|tok_vec| tok_vec.as_slice())
+                    .unwrap_or(&[]);
+
+                match crate::phases::parser::parse_source(
+                    source_id,
+                    tokens,
+                    &context.sources[source_index],
+                ) {
+                    Ok(ast) => {
+                        context.ast[source_index] = Some(ast);
+                    }
+                    Err(errors) => {
+                        context.ast[source_index] = None;
+                        for error in errors {
+                            accumulated_diagnostics
+                                .push(CompilationDiagnostic::from(error).with_source_id(source_id));
+                        }
                     }
                 }
             }

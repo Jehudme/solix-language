@@ -615,6 +615,166 @@ fn emit_top_level_field(
     ));
 }
 
+/// Magic header identifying lazy-indexed Section-7 AST payloads (`SLXAST01`).
+pub const INDEXED_AST_MAGIC: &[u8; 8] = b"SLXAST01";
+
+/// Minimum declaration count before emitting indexed Section-7 AST payloads.
+const INDEXED_AST_THRESHOLD: usize = 16;
+
+/// Metadata index entry for a single serialized declaration inside an `SLXAST01` payload.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IndexedDeclEntry {
+    /// Simple declaration identifier (empty for constructors/destructors/operators).
+    pub simple_name: String,
+    /// Namespace-qualified declaration identifier.
+    pub qualified_name: String,
+    /// Effective namespace path.
+    pub namespace: String,
+    /// Byte offset inside the concatenated declaration blob buffer.
+    pub byte_offset: u32,
+    /// Byte length of this declaration's bincode payload.
+    pub byte_len: u32,
+    /// True for declarations that cannot be pruned by name (constructors/destructors/operators).
+    pub always_keep: bool,
+    /// Deduplicated identifiers referenced in this declaration's API signature/body.
+    pub referenced_names: Vec<String>,
+}
+
+/// Header for an indexed Section-7 AST payload enabling selective lazy deserialization.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IndexedAstHeader {
+    /// Original source identifier at emission time.
+    pub source_id: u16,
+    /// Overall source coordinate span.
+    pub span: Span,
+    /// Optional package declaration.
+    pub package: Option<crate::phases::parser::statements::PackageStatement>,
+    /// Package imports.
+    pub imports: Vec<crate::phases::parser::statements::ImportStatement>,
+    /// Package type aliases.
+    pub aliases: Vec<crate::phases::parser::statements::AliasStatement>,
+    /// Index of serialized declarations.
+    pub entries: Vec<IndexedDeclEntry>,
+}
+
+fn collect_decl_identifiers(slice: &str, own_name: &str) -> Vec<String> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut identifiers = Vec::new();
+    let bytes = slice.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        let byte = bytes[idx];
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = idx;
+            idx += 1;
+            while idx < bytes.len() && (bytes[idx].is_ascii_alphanumeric() || bytes[idx] == b'_') {
+                idx += 1;
+            }
+            let word = &slice[start..idx];
+            if word != own_name && seen.insert(word) {
+                identifiers.push(word.to_string());
+            }
+        } else {
+            idx += 1;
+        }
+    }
+    identifiers
+}
+
+fn extract_decl_index_names(
+    declaration: &Declaration,
+    source_code: &str,
+) -> (String, String, String, bool) {
+    let (name_span, namespace_path, always_keep) = match declaration {
+        Declaration::Class(class_decl) => (
+            class_decl.name_span,
+            class_decl.namespace_path.as_slice(),
+            false,
+        ),
+        Declaration::Interface(iface_decl) => (
+            iface_decl.name_span,
+            iface_decl.namespace_path.as_slice(),
+            false,
+        ),
+        Declaration::Enum(enum_decl) => (
+            enum_decl.name_span,
+            enum_decl.namespace_path.as_slice(),
+            false,
+        ),
+        Declaration::Method(method_decl) => (
+            method_decl.name_span,
+            method_decl.namespace_path.as_slice(),
+            false,
+        ),
+        Declaration::Field(field_decl) => (
+            field_decl.name_span,
+            field_decl.namespace_path.as_slice(),
+            false,
+        ),
+        Declaration::Constructor(_) | Declaration::Destructor(_) | Declaration::Operator(_) => {
+            return (String::new(), String::new(), String::new(), true);
+        }
+    };
+    let simple_name = get_span_text(name_span, source_code).to_string();
+    let namespace = extract_namespace_path(namespace_path, source_code);
+    let qualified_name = if namespace.is_empty() {
+        simple_name.clone()
+    } else {
+        format!("{namespace}::{simple_name}")
+    };
+    (simple_name, qualified_name, namespace, always_keep)
+}
+
+/// Serializes a `ProgramAst` into `SLXAST01` indexed format when it has `>= 16` declarations.
+#[must_use]
+pub fn encode_indexed_program_ast(
+    program_ast: &crate::phases::parser::statements::ProgramAst,
+    api_header: &str,
+) -> Option<Vec<u8>> {
+    let mut entries = Vec::with_capacity(program_ast.declarations.len());
+    let mut decl_blobs = Vec::new();
+
+    for declaration in &program_ast.declarations {
+        let blob = bincode::serialize(declaration).ok()?;
+        let byte_offset = u32::try_from(decl_blobs.len()).ok()?;
+        let byte_len = u32::try_from(blob.len()).ok()?;
+        decl_blobs.extend_from_slice(&blob);
+
+        let (simple_name, qualified_name, namespace, always_keep) =
+            extract_decl_index_names(declaration, api_header);
+        let decl_slice = get_span_text(declaration.span(), api_header);
+        let referenced_names = collect_decl_identifiers(decl_slice, &simple_name);
+        entries.push(IndexedDeclEntry {
+            simple_name,
+            qualified_name,
+            namespace,
+            byte_offset,
+            byte_len,
+            always_keep,
+            referenced_names,
+        });
+    }
+
+    let header = IndexedAstHeader {
+        source_id: program_ast.source_id,
+        span: program_ast.span,
+        package: program_ast.package.clone(),
+        imports: program_ast.imports.clone(),
+        aliases: program_ast.aliases.clone(),
+        entries,
+    };
+    let header_bytes = bincode::serialize(&header).ok()?;
+    let header_len = u32::try_from(header_bytes.len()).ok()?;
+
+    let mut output =
+        Vec::with_capacity(INDEXED_AST_MAGIC.len() + 4 + header_bytes.len() + decl_blobs.len());
+    output.extend_from_slice(INDEXED_AST_MAGIC);
+    output.extend_from_slice(&header_len.to_le_bytes());
+    output.extend_from_slice(&header_bytes);
+    output.extend_from_slice(&decl_blobs);
+    Some(output)
+}
+
 /// Generates the public API header source string and its pre-parsed serialized AST bytes.
 pub fn generate_api_header_and_ast(context: &CompilationContext) -> (String, Vec<u8>) {
     let api_header = generate_api_header(context);
@@ -628,10 +788,17 @@ pub fn generate_api_header_and_ast(context: &CompilationContext) -> (String, Vec
     }
 
     match crate::phases::parser::parse_source(0, &tokens, &api_header) {
-        Ok(program_ast) => match bincode::serialize(&program_ast) {
-            Ok(ast_bytes) => (api_header, ast_bytes),
-            Err(_) => (api_header, Vec::new()),
-        },
+        Ok(program_ast) => {
+            if program_ast.declarations.len() >= INDEXED_AST_THRESHOLD
+                && let Some(indexed_bytes) = encode_indexed_program_ast(&program_ast, &api_header)
+            {
+                return (api_header, indexed_bytes);
+            }
+            match bincode::serialize(&program_ast) {
+                Ok(ast_bytes) => (api_header, ast_bytes),
+                Err(_) => (api_header, Vec::new()),
+            }
+        }
         Err(_) => (api_header, Vec::new()),
     }
 }

@@ -32,7 +32,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
   - Recognizes language keywords (`class`, `interface`, `while`, `extern`, `weak`, etc.).
   - Distinguishes numeric literals with radices (`0x` hexadecimal, `0b` binary), underscore digit separators (rejecting leading, trailing, consecutive underscores and digitless exponents via `E0014`/`E0015`/`E0017`), and suffixes (`L` for `int64`, `f` for `float32`).
   - Distinguishes unicode character literals (`'a'`, `'\u{1F680}'`) from escaped double-quoted string literals (`"message\n"`).
-  - Accurately tracks 1-based line and column spans and validates checked `u16` source ID limits (`E0018`).
+  - Accurately tracks 1-based line and column spans, validates checked `u16` source ID limits (`E0018`), and parallelizes across pending files (`>= 4` sources) via `rayon` with deterministic `source_id`-ordered diagnostics.
 
 ### 2.2. Syntactic Analysis (`Parser`)
 - **Input**: Token stream (`Vec<Token>`).
@@ -43,7 +43,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
   - Constructs discrete AST declaration nodes (classes, interfaces, enums, fields, constructors, methods), decoding `\xHH` and `\u{H...}` escapes uniformly.
   - Parses structured control flow statements (`while`, `for`, `if`, `switch`, `try-catch-finally`).
   - Supports module statements (`package`, `import`, `extern import`, `alias`).
-  - Recovers across malformed class members and control-flow typos (`E0158`) with stack-allocated fuzzy matching invoked only after confirming a trailing block `{ ... }` (zero heap allocations on valid call statements), and halts with diagnostic parsing errors if syntax is malformed.
+  - Recovers across malformed class members and control-flow typos (`E0158`) with stack-allocated fuzzy matching invoked only after confirming a trailing block `{ ... }` (zero heap allocations on valid call statements), parallelizes across pending files (`>= 4` sources) via `rayon` with deterministic `source_id`-ordered diagnostics, and halts with diagnostic parsing errors if syntax is malformed.
 
 ### 2.3. Semantic Analysis & Type Binding (`Binder`)
 - **Input**: Raw parsed AST.

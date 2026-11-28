@@ -10,7 +10,7 @@ use crate::phases::parser::statements::declarations::{
 use crate::phases::parser::statements::expressions::{Expression, LambdaBody};
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::statements::{BlockStatement, ProgramAst, Statement};
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// Metadata for a single formal parameter.
 #[derive(Clone, Debug)]
@@ -51,12 +51,12 @@ struct NormalizerScopes {
 impl NormalizerScopes {
     fn new() -> Self {
         Self {
-            frames: vec![HashMap::new()],
+            frames: vec![HashMap::default()],
         }
     }
 
     fn push(&mut self) {
-        self.frames.push(HashMap::new());
+        self.frames.push(HashMap::default());
     }
 
     fn pop(&mut self) {
@@ -387,7 +387,7 @@ fn class_or_ancestor_matches(
         return true;
     }
 
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     let mut worklist = vec![target_class.replace('.', "::")];
 
     while let Some(current) = worklist.pop() {
@@ -491,7 +491,7 @@ fn lookup_field_type_in_hierarchy(
     class_name: &str,
     field_name: &str,
 ) -> Option<String> {
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     let mut worklist = vec![class_name.replace('.', "::")];
 
     while let Some(current) = worklist.pop() {
