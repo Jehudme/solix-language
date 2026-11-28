@@ -81,12 +81,14 @@ pub(crate) fn ensure_compiled(
     };
     clif_ctx.func.signature = clif_sig;
 
+    let const_pool = vm.context.get_constant_pool(meta.binary_id);
     let mut fb_ctx = FunctionBuilderContext::new();
     let build_ok = {
         let engine = vm.jit_engine.as_mut()?;
         translate_function(
             &compiled_fn,
             meta.binary_id as u32,
+            const_pool,
             &sig_info,
             clif_func_id,
             &mut clif_ctx.func,
@@ -130,6 +132,7 @@ pub(crate) fn ensure_compiled(
 
 struct InferredFunctionTypes {
     reg_types: Vec<RegType>,
+    raw_reg_types: Vec<Option<RegType>>,
     func_sig: JitFuncSig,
 }
 
@@ -433,6 +436,72 @@ fn infer_signature_and_types(compiled_fn: &CompiledFunction) -> Option<InferredF
                         return None;
                     }
                 }
+                OpCode::EqRef | OpCode::NeqRef | OpCode::EqString | OpCode::NeqString => {
+                    if !set_reg(&mut reg_types, inst.dst(), RegType::I32)
+                        || !set_reg(&mut reg_types, inst.src1(), RegType::Ref)
+                        || !set_reg(&mut reg_types, inst.src2(), RegType::Ref)
+                    {
+                        return None;
+                    }
+                }
+                OpCode::GetField => {
+                    if (inst.flags() & 1) != 0 {
+                        return None;
+                    }
+                    let field_ty = match inst.flags() {
+                        10 | 12 => RegType::I32,
+                        14 | 16 => RegType::I64,
+                        20 => RegType::F64,
+                        24 => RegType::Ref,
+                        _ => return None,
+                    };
+                    if !set_reg(&mut reg_types, inst.dst(), field_ty)
+                        || !set_reg(&mut reg_types, inst.src1(), RegType::Ref)
+                    {
+                        return None;
+                    }
+                }
+                OpCode::SetField => {
+                    let raw_flags = inst.flags();
+                    if (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0 {
+                        return None;
+                    }
+                    let field_tag =
+                        (raw_flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1;
+                    let field_ty = match field_tag {
+                        5 | 6 => RegType::I32,
+                        7 | 8 => RegType::I64,
+                        10 => RegType::F64,
+                        12 => RegType::Ref,
+                        _ => return None,
+                    };
+                    if !set_reg(&mut reg_types, inst.src1(), RegType::Ref)
+                        || !set_reg(&mut reg_types, inst.dst(), field_ty)
+                    {
+                        return None;
+                    }
+                }
+                OpCode::GetArray => {
+                    if !set_reg(&mut reg_types, inst.src1(), RegType::Ref)
+                        || !set_reg(&mut reg_types, inst.src2(), RegType::I32)
+                    {
+                        return None;
+                    }
+                }
+                OpCode::SetArray => {
+                    if !set_reg(&mut reg_types, inst.dst(), RegType::Ref)
+                        || !set_reg(&mut reg_types, inst.src1(), RegType::I32)
+                    {
+                        return None;
+                    }
+                }
+                OpCode::GetArrayJumpIfFalse | OpCode::GetArrayJumpIfTrue => {
+                    if !set_reg(&mut reg_types, inst.dst(), RegType::Ref)
+                        || !set_reg(&mut reg_types, inst.src1(), RegType::I32)
+                    {
+                        return None;
+                    }
+                }
                 OpCode::Return => {
                     has_return = true;
                 }
@@ -447,10 +516,13 @@ fn infer_signature_and_types(compiled_fn: &CompiledFunction) -> Option<InferredF
                         return_type = Some(ty);
                     }
                 }
-                OpCode::CallDirect | OpCode::TailCallDirect => {
+                OpCode::CallDirect
+                | OpCode::TailCallDirect
+                | OpCode::CallNativeDirect
+                | OpCode::CallSymbol => {
                     // Leave return/arg registers flexible unless already constrained.
                 }
-                // Fall back to Tier 0 for opcodes not yet lowered in MVP.
+                // Fall back to Tier 0 for opcodes not yet lowered (e.g. CallVirtual/CallInterface until #357).
                 _ => return None,
             }
         }
@@ -467,16 +539,19 @@ fn infer_signature_and_types(compiled_fn: &CompiledFunction) -> Option<InferredF
     for inst in &compiled_fn.instructions {
         let opcode = OpCode::from_raw_u8(inst.raw_opcode())?;
         match opcode {
-            OpCode::ReturnValue
-                if reg_types
-                    .get(inst.dst() as usize)
-                    .copied()
-                    .flatten()
-                    .is_none() =>
-            {
-                return None;
+            OpCode::ReturnValue => {
+                reg_types.get(inst.dst() as usize).copied().flatten()?;
             }
-            OpCode::CallDirect | OpCode::TailCallDirect => {
+            OpCode::GetArray => {
+                reg_types.get(inst.dst() as usize).copied().flatten()?;
+            }
+            OpCode::SetArray => {
+                reg_types.get(inst.src2() as usize).copied().flatten()?;
+            }
+            OpCode::CallDirect
+            | OpCode::TailCallDirect
+            | OpCode::CallNativeDirect
+            | OpCode::CallSymbol => {
                 let arg_base = inst.arg_base() as usize;
                 let arg_count = inst.arg_count() as usize;
                 if arg_base + arg_count > reg_types.len()
@@ -492,13 +567,14 @@ fn infer_signature_and_types(compiled_fn: &CompiledFunction) -> Option<InferredF
     }
 
     let resolved_regs: Vec<RegType> = reg_types
-        .into_iter()
+        .iter()
         .map(|slot| slot.unwrap_or(RegType::I32))
         .collect();
     let param_types = resolved_regs[..param_count].to_vec();
 
     Some(InferredFunctionTypes {
         reg_types: resolved_regs,
+        raw_reg_types: reg_types,
         func_sig: JitFuncSig {
             param_types,
             return_type,
@@ -506,9 +582,11 @@ fn infer_signature_and_types(compiled_fn: &CompiledFunction) -> Option<InferredF
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn translate_function(
     compiled_fn: &CompiledFunction,
     binary_id: u32,
+    const_pool: Option<&solix_common::bytecode::ConstantPool>,
     types_info: &InferredFunctionTypes,
     self_clif_id: FuncId,
     clif_func: &mut cranelift_codegen::ir::Function,
@@ -550,6 +628,8 @@ fn translate_function(
             | OpCode::JumpIfNeqI32
             | OpCode::JumpIfLtF64
             | OpCode::JumpIfLteF64
+            | OpCode::GetArrayJumpIfFalse
+            | OpCode::GetArrayJumpIfTrue
             | OpCode::ForLoopI32 => {
                 let target = ((pc as i32) + (inst.src2() as i16 as i32)) as usize;
                 block_pcs.push(target);
@@ -622,12 +702,36 @@ fn translate_function(
     let rt_call_slow_ref = engine
         .module
         .declare_func_in_func(engine.rt_symbols.rt_call_slow, builder.func);
+    let rt_call_symbol_slow_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_call_symbol_slow, builder.func);
+    let rt_call_virtual_slow_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_call_virtual_slow, builder.func);
+    let rt_call_interface_slow_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_call_interface_slow, builder.func);
+    let rt_set_field_ref_fn = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_set_field_ref, builder.func);
+    let rt_get_array_slow_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_get_array_slow, builder.func);
+    let rt_set_array_slow_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_set_array_slow, builder.func);
+    let rt_string_eq_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_string_eq, builder.func);
     let rt_trap_null_ref = engine
         .module
         .declare_func_in_func(engine.rt_symbols.rt_trap_null, builder.func);
     let rt_trap_div_zero_ref = engine
         .module
         .declare_func_in_func(engine.rt_symbols.rt_trap_div_zero, builder.func);
+    let rt_trap_oob_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_trap_oob, builder.func);
 
     let mut block_terminated = false;
 
@@ -1288,6 +1392,378 @@ fn translate_function(
                 let val = builder.use_var(vars[inst.dst() as usize]);
                 builder.ins().store(MemFlags::new(), val, ptr, field_off);
             }
+            OpCode::GetField => {
+                let obj = builder.use_var(vars[inst.src1() as usize]);
+                emit_null_check(&mut builder, ctx_ptr, obj, rt_trap_null_ref);
+                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let obj_ext = builder.ins().uextend(ptr_ty, obj);
+                let field_off = inst.src2() as i32;
+                let ptr = builder.ins().iadd(heap_base, obj_ext);
+                match inst.flags() {
+                    10 | 12 => {
+                        let val = builder
+                            .ins()
+                            .load(types::I32, MemFlags::new(), ptr, field_off);
+                        builder.def_var(vars[inst.dst() as usize], val);
+                    }
+                    14 | 16 => {
+                        let val = builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), ptr, field_off);
+                        builder.def_var(vars[inst.dst() as usize], val);
+                    }
+                    20 => {
+                        let val = builder
+                            .ins()
+                            .load(types::F64, MemFlags::new(), ptr, field_off);
+                        builder.def_var(vars[inst.dst() as usize], val);
+                    }
+                    24 => {
+                        let raw = builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), ptr, field_off);
+                        let addr = builder.ins().ireduce(types::I32, raw);
+                        builder.def_var(vars[inst.dst() as usize], addr);
+                    }
+                    _ => return Err(()),
+                }
+            }
+            OpCode::SetField => {
+                let raw_flags = inst.flags();
+                let is_move = (raw_flags & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
+                let field_tag = (raw_flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1;
+                let obj = builder.use_var(vars[inst.src1() as usize]);
+                emit_null_check(&mut builder, ctx_ptr, obj, rt_trap_null_ref);
+                let val = builder.use_var(vars[inst.dst() as usize]);
+                if field_tag == 12 {
+                    let off_val = builder.ins().iconst(types::I32, i64::from(inst.src2()));
+                    let move_val = builder
+                        .ins()
+                        .iconst(types::I8, i64::from(u8::from(is_move)));
+                    builder
+                        .ins()
+                        .call(rt_set_field_ref_fn, &[ctx_ptr, obj, off_val, val, move_val]);
+                    emit_trap_return_check(&mut builder, ctx_ptr);
+                } else {
+                    let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                    let obj_ext = builder.ins().uextend(ptr_ty, obj);
+                    let field_off = inst.src2() as i32;
+                    let ptr = builder.ins().iadd(heap_base, obj_ext);
+                    builder.ins().store(MemFlags::new(), val, ptr, field_off);
+                }
+            }
+            OpCode::EqRef | OpCode::NeqRef => {
+                let lhs = builder.use_var(vars[inst.src1() as usize]);
+                let rhs = builder.use_var(vars[inst.src2() as usize]);
+                let cc = if opcode == OpCode::EqRef {
+                    IntCC::Equal
+                } else {
+                    IntCC::NotEqual
+                };
+                let cmp = builder.ins().icmp(cc, lhs, rhs);
+                let res = builder.ins().uextend(types::I32, cmp);
+                builder.def_var(vars[inst.dst() as usize], res);
+            }
+            OpCode::EqString | OpCode::NeqString => {
+                let lhs = builder.use_var(vars[inst.src1() as usize]);
+                let rhs = builder.use_var(vars[inst.src2() as usize]);
+                let call = builder.ins().call(rt_string_eq_ref, &[ctx_ptr, lhs, rhs]);
+                let eq_byte = builder.inst_results(call)[0];
+                let eq_i32 = builder.ins().uextend(types::I32, eq_byte);
+                let res = if opcode == OpCode::EqString {
+                    eq_i32
+                } else {
+                    builder.ins().bxor_imm(eq_i32, 1)
+                };
+                builder.def_var(vars[inst.dst() as usize], res);
+            }
+            OpCode::ArrayLength => {
+                let arr = builder.use_var(vars[inst.src1() as usize]);
+                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
+                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let arr_ext = builder.ins().uextend(ptr_ty, arr);
+                let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
+                let arr_len = builder.ins().load(types::I32, MemFlags::new(), arr_ptr, 0);
+                builder.def_var(vars[inst.dst() as usize], arr_len);
+            }
+            OpCode::GetArray => {
+                use crate::memory::BlockTag;
+
+                let arr = builder.use_var(vars[inst.src1() as usize]);
+                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
+                let idx_i32 = builder.use_var(vars[inst.src2() as usize]);
+                let idx_i64 = builder.ins().sextend(types::I64, idx_i32);
+                let dst_idx = inst.dst() as usize;
+                let dst_ty = types_info.reg_types[dst_idx];
+
+                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let arr_ext = builder.ins().uextend(ptr_ty, arr);
+                let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
+                let tag_byte = builder.ins().load(types::I8, MemFlags::new(), arr_ptr, -1);
+                let tag_shift = builder.ins().ushr_imm(tag_byte, 4);
+                let tag_nibble = builder.ins().band_imm(tag_shift, 0x0F);
+                let is_arr = builder.ins().icmp_imm(
+                    IntCC::Equal,
+                    tag_nibble,
+                    i64::from(BlockTag::ArrayRef.to_u8()),
+                );
+
+                let arr_blk = builder.create_block();
+                let bounds_ok_blk = builder.create_block();
+                let oob_blk = builder.create_block();
+                let fast_load_blk = builder.create_block();
+                let fast_1b_blk = builder.create_block();
+                let slow_blk = builder.create_block();
+                let merge_blk = builder.create_block();
+                builder.append_block_param(merge_blk, reg_type_to_clif(dst_ty));
+
+                builder.ins().brif(is_arr, arr_blk, &[], slow_blk, &[]);
+
+                builder.switch_to_block(arr_blk);
+                let arr_len = builder.ins().load(types::I32, MemFlags::new(), arr_ptr, 0);
+                let len_i64 = builder.ins().uextend(types::I64, arr_len);
+                let in_bounds = builder
+                    .ins()
+                    .icmp(IntCC::UnsignedLessThan, idx_i64, len_i64);
+                builder
+                    .ins()
+                    .brif(in_bounds, bounds_ok_blk, &[], oob_blk, &[]);
+
+                builder.switch_to_block(oob_blk);
+                builder
+                    .ins()
+                    .call(rt_trap_oob_ref, &[ctx_ptr, idx_i64, len_i64]);
+                let zero_ret = builder.ins().iconst(types::I64, 0);
+                builder.ins().return_(&[zero_ret]);
+
+                builder.switch_to_block(bounds_ok_blk);
+                let elem_sz = builder.ins().load(types::I8, MemFlags::new(), arr_ptr, 4);
+                match dst_ty {
+                    RegType::I32 => {
+                        let is_4b = builder.ins().icmp_imm(IntCC::Equal, elem_sz, 4);
+                        let check_1b_blk = builder.create_block();
+                        builder
+                            .ins()
+                            .brif(is_4b, fast_load_blk, &[], check_1b_blk, &[]);
+                        builder.switch_to_block(check_1b_blk);
+                        let is_1b = builder.ins().icmp_imm(IntCC::Equal, elem_sz, 1);
+                        builder.ins().brif(is_1b, fast_1b_blk, &[], slow_blk, &[]);
+
+                        builder.switch_to_block(fast_load_blk);
+                        let off4 = builder.ins().ishl_imm(idx_i64, 2);
+                        let ptr4 = builder.ins().iadd(arr_ptr, off4);
+                        let val4 = builder.ins().load(types::I32, MemFlags::new(), ptr4, 8);
+                        builder.ins().jump(merge_blk, &[val4]);
+
+                        builder.switch_to_block(fast_1b_blk);
+                        let ptr1 = builder.ins().iadd(arr_ptr, idx_i64);
+                        let val1 = builder.ins().load(types::I8, MemFlags::new(), ptr1, 8);
+                        let val1_i32 = builder.ins().uextend(types::I32, val1);
+                        builder.ins().jump(merge_blk, &[val1_i32]);
+                    }
+                    RegType::I64 | RegType::F64 | RegType::Ref => {
+                        let is_8b = builder.ins().icmp_imm(IntCC::Equal, elem_sz, 8);
+                        builder.ins().brif(is_8b, fast_load_blk, &[], slow_blk, &[]);
+                        builder.switch_to_block(fast_1b_blk);
+                        builder.ins().jump(slow_blk, &[]);
+
+                        builder.switch_to_block(fast_load_blk);
+                        let off8 = builder.ins().ishl_imm(idx_i64, 3);
+                        let ptr8 = builder.ins().iadd(arr_ptr, off8);
+                        let loaded = if dst_ty == RegType::F64 {
+                            builder.ins().load(types::F64, MemFlags::new(), ptr8, 8)
+                        } else if dst_ty == RegType::I64 {
+                            builder.ins().load(types::I64, MemFlags::new(), ptr8, 8)
+                        } else {
+                            let raw = builder.ins().load(types::I64, MemFlags::new(), ptr8, 8);
+                            builder.ins().ireduce(types::I32, raw)
+                        };
+                        builder.ins().jump(merge_blk, &[loaded]);
+                    }
+                }
+
+                builder.switch_to_block(slow_blk);
+                let ty_code_val = builder
+                    .ins()
+                    .iconst(types::I32, i64::from(dst_ty.to_code()));
+                let call = builder
+                    .ins()
+                    .call(rt_get_array_slow_ref, &[ctx_ptr, arr, idx_i64, ty_code_val]);
+                let raw_word = builder.inst_results(call)[0];
+                emit_trap_return_check(&mut builder, ctx_ptr);
+                let typed = decode_raw_word(&mut builder, raw_word, dst_ty);
+                builder.ins().jump(merge_blk, &[typed]);
+
+                builder.switch_to_block(merge_blk);
+                let merged_val = builder.block_params(merge_blk)[0];
+                builder.def_var(vars[dst_idx], merged_val);
+            }
+            OpCode::SetArray => {
+                use crate::memory::BlockTag;
+
+                let arr = builder.use_var(vars[inst.dst() as usize]);
+                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
+                let idx_i32 = builder.use_var(vars[inst.src1() as usize]);
+                let idx_i64 = builder.ins().sextend(types::I64, idx_i32);
+                let src_idx = inst.src2() as usize;
+                let val = builder.use_var(vars[src_idx]);
+                let val_ty = types_info.reg_types[src_idx];
+
+                if val_ty == RegType::Ref {
+                    let raw_val = encode_raw_word(&mut builder, val, val_ty);
+                    let ty_code_val = builder
+                        .ins()
+                        .iconst(types::I32, i64::from(val_ty.to_code()));
+                    let is_move =
+                        (inst.flags() & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
+                    let move_val = builder
+                        .ins()
+                        .iconst(types::I8, i64::from(u8::from(is_move)));
+                    builder.ins().call(
+                        rt_set_array_slow_ref,
+                        &[ctx_ptr, arr, idx_i64, raw_val, ty_code_val, move_val],
+                    );
+                    emit_trap_return_check(&mut builder, ctx_ptr);
+                } else {
+                    let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                    let arr_ext = builder.ins().uextend(ptr_ty, arr);
+                    let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
+                    let tag_byte = builder.ins().load(types::I8, MemFlags::new(), arr_ptr, -1);
+                    let tag_shift = builder.ins().ushr_imm(tag_byte, 4);
+                    let tag_nibble = builder.ins().band_imm(tag_shift, 0x0F);
+                    let is_arr = builder.ins().icmp_imm(
+                        IntCC::Equal,
+                        tag_nibble,
+                        i64::from(BlockTag::ArrayRef.to_u8()),
+                    );
+
+                    let arr_blk = builder.create_block();
+                    let bounds_ok_blk = builder.create_block();
+                    let oob_blk = builder.create_block();
+                    let fast_store_blk = builder.create_block();
+                    let fast_1b_blk = builder.create_block();
+                    let slow_blk = builder.create_block();
+                    let done_blk = builder.create_block();
+
+                    builder.ins().brif(is_arr, arr_blk, &[], slow_blk, &[]);
+
+                    builder.switch_to_block(arr_blk);
+                    let arr_len = builder.ins().load(types::I32, MemFlags::new(), arr_ptr, 0);
+                    let len_i64 = builder.ins().uextend(types::I64, arr_len);
+                    let in_bounds = builder
+                        .ins()
+                        .icmp(IntCC::UnsignedLessThan, idx_i64, len_i64);
+                    builder
+                        .ins()
+                        .brif(in_bounds, bounds_ok_blk, &[], oob_blk, &[]);
+
+                    builder.switch_to_block(oob_blk);
+                    builder
+                        .ins()
+                        .call(rt_trap_oob_ref, &[ctx_ptr, idx_i64, len_i64]);
+                    let zero_ret = builder.ins().iconst(types::I64, 0);
+                    builder.ins().return_(&[zero_ret]);
+
+                    builder.switch_to_block(bounds_ok_blk);
+                    let elem_sz = builder.ins().load(types::I8, MemFlags::new(), arr_ptr, 4);
+                    match val_ty {
+                        RegType::I32 => {
+                            let is_4b = builder.ins().icmp_imm(IntCC::Equal, elem_sz, 4);
+                            let check_1b_blk = builder.create_block();
+                            builder
+                                .ins()
+                                .brif(is_4b, fast_store_blk, &[], check_1b_blk, &[]);
+                            builder.switch_to_block(check_1b_blk);
+                            let is_1b = builder.ins().icmp_imm(IntCC::Equal, elem_sz, 1);
+                            builder.ins().brif(is_1b, fast_1b_blk, &[], slow_blk, &[]);
+
+                            builder.switch_to_block(fast_store_blk);
+                            let off4 = builder.ins().ishl_imm(idx_i64, 2);
+                            let ptr4 = builder.ins().iadd(arr_ptr, off4);
+                            builder.ins().store(MemFlags::new(), val, ptr4, 8);
+                            builder.ins().jump(done_blk, &[]);
+
+                            builder.switch_to_block(fast_1b_blk);
+                            let ptr1 = builder.ins().iadd(arr_ptr, idx_i64);
+                            let byte_val = builder.ins().ireduce(types::I8, val);
+                            builder.ins().store(MemFlags::new(), byte_val, ptr1, 8);
+                            builder.ins().jump(done_blk, &[]);
+                        }
+                        RegType::I64 | RegType::F64 => {
+                            let is_8b = builder.ins().icmp_imm(IntCC::Equal, elem_sz, 8);
+                            builder
+                                .ins()
+                                .brif(is_8b, fast_store_blk, &[], slow_blk, &[]);
+                            builder.switch_to_block(fast_1b_blk);
+                            builder.ins().jump(slow_blk, &[]);
+
+                            builder.switch_to_block(fast_store_blk);
+                            let off8 = builder.ins().ishl_imm(idx_i64, 3);
+                            let ptr8 = builder.ins().iadd(arr_ptr, off8);
+                            builder.ins().store(MemFlags::new(), val, ptr8, 8);
+                            builder.ins().jump(done_blk, &[]);
+                        }
+                        RegType::Ref => {}
+                    }
+
+                    builder.switch_to_block(slow_blk);
+                    let raw_val = encode_raw_word(&mut builder, val, val_ty);
+                    let ty_code_val = builder
+                        .ins()
+                        .iconst(types::I32, i64::from(val_ty.to_code()));
+                    let is_move =
+                        (inst.flags() & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
+                    let move_val = builder
+                        .ins()
+                        .iconst(types::I8, i64::from(u8::from(is_move)));
+                    builder.ins().call(
+                        rt_set_array_slow_ref,
+                        &[ctx_ptr, arr, idx_i64, raw_val, ty_code_val, move_val],
+                    );
+                    emit_trap_return_check(&mut builder, ctx_ptr);
+                    builder.ins().jump(done_blk, &[]);
+
+                    builder.switch_to_block(done_blk);
+                }
+            }
+            OpCode::GetArrayJumpIfFalse | OpCode::GetArrayJumpIfTrue => {
+                let arr = builder.use_var(vars[inst.dst() as usize]);
+                emit_null_check(&mut builder, ctx_ptr, arr, rt_trap_null_ref);
+                let idx_i32 = builder.use_var(vars[inst.src1() as usize]);
+                let idx_i64 = builder.ins().sextend(types::I64, idx_i32);
+                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let arr_ext = builder.ins().uextend(ptr_ty, arr);
+                let arr_ptr = builder.ins().iadd(heap_base, arr_ext);
+                let arr_len = builder.ins().load(types::I32, MemFlags::new(), arr_ptr, 0);
+                let len_i64 = builder.ins().uextend(types::I64, arr_len);
+                let in_bounds = builder
+                    .ins()
+                    .icmp(IntCC::UnsignedLessThan, idx_i64, len_i64);
+                let oob_blk = builder.create_block();
+                let ok_blk = builder.create_block();
+                builder.ins().brif(in_bounds, ok_blk, &[], oob_blk, &[]);
+                builder.switch_to_block(oob_blk);
+                builder
+                    .ins()
+                    .call(rt_trap_oob_ref, &[ctx_ptr, idx_i64, len_i64]);
+                let zero_ret = builder.ins().iconst(types::I64, 0);
+                builder.ins().return_(&[zero_ret]);
+                builder.switch_to_block(ok_blk);
+
+                let elem_ptr = builder.ins().iadd(arr_ptr, idx_i64);
+                let elem_byte = builder.ins().load(types::I8, MemFlags::new(), elem_ptr, 8);
+                let cc = if opcode == OpCode::GetArrayJumpIfFalse {
+                    IntCC::Equal
+                } else {
+                    IntCC::NotEqual
+                };
+                let taken = builder.ins().icmp_imm(cc, elem_byte, 0);
+                let target_pc = ((pc as i32) + (inst.src2() as i16 as i32)) as usize;
+                let target_blk = blocks_by_pc[&target_pc];
+                let next_blk = blocks_by_pc[&(pc + 1)];
+                builder.ins().brif(taken, target_blk, &[], next_blk, &[]);
+                block_terminated = true;
+            }
             OpCode::IncRef => {
                 let addr = builder.use_var(vars[inst.dst() as usize]);
                 builder.ins().call(rt_inc_ref, &[ctx_ptr, addr]);
@@ -1333,65 +1809,131 @@ fn translate_function(
                         builder.def_var(vars[call_dst], typed);
                     }
                 } else {
-                    // Marshal arguments onto stack slot and call `rt_call_slow`.
-                    let args_slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            32,
-                            3,
-                        ));
-                    let out_slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            8,
-                            3,
-                        ));
-                    let mut arg_types_mask: u32 = 0;
-                    for arg_idx in 0..arg_count.min(4) {
-                        let reg_val = builder.use_var(vars[arg_base + arg_idx]);
-                        let reg_ty = types_info.reg_types[arg_base + arg_idx];
-                        arg_types_mask |= reg_ty.to_code() << (arg_idx * 2);
-                        let raw_val = encode_raw_word(&mut builder, reg_val, reg_ty);
-                        builder
-                            .ins()
-                            .stack_store(raw_val, args_slot, (arg_idx * 8) as i32);
-                    }
-                    let ret_type_code = if call_dst < vars.len() {
-                        types_info.reg_types[call_dst].to_code()
-                    } else {
-                        4
-                    };
-                    let args_addr = builder.ins().stack_addr(ptr_ty, args_slot, 0);
-                    let out_addr = builder.ins().stack_addr(ptr_ty, out_slot, 0);
-                    let fid_val = builder.ins().iconst(types::I32, i64::from(target_id));
-                    let cnt_val = builder.ins().iconst(types::I32, arg_count as i64);
-                    let mask_val = builder.ins().iconst(types::I32, i64::from(arg_types_mask));
-                    let ret_ty_val = builder.ins().iconst(types::I32, i64::from(ret_type_code));
-                    let call = builder.ins().call(
+                    let is_dst_used =
+                        is_reg_used_after(&compiled_fn.instructions, pc, call_dst as u16);
+                    emit_slow_call_dispatch(
+                        &mut builder,
                         rt_call_slow_ref,
-                        &[
-                            ctx_ptr, fid_val, args_addr, cnt_val, out_addr, mask_val, ret_ty_val,
-                        ],
+                        ctx_ptr,
+                        ptr_ty,
+                        None,
+                        target_id,
+                        arg_base,
+                        arg_count,
+                        call_dst,
+                        is_dst_used,
+                        opcode == OpCode::TailCallDirect,
+                        &vars,
+                        types_info,
                     );
-                    let trapped = builder.inst_results(call)[0];
-                    let is_trap = builder.ins().icmp_imm(IntCC::NotEqual, trapped, 0);
-                    let trap_blk = builder.create_block();
-                    let ok_blk = builder.create_block();
-                    builder.ins().brif(is_trap, trap_blk, &[], ok_blk, &[]);
-                    builder.switch_to_block(trap_blk);
-                    let zero_ret = builder.ins().iconst(types::I64, 0);
-                    builder.ins().return_(&[zero_ret]);
-                    builder.switch_to_block(ok_blk);
-                    let ret_raw = builder.ins().stack_load(types::I64, out_slot, 0);
                     if opcode == OpCode::TailCallDirect {
-                        builder.ins().return_(&[ret_raw]);
                         block_terminated = true;
-                    } else if call_dst < vars.len() {
-                        let dst_ty = types_info.reg_types[call_dst];
-                        let typed = decode_raw_word(&mut builder, ret_raw, dst_ty);
-                        builder.def_var(vars[call_dst], typed);
                     }
                 }
+            }
+            OpCode::CallNativeDirect => {
+                let target_id = inst.call_target() as u32;
+                let arg_base = inst.arg_base() as usize;
+                let arg_count = inst.arg_count() as usize;
+                let call_dst = inst.call_dst() as usize;
+                let is_dst_used = is_reg_used_after(&compiled_fn.instructions, pc, call_dst as u16);
+                emit_slow_call_dispatch(
+                    &mut builder,
+                    rt_call_slow_ref,
+                    ctx_ptr,
+                    ptr_ty,
+                    None,
+                    target_id,
+                    arg_base,
+                    arg_count,
+                    call_dst,
+                    is_dst_used,
+                    false,
+                    &vars,
+                    types_info,
+                );
+            }
+            OpCode::CallSymbol => {
+                let sym_idx = inst.call_target() as u32;
+                let arg_base = inst.arg_base() as usize;
+                let arg_count = inst.arg_count() as usize;
+                let call_dst = inst.call_dst() as usize;
+                let sym_name = match const_pool.and_then(|pool| pool.get(sym_idx as usize)) {
+                    Some(solix_common::bytecode::ConstantPoolValue::String(text)) => text.as_str(),
+                    _ => "",
+                };
+                if (sym_name == "Math::sqrt" || sym_name == "sqrt")
+                    && arg_count == 1
+                    && types_info.reg_types[arg_base] == RegType::F64
+                    && call_dst < vars.len()
+                    && types_info.reg_types[call_dst] == RegType::F64
+                {
+                    let arg_val = builder.use_var(vars[arg_base]);
+                    let res = builder.ins().sqrt(arg_val);
+                    builder.def_var(vars[call_dst], res);
+                } else {
+                    let is_dst_used =
+                        is_reg_used_after(&compiled_fn.instructions, pc, call_dst as u16);
+                    emit_slow_call_dispatch(
+                        &mut builder,
+                        rt_call_symbol_slow_ref,
+                        ctx_ptr,
+                        ptr_ty,
+                        Some(binary_id),
+                        sym_idx,
+                        arg_base,
+                        arg_count,
+                        call_dst,
+                        is_dst_used,
+                        false,
+                        &vars,
+                        types_info,
+                    );
+                }
+            }
+            OpCode::CallVirtual | OpCode::CallVirtualDirect => {
+                let raw_target = inst.call_target() as u32;
+                let arg_base = inst.arg_base() as usize;
+                let arg_count = inst.arg_count() as usize;
+                let call_dst = inst.call_dst() as usize;
+                let is_dst_used = is_reg_used_after(&compiled_fn.instructions, pc, call_dst as u16);
+                emit_slow_call_dispatch(
+                    &mut builder,
+                    rt_call_virtual_slow_ref,
+                    ctx_ptr,
+                    ptr_ty,
+                    None,
+                    raw_target,
+                    arg_base,
+                    arg_count,
+                    call_dst,
+                    is_dst_used,
+                    false,
+                    &vars,
+                    types_info,
+                );
+            }
+            OpCode::CallInterface => {
+                let target = inst.call_target() as u32;
+                let arg_base = inst.arg_base() as usize;
+                let arg_count = inst.arg_count() as usize;
+                let call_dst = inst.call_dst() as usize;
+                let is_dst_used = is_reg_used_after(&compiled_fn.instructions, pc, call_dst as u16);
+                emit_slow_call_dispatch(
+                    &mut builder,
+                    rt_call_interface_slow_ref,
+                    ctx_ptr,
+                    ptr_ty,
+                    None,
+                    target,
+                    arg_base,
+                    arg_count,
+                    call_dst,
+                    is_dst_used,
+                    false,
+                    &vars,
+                    types_info,
+                );
             }
             OpCode::Return => {
                 let zero_ret = builder.ins().iconst(types::I64, 0);
@@ -1453,9 +1995,185 @@ fn emit_null_check(
     builder.switch_to_block(ok_blk);
 }
 
+fn is_reg_used_after(
+    instructions: &[solix_common::bytecode::Instruction],
+    call_pc: usize,
+    reg: u16,
+) -> bool {
+    let mut saw_branch = false;
+    for inst in instructions.iter().skip(call_pc + 1) {
+        let Some(opcode) = OpCode::from_raw_u8(inst.raw_opcode()) else {
+            return true;
+        };
+        if inst.src1() == reg || inst.src2() == reg {
+            return true;
+        }
+        match opcode {
+            OpCode::ReturnValue
+            | OpCode::JumpIfTrue
+            | OpCode::JumpIfFalse
+            | OpCode::JumpIfI32Imm
+            | OpCode::JumpIfLtI32
+            | OpCode::JumpIfLteI32
+            | OpCode::JumpIfGtI32
+            | OpCode::JumpIfGteI32
+            | OpCode::JumpIfEqI32
+            | OpCode::JumpIfNeqI32
+            | OpCode::JumpIfLtF64
+            | OpCode::JumpIfLteF64
+            | OpCode::ForLoopI32
+            | OpCode::SetField
+            | OpCode::SetFieldI32
+            | OpCode::SetFieldF64
+            | OpCode::SetArray
+            | OpCode::GetArrayJumpIfFalse
+            | OpCode::GetArrayJumpIfTrue
+            | OpCode::IncRef
+            | OpCode::DecRef
+                if inst.dst() == reg =>
+            {
+                return true;
+            }
+            OpCode::MulAddF64 | OpCode::AddBandI32 if u16::from(inst.flags()) == reg => {
+                return true;
+            }
+            OpCode::CallDirect
+            | OpCode::TailCallDirect
+            | OpCode::CallNativeDirect
+            | OpCode::CallSymbol
+            | OpCode::CallVirtual
+            | OpCode::CallVirtualDirect
+            | OpCode::CallInterface => {
+                let base = inst.arg_base();
+                let count = u16::from(inst.arg_count());
+                if reg >= base && reg < base.saturating_add(count) {
+                    return true;
+                }
+                if !saw_branch && inst.call_dst() == reg {
+                    return false;
+                }
+            }
+            OpCode::Jump
+            | OpCode::JumpIfTrue
+            | OpCode::JumpIfFalse
+            | OpCode::JumpIfI32Imm
+            | OpCode::JumpIfLtI32
+            | OpCode::JumpIfLteI32
+            | OpCode::JumpIfGtI32
+            | OpCode::JumpIfGteI32
+            | OpCode::JumpIfEqI32
+            | OpCode::JumpIfNeqI32
+            | OpCode::JumpIfLtF64
+            | OpCode::JumpIfLteF64
+            | OpCode::GetArrayJumpIfFalse
+            | OpCode::GetArrayJumpIfTrue
+            | OpCode::ForLoopI32 => {
+                saw_branch = true;
+            }
+            OpCode::Return | OpCode::ReturnValue if !saw_branch => {
+                return false;
+            }
+            _ if !saw_branch && inst.dst() == reg => {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_slow_call_dispatch(
+    builder: &mut FunctionBuilder<'_>,
+    callee_ref: cranelift_codegen::ir::FuncRef,
+    ctx_ptr: ClifVal,
+    ptr_ty: types::Type,
+    binary_id: Option<u32>,
+    target_id: u32,
+    arg_base: usize,
+    arg_count: usize,
+    call_dst: usize,
+    is_dst_used: bool,
+    is_tail: bool,
+    vars: &[Variable],
+    types_info: &InferredFunctionTypes,
+) {
+    let args_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+        32,
+        3,
+    ));
+    let out_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+        8,
+        3,
+    ));
+    let mut arg_types_mask: u32 = 0;
+    for arg_idx in 0..arg_count.min(4) {
+        let reg_val = builder.use_var(vars[arg_base + arg_idx]);
+        let reg_ty = types_info.reg_types[arg_base + arg_idx];
+        arg_types_mask |= reg_ty.to_code() << (arg_idx * 2);
+        let raw_val = encode_raw_word(builder, reg_val, reg_ty);
+        builder
+            .ins()
+            .stack_store(raw_val, args_slot, (arg_idx * 8) as i32);
+    }
+    let ret_type_code = if is_dst_used && call_dst < vars.len() {
+        types_info
+            .raw_reg_types
+            .get(call_dst)
+            .copied()
+            .flatten()
+            .map_or(4, RegType::to_code)
+    } else {
+        4
+    };
+    let args_addr = builder.ins().stack_addr(ptr_ty, args_slot, 0);
+    let out_addr = builder.ins().stack_addr(ptr_ty, out_slot, 0);
+    let target_val = builder.ins().iconst(types::I32, i64::from(target_id));
+    let cnt_val = builder.ins().iconst(types::I32, arg_count as i64);
+    let mask_val = builder.ins().iconst(types::I32, i64::from(arg_types_mask));
+    let ret_ty_val = builder.ins().iconst(types::I32, i64::from(ret_type_code));
+    let call = if let Some(bin_id) = binary_id {
+        let bin_val = builder.ins().iconst(types::I32, i64::from(bin_id));
+        builder.ins().call(
+            callee_ref,
+            &[
+                ctx_ptr, bin_val, target_val, args_addr, cnt_val, out_addr, mask_val, ret_ty_val,
+            ],
+        )
+    } else {
+        builder.ins().call(
+            callee_ref,
+            &[
+                ctx_ptr, target_val, args_addr, cnt_val, out_addr, mask_val, ret_ty_val,
+            ],
+        )
+    };
+    let trapped = builder.inst_results(call)[0];
+    let is_trap = builder.ins().icmp_imm(IntCC::NotEqual, trapped, 0);
+    let trap_blk = builder.create_block();
+    let ok_blk = builder.create_block();
+    builder.ins().brif(is_trap, trap_blk, &[], ok_blk, &[]);
+    builder.switch_to_block(trap_blk);
+    let zero_ret = builder.ins().iconst(types::I64, 0);
+    builder.ins().return_(&[zero_ret]);
+    builder.switch_to_block(ok_blk);
+    let ret_raw = builder.ins().stack_load(types::I64, out_slot, 0);
+    if is_tail {
+        builder.ins().return_(&[ret_raw]);
+    } else if call_dst < vars.len() {
+        let dst_ty = types_info.reg_types[call_dst];
+        let typed = decode_raw_word(builder, ret_raw, dst_ty);
+        builder.def_var(vars[call_dst], typed);
+    }
+}
+
 fn emit_trap_return_check(builder: &mut FunctionBuilder<'_>, ctx_ptr: ClifVal) {
-    // has_trap is at offset 24 on 64-bit platforms (heap_ptr: 8, heap_len: 8, vm_ptr: 8)
-    let has_trap = builder.ins().load(types::I8, MemFlags::new(), ctx_ptr, 24);
+    let trap_off = std::mem::offset_of!(crate::vm::jit::JitContext, has_trap) as i32;
+    let has_trap = builder
+        .ins()
+        .load(types::I8, MemFlags::new(), ctx_ptr, trap_off);
     let trapped = builder.ins().icmp_imm(IntCC::NotEqual, has_trap, 0);
     let trap_blk = builder.create_block();
     let ok_blk = builder.create_block();

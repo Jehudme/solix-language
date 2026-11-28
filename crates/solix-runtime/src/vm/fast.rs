@@ -2158,7 +2158,7 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn push_purple_candidate_cold(
+    pub(crate) fn push_purple_candidate_cold(
         &mut self,
         addr: u32,
         tag_and_ref_word: u32,
@@ -3682,6 +3682,301 @@ impl VirtualMachine {
         } else {
             self.run_fast_trap::<false, false>(target_depth)
                 .map_err(VmTrap::into_inner)
+        }
+    }
+
+    #[cfg(all(
+        feature = "jit",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(target_family = "wasm")
+    ))]
+    pub(crate) fn jit_resolve_virtual(
+        &self,
+        obj_addr: u32,
+        raw_target: u16,
+    ) -> Result<u32, VmTrap> {
+        if obj_addr == 0 {
+            return Err(VmTrap::null_reference());
+        }
+        let slot = (raw_target & 0x7FFF) as usize;
+        let vtable_id = read_heap_u32_fast(&self.heap.buffer, obj_addr)?;
+        self.context
+            .flat_vtables
+            .get(vtable_id as usize)
+            .and_then(|slots| slots.get(slot))
+            .copied()
+            .ok_or_else(|| self.resolve_virtual_slot_error(vtable_id, slot))
+    }
+
+    #[cfg(all(
+        feature = "jit",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(target_family = "wasm")
+    ))]
+    pub(crate) fn jit_resolve_interface(&self, obj_addr: u32, target: u16) -> Result<u32, VmTrap> {
+        if obj_addr == 0 {
+            return Err(VmTrap::null_reference());
+        }
+        let iface_id = (target >> 8) as usize;
+        let slot = (target & 0xFF) as usize;
+        let vtable_id = read_heap_u32_fast(&self.heap.buffer, obj_addr)?;
+        if iface_id != 0
+            && let Some(func_id) = self
+                .context
+                .flat_itables
+                .get(vtable_id as usize)
+                .and_then(|iface_rows| iface_rows.get(iface_id))
+                .and_then(|slots| slots.get(slot))
+                .copied()
+        {
+            return Ok(func_id);
+        }
+        self.resolve_interface_slot_slow(vtable_id, iface_id as u32, slot)
+    }
+
+    #[cfg(all(
+        feature = "jit",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(target_family = "wasm")
+    ))]
+    pub(crate) fn jit_resolve_symbol_call(
+        &mut self,
+        binary_id: usize,
+        sym_idx: usize,
+        arg_start: usize,
+        arg_count: usize,
+    ) -> Result<Option<u32>, VmTrap> {
+        let sym_str = self
+            .resolve_constant_pool_symbol(binary_id, sym_idx)?
+            .to_owned();
+        let clean_sym = sym_str.split('(').next().unwrap_or(&sym_str);
+        let mangled_sym = clean_sym.replace("::", "_");
+        let simple_sym = clean_sym.rsplit(['.', ':']).next().unwrap_or(clean_sym);
+        let native_candidate = self
+            .native_registry
+            .get(&sym_str)
+            .or_else(|| self.native_registry.get(clean_sym))
+            .or_else(|| self.native_registry.get(&mangled_sym))
+            .or_else(|| self.native_registry.get(simple_sym))
+            .copied();
+
+        if let Some(native_fn) = native_candidate {
+            let call_result = self.invoke_native_callback_fast(native_fn, arg_start, arg_count)?;
+            self.last_return_value = call_result;
+            return Ok(None);
+        }
+
+        let global_id = self
+            .context
+            .symbol_to_function_id
+            .get(&sym_str)
+            .copied()
+            .ok_or_else(|| {
+                let msg = if sym_str.contains("::") || sym_str.contains('_') {
+                    let mangled = sym_str.replace("::", "_");
+                    format!("Call to unknown native function: {mangled}")
+                } else {
+                    format!("Call to unknown native function: {sym_str}")
+                };
+                VmTrap::from_error(RuntimeError::FunctionNotFound { symbol_or_id: msg })
+            })?;
+        Ok(Some(global_id))
+    }
+
+    #[cfg(all(
+        feature = "jit",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(target_family = "wasm")
+    ))]
+    pub(crate) fn jit_set_field_ref(
+        &mut self,
+        obj_addr: u32,
+        offset: usize,
+        new_addr: u32,
+        is_move: bool,
+    ) -> Result<(), VmTrap> {
+        if obj_addr == 0 {
+            return Err(VmTrap::null_reference());
+        }
+        let new_val = if new_addr == 0 {
+            Value::Null
+        } else {
+            Value::Ref(new_addr)
+        };
+        let raw_flags = if is_move {
+            (12 << 1) | solix_common::bytecode::instruction::FLAG_MOVE
+        } else {
+            12 << 1
+        };
+        self.execute_set_field_slow(obj_addr, offset, raw_flags, new_val, 0)?;
+        Ok(())
+    }
+
+    #[cfg(all(
+        feature = "jit",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(target_family = "wasm")
+    ))]
+    pub(crate) fn jit_get_array_slow(
+        &mut self,
+        arr_addr: u32,
+        index_i64: i64,
+    ) -> Result<Value, VmTrap> {
+        let arr_offset = arr_addr as usize;
+        if arr_offset < 8 || arr_offset + 8 > self.heap.buffer.len() {
+            return Err(VmTrap::null_reference());
+        }
+        let header = self
+            .heap
+            .read_header(arr_addr)
+            .map_err(VmTrap::from_error)?;
+        if header.tag == BlockTag::Tuple {
+            let elem_count = (header.size as usize) / 8;
+            if index_i64 < 0 || (index_i64 as usize) >= elem_count {
+                return Err(VmTrap::index_out_of_bounds(index_i64, elem_count));
+            }
+            let raw = self
+                .heap
+                .read_u64(arr_addr + (index_i64 as u32) * 8)
+                .map_err(VmTrap::from_error)?;
+            return Ok(Value::from_raw_u64(raw));
+        }
+        if header.tag != BlockTag::ArrayRef {
+            return Err(VmTrap::type_mismatch("array", &Value::Ref(arr_addr)));
+        }
+        let arr_len = self.heap.read_u32(arr_addr).map_err(VmTrap::from_error)? as usize;
+        if index_i64 < 0 || (index_i64 as usize) >= arr_len {
+            return Err(VmTrap::index_out_of_bounds(index_i64, arr_len));
+        }
+        let elem_size = self
+            .heap
+            .read_u8(arr_addr + 4)
+            .map_err(VmTrap::from_error)? as usize;
+        let type_tag = self
+            .heap
+            .read_u8(arr_addr + 7)
+            .map_err(VmTrap::from_error)?;
+        let elem_addr = arr_addr + 8 + ((index_i64 as usize) * elem_size) as u32;
+        match (elem_size, type_tag) {
+            (1, 11) => Ok(Value::Bool(
+                self.heap.read_u8(elem_addr).map_err(VmTrap::from_error)? != 0,
+            )),
+            (1, _) => Ok(Value::I32(i32::from(
+                self.heap.read_u8(elem_addr).map_err(VmTrap::from_error)? as i8,
+            ))),
+            (4, _) => Ok(Value::I32(
+                self.heap.read_u32(elem_addr).map_err(VmTrap::from_error)? as i32,
+            )),
+            (8, 10) => Ok(Value::F64(f64::from_bits(
+                self.heap.read_u64(elem_addr).map_err(VmTrap::from_error)?,
+            ))),
+            (8, tag) if tag >= 13 || tag == 0 => {
+                let raw = self.heap.read_u64(elem_addr).map_err(VmTrap::from_error)?;
+                if raw == 0 || raw == Value::TAG_NULL {
+                    Ok(Value::Null)
+                } else {
+                    Ok(Value::Ref(raw as u32))
+                }
+            }
+            (8, _) => Ok(Value::I64(
+                self.heap.read_u64(elem_addr).map_err(VmTrap::from_error)? as i64,
+            )),
+            _ => Err(VmTrap::type_mismatch("array element", &Value::Null)),
+        }
+    }
+
+    #[cfg(all(
+        feature = "jit",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(target_family = "wasm")
+    ))]
+    pub(crate) fn jit_set_array_slow(
+        &mut self,
+        arr_addr: u32,
+        index_i64: i64,
+        val: Value,
+        is_move: bool,
+    ) -> Result<(), VmTrap> {
+        let arr_offset = arr_addr as usize;
+        if arr_offset < 8 || arr_offset + 8 > self.heap.buffer.len() {
+            return Err(VmTrap::null_reference());
+        }
+        let header = self
+            .heap
+            .read_header(arr_addr)
+            .map_err(VmTrap::from_error)?;
+        if header.tag != BlockTag::ArrayRef {
+            return Err(VmTrap::type_mismatch("array", &Value::Ref(arr_addr)));
+        }
+        let arr_len = self.heap.read_u32(arr_addr).map_err(VmTrap::from_error)? as usize;
+        if index_i64 < 0 || (index_i64 as usize) >= arr_len {
+            return Err(VmTrap::index_out_of_bounds(index_i64, arr_len));
+        }
+        let elem_size = self
+            .heap
+            .read_u8(arr_addr + 4)
+            .map_err(VmTrap::from_error)? as usize;
+        let type_tag = self
+            .heap
+            .read_u8(arr_addr + 7)
+            .map_err(VmTrap::from_error)?;
+        let elem_addr = arr_addr + 8 + ((index_i64 as usize) * elem_size) as u32;
+        if type_tag >= 13 && elem_size == 8 {
+            let old_raw = self.heap.read_u64(elem_addr).map_err(VmTrap::from_error)?;
+            let new_raw = match val {
+                Value::Null => 0,
+                Value::Ref(addr) => u64::from(addr),
+                _ => return Err(VmTrap::type_mismatch("ref", &val)),
+            };
+            self.heap
+                .write_u64(elem_addr, new_raw)
+                .map_err(VmTrap::from_error)?;
+            if !is_move
+                && let Value::Ref(new_addr) = val
+                && new_addr > 0
+            {
+                inc_ref_inline(&mut self.heap, new_addr, self.cycle_collector_enabled)?;
+            }
+            if old_raw != 0 && old_raw != Value::TAG_NULL {
+                let old_addr = old_raw as u32;
+                if old_addr > 0 {
+                    let old_header = self
+                        .heap
+                        .read_header(old_addr)
+                        .map_err(VmTrap::from_error)?;
+                    if old_header.ref_count > 1
+                        && old_header.ref_count < crate::memory::MAX_REF_COUNT
+                    {
+                        let mut updated = old_header;
+                        updated.ref_count -= 1;
+                        self.heap
+                            .write_header(old_addr, updated)
+                            .map_err(VmTrap::from_error)?;
+                    } else if old_header.ref_count == 1 {
+                        self.release_reference_cold(old_addr)?;
+                    }
+                }
+            }
+            return Ok(());
+        }
+        match elem_size {
+            1 => self
+                .heap
+                .write_u8(elem_addr, read_i32_fast(&val)? as u8)
+                .map_err(VmTrap::from_error),
+            4 => self
+                .heap
+                .write_u32(elem_addr, read_i32_fast(&val)? as u32)
+                .map_err(VmTrap::from_error),
+            8 if type_tag == 10 => self
+                .heap
+                .write_u64(elem_addr, read_f64_fast(&val)?.to_bits())
+                .map_err(VmTrap::from_error),
+            8 => self
+                .heap
+                .write_u64(elem_addr, read_i64_fast(&val)? as u64)
+                .map_err(VmTrap::from_error),
+            _ => Err(VmTrap::type_mismatch("array element", &val)),
         }
     }
 
