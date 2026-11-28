@@ -18,7 +18,7 @@ profiles:
       - all
     dependencies:
       raylib:
-        version: "6.0.1"
+        version: "6.1.0"
         profile: release
       solix:
         version: "2.2.1"
@@ -36,7 +36,7 @@ profiles:
       - host
     dependencies:
       raylib:
-        version: "6.0.1"
+        version: "6.1.0"
         profile: release
       solix:
         version: "2.2.1"
@@ -55,7 +55,7 @@ profiles:
       - host
     dependencies:
       raylib:
-        version: "6.0.1"
+        version: "6.1.0"
         profile: release
       solix:
         version: "2.2.1"
