@@ -84,6 +84,7 @@ pub struct JitContext {
     pub jit_alloc_count: u64,
     pub jit_alloc_bytes: usize,
     pub has_trap: u8,
+    pub cycle_collector_enabled: u8,
     pub(crate) pending_trap: Option<VmTrap>,
 }
 
@@ -100,6 +101,7 @@ impl JitContext {
             jit_alloc_count: 0,
             jit_alloc_bytes: 0,
             has_trap: 0,
+            cycle_collector_enabled: u8::from(vm.cycle_collector_enabled),
             pending_trap: None,
         };
         ctx.refresh_heap(vm);
