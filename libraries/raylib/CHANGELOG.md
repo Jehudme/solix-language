@@ -2,6 +2,12 @@
 
 All notable changes to this Solix package are documented in this file.
 
+## [6.1.0] - 2026-11-28
+
+### Features
+
+- *(raylib)* Emit typedef aliases and add rlgl/raymath API bindings (#324, #325) (#331)
+
 ## [6.0.1] - 2026-11-27
 
 ### Bug Fixes

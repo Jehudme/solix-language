@@ -2,6 +2,45 @@
 
 All notable changes to the Solix C/C++ FFI SDK (`solix::ffi`) will be documented in this file.
 
+## [3.2.0] - 2026-11-28
+
+### Bug Fixes
+
+- *(jit)* Add --jit to command wiki and guard untyped JIT regs (#362)
+- *(vscode)* Use shell-aware terminal command chaining for PowerShell, cmd, and POSIX (#323) (#330)
+- *(toolchain,common)* Align solix add version constraints and stale cwd diagnostics (#326) (#329)
+- *(compiler)* Relocate constant pool indices for f64 immediate opcodes in StaticLinker (#327) (#328)
+
+### Documentation
+
+- *(guide)* Add in-memory compilation and runtime embedding guide for Rust (#368)
+- *(docs)* Comprehensive documentation audit and drift fixes (#339)
+
+### Features
+
+- *(ci)* Implement staged selective pipeline, auto-recompilation recovery, and benchmark modernization (#370)
+- *(jit)* Cranelift JIT MVP (#353) (#360)
+- *(raylib)* Emit typedef aliases and add rlgl/raymath API bindings (#324, #325) (#331)
+
+### Performance
+
+- *(jit)* Hoist heap_ptr and cache per-block non-null/heap_base checks (#367)
+- *(jit)* Inline monomorphic vtable guard and native indirect dispatch (#357) (#366)
+- *(jit)* Inline IncRef/DecRef ARC fast-path in Cranelift IR (#355) (#365)
+- *(jit)* CFG-aware multi-type VarTable, const-pool inlining, fast ModI32Imm/EqString, and self-tail-call loops (#364)
+- *(jit)* Stabilize JIT opcode coverage, inline GetArray/SetArray, and fix cycle collector/trap offset (#363)
+- *(jit)* Inline AllocObject and AllocArray bump allocation (#354) (#361)
+- *(bench)* Scale up all 16 benchmark workloads for steady-state JIT benchmarking (#352) (#359)
+- *(compiler)* Lazy SLXAST01 AST deserialization, parallel Lexer/Parser, and FxHashMap (#341) (#351)
+- *(runtime)* Elide redundant bump zero-fills and replace BTreeSet in FreeListManager (Part of #343) (#350)
+- *(runtime,compiler,toolchain)* Fix dev benchmark regressions (remove mimalloc, revert const_pool_ptr, gate rayon) (#349)
+- *(compiler,common)* Fast-path dependency cache, manifest-only decoding, and static-mode hash skipping (#332) (#335)
+- *(compiler)* Parallelize bytecode optimizer and prune wildcard dependency ASTs (#336)
+- *(toolchain)* Fast Stored .slxp for debug/test, mimalloc allocator, and fast manifest lookup (#337)
+- *(compiler)* Use SmallVec, buffer reuse, and register bitsets in bytecode optimizer (#345)
+- *(common)* Add sidecar metadata cache for .slxp extract_and_load (#346)
+- *(runtime)* Cache const_pool_ptr and use flat inline-cache slots in VM dispatch (#347)
+
 ## [3.1.1] - 2026-11-27
 
 ### Bug Fixes
