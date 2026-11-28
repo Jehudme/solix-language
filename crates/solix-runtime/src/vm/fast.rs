@@ -3683,8 +3683,6 @@ impl VirtualMachine {
         let mut reg_base: *mut Value;
         let mut current_binary_id: usize;
         let mut current_static_base: u32;
-        let mut const_pool_ptr: *const Value;
-        let mut const_pool_len: usize;
         let mut local_inst_count: u64 = 0;
 
         macro_rules! reload_frame {
@@ -3692,13 +3690,6 @@ impl VirtualMachine {
                 let curr = self.current_frame_fast()?;
                 inst_ptr = curr.inst_ptr;
                 current_binary_id = curr.binary_id as usize;
-                if let Some(pool_slice) = self.const_pool_cache.get(current_binary_id) {
-                    const_pool_ptr = pool_slice.as_ptr();
-                    const_pool_len = pool_slice.len();
-                } else {
-                    const_pool_ptr = std::ptr::null();
-                    const_pool_len = 0;
-                }
                 current_static_base = self.func_code[curr.function_id as usize].static_base_offset;
                 if SINGLE_STEP {
                     inst_len = self.func_code[curr.function_id as usize].inst_len;
@@ -3747,13 +3738,6 @@ impl VirtualMachine {
                 let caller_frame = self.current_frame_fast()?;
                 inst_ptr = caller_frame.inst_ptr;
                 current_binary_id = caller_frame.binary_id as usize;
-                if let Some(pool_slice) = self.const_pool_cache.get(current_binary_id) {
-                    const_pool_ptr = pool_slice.as_ptr();
-                    const_pool_len = pool_slice.len();
-                } else {
-                    const_pool_ptr = std::ptr::null();
-                    const_pool_len = 0;
-                }
                 current_static_base = self.func_code[caller_frame.function_id as usize].static_base_offset;
                 if SINGLE_STEP {
                     inst_len = self.func_code[caller_frame.function_id as usize].inst_len;
@@ -3839,12 +3823,7 @@ impl VirtualMachine {
 
                     OpCode::LoadF64 => {
                         let idx = inst.imm32() as usize;
-                        let val = if idx < const_pool_len {
-                            // SAFETY: idx < const_pool_len guarantees in-bounds read from cached constant pool
-                            unsafe { *const_pool_ptr.add(idx) }
-                        } else {
-                            self.const_pool_cache[current_binary_id][idx]
-                        };
+                        let val = self.const_pool_cache[current_binary_id][idx];
                         // SAFETY: Destination register is within frame window
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = val;
@@ -3853,12 +3832,7 @@ impl VirtualMachine {
 
                     OpCode::LoadConst => {
                         let pool_idx = inst.imm32() as usize;
-                        let const_val = if pool_idx < const_pool_len {
-                            // SAFETY: pool_idx < const_pool_len guarantees in-bounds read from cached constant pool
-                            unsafe { *const_pool_ptr.add(pool_idx) }
-                        } else {
-                            self.const_pool_cache[current_binary_id][pool_idx]
-                        };
+                        let const_val = self.const_pool_cache[current_binary_id][pool_idx];
                         // SAFETY: Destination register is within frame window
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = const_val;
@@ -6053,12 +6027,7 @@ impl VirtualMachine {
 
                     OpCode::AddF64Imm => {
                         let const_index = inst.src2() as usize;
-                        let const_val = if const_index < const_pool_len {
-                            // SAFETY: const_index < const_pool_len guarantees in-bounds read from cached constant pool
-                            unsafe { *const_pool_ptr.add(const_index) }
-                        } else {
-                            self.const_pool_cache[current_binary_id][const_index]
-                        };
+                        let const_val = self.const_pool_cache[current_binary_id][const_index];
                         let const_num = match const_val {
                             Value::F64(num) => num,
                             _ => read_f64_fast(&const_val)?,
@@ -6076,12 +6045,7 @@ impl VirtualMachine {
 
                     OpCode::SubF64Imm => {
                         let const_index = inst.src2() as usize;
-                        let const_val = if const_index < const_pool_len {
-                            // SAFETY: const_index < const_pool_len guarantees in-bounds read from cached constant pool
-                            unsafe { *const_pool_ptr.add(const_index) }
-                        } else {
-                            self.const_pool_cache[current_binary_id][const_index]
-                        };
+                        let const_val = self.const_pool_cache[current_binary_id][const_index];
                         let const_num = match const_val {
                             Value::F64(num) => num,
                             _ => read_f64_fast(&const_val)?,
@@ -6099,12 +6063,7 @@ impl VirtualMachine {
 
                     OpCode::MulF64Imm => {
                         let const_index = inst.src2() as usize;
-                        let const_val = if const_index < const_pool_len {
-                            // SAFETY: const_index < const_pool_len guarantees in-bounds read from cached constant pool
-                            unsafe { *const_pool_ptr.add(const_index) }
-                        } else {
-                            self.const_pool_cache[current_binary_id][const_index]
-                        };
+                        let const_val = self.const_pool_cache[current_binary_id][const_index];
                         let const_num = match const_val {
                             Value::F64(num) => num,
                             _ => read_f64_fast(&const_val)?,
