@@ -21,6 +21,7 @@ Welcome to the Solix developer guides. These documents are written for developer
 | 11 | [`editors_vscode.md`](editors_vscode.md) | Visual Studio Code syntax highlighting, Language Server Protocol (`solix-lsp`), configuration |
 | 12 | [`release.md`](release.md) | Automated build pipelines, cross-compilation, packaging, and release automation |
 | 13 | [`build_system.md`](build_system.md) | Pure-Rust `solix build` architecture, `manifest.yaml` profiles/hooks/natives, and cross-compilation |
+| 14 | [`embedding_rust_api.md`](embedding_rust_api.md) | In-memory compilation and VM embedding guide using `solix-compilation` and `solix-runtime` Rust APIs |
 
 ---
 
