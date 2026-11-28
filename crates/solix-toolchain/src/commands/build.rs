@@ -368,8 +368,18 @@ fn execute_declarative_build(
     if output_slxarc.exists() {
         let _ = fs::remove_file(&output_slxarc);
     }
-    solix_common::project::SlxpPackage::pack_directory(&stage_dir, &output_slxp)
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let compression_method = if resolved_profile.name == "debug" || resolved_profile.name == "test"
+    {
+        zip::CompressionMethod::Stored
+    } else {
+        zip::CompressionMethod::Deflated
+    };
+    solix_common::project::SlxpPackage::pack_directory_with_compression(
+        &stage_dir,
+        &output_slxp,
+        compression_method,
+    )
+    .map_err(|error| anyhow::anyhow!("{error}"))?;
     let _ = fs::copy(&output_slxp, &output_slxarc);
 
     println!("  [package] Emitted package: {}", output_slxp.display());
