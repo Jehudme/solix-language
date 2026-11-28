@@ -588,6 +588,9 @@ fn translate_function(
     let rt_alloc_obj_ref = engine
         .module
         .declare_func_in_func(engine.rt_symbols.rt_alloc_object, builder.func);
+    let rt_alloc_arr_ref = engine
+        .module
+        .declare_func_in_func(engine.rt_symbols.rt_alloc_array, builder.func);
     let rt_inc_ref = engine
         .module
         .declare_func_in_func(engine.rt_symbols.rt_inc_ref, builder.func);
@@ -1023,6 +1026,85 @@ fn translate_function(
                 block_terminated = true;
             }
             OpCode::AllocObject => {
+                use crate::memory::{BlockHeader, BlockTag};
+                use crate::vm::jit::JitContext;
+
+                let payload_size = inst.src2() as usize;
+                let aligned_payload = ((payload_size + 7) & !7).max(8);
+                let required_block = 8 + aligned_payload;
+                let tag = if inst.is_pod() {
+                    BlockTag::ObjectPod
+                } else {
+                    BlockTag::Object
+                };
+                let header_u64 =
+                    u64::from_le_bytes(BlockHeader::new(payload_size as u32, tag, 1).to_bytes());
+
+                let cursor_off = std::mem::offset_of!(JitContext, bump_cursor) as i32;
+                let limit_off = std::mem::offset_of!(JitContext, bump_limit) as i32;
+                let static_off = std::mem::offset_of!(JitContext, static_size) as i32;
+                let heap_off = std::mem::offset_of!(JitContext, heap_ptr) as i32;
+                let count_off = std::mem::offset_of!(JitContext, jit_alloc_count) as i32;
+                let bytes_off = std::mem::offset_of!(JitContext, jit_alloc_bytes) as i32;
+
+                let cursor = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, cursor_off);
+                let limit = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, limit_off);
+                let new_cursor = builder.ins().iadd_imm(cursor, required_block as i64);
+                let fits = builder
+                    .ins()
+                    .icmp(IntCC::UnsignedLessThanOrEqual, new_cursor, limit);
+
+                let fast_blk = builder.create_block();
+                let slow_blk = builder.create_block();
+                let merge_blk = builder.create_block();
+                builder.append_block_param(merge_blk, types::I32);
+                builder.ins().brif(fits, fast_blk, &[], slow_blk, &[]);
+
+                builder.switch_to_block(fast_blk);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), new_cursor, ctx_ptr, cursor_off);
+                let cur_cnt = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, count_off);
+                let new_cnt = builder.ins().iadd_imm(cur_cnt, 1);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), new_cnt, ctx_ptr, count_off);
+                let cur_bytes = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, bytes_off);
+                let new_bytes = builder.ins().iadd_imm(cur_bytes, required_block as i64);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), new_bytes, ctx_ptr, bytes_off);
+
+                let static_sz =
+                    builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), ctx_ptr, static_off);
+                let block_abs = builder.ins().iadd(static_sz, cursor);
+                let heap_base = builder
+                    .ins()
+                    .load(ptr_ty, MemFlags::new(), ctx_ptr, heap_off);
+                let block_ptr = builder.ins().iadd(heap_base, block_abs);
+                let hdr_const = builder.ins().iconst(types::I64, header_u64 as i64);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), hdr_const, block_ptr, 0);
+                let vtable_const = builder.ins().iconst(types::I32, i64::from(inst.src1()));
+                builder
+                    .ins()
+                    .store(MemFlags::new(), vtable_const, block_ptr, 8);
+                let payload_abs = builder.ins().iadd_imm(block_abs, 8);
+                let payload_i32 = builder.ins().ireduce(types::I32, payload_abs);
+                builder.ins().jump(merge_blk, &[payload_i32]);
+
+                builder.switch_to_block(slow_blk);
                 let vtable = builder.ins().iconst(types::I32, i64::from(inst.src1()));
                 let size = builder.ins().iconst(types::I32, i64::from(inst.src2()));
                 let is_pod = builder
@@ -1031,9 +1113,133 @@ fn translate_function(
                 let call = builder
                     .ins()
                     .call(rt_alloc_obj_ref, &[ctx_ptr, vtable, size, is_pod]);
-                let addr = builder.inst_results(call)[0];
-                builder.def_var(vars[inst.dst() as usize], addr);
+                let slow_addr = builder.inst_results(call)[0];
                 emit_trap_return_check(&mut builder, ctx_ptr);
+                builder.ins().jump(merge_blk, &[slow_addr]);
+
+                builder.switch_to_block(merge_blk);
+                let merged_addr = builder.block_params(merge_blk)[0];
+                builder.def_var(vars[inst.dst() as usize], merged_addr);
+            }
+            OpCode::AllocArray => {
+                use crate::memory::{BlockTag, GcColor};
+                use crate::vm::jit::JitContext;
+
+                let raw_len = builder.use_var(vars[inst.src1() as usize]);
+                let type_tag = inst.flags();
+                let (elem_size, vtable_id) = if type_tag >= 0x80 {
+                    (8usize, inst.src2())
+                } else {
+                    ((inst.src2() as usize).max(1), 0u16)
+                };
+
+                let non_neg = builder
+                    .ins()
+                    .icmp_imm(IntCC::SignedGreaterThanOrEqual, raw_len, 0);
+                let len_i64 = builder.ins().uextend(types::I64, raw_len);
+                let elem_bytes = builder.ins().imul_imm(len_i64, elem_size as i64);
+                let payload_size = builder.ins().iadd_imm(elem_bytes, 8);
+                let aligned_plus = builder.ins().iadd_imm(payload_size, 7);
+                let aligned_payload = builder.ins().band_imm(aligned_plus, -8);
+                let required_block = builder.ins().iadd_imm(aligned_payload, 8);
+
+                let cursor_off = std::mem::offset_of!(JitContext, bump_cursor) as i32;
+                let limit_off = std::mem::offset_of!(JitContext, bump_limit) as i32;
+                let static_off = std::mem::offset_of!(JitContext, static_size) as i32;
+                let heap_off = std::mem::offset_of!(JitContext, heap_ptr) as i32;
+                let count_off = std::mem::offset_of!(JitContext, jit_alloc_count) as i32;
+                let bytes_off = std::mem::offset_of!(JitContext, jit_alloc_bytes) as i32;
+
+                let cursor = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, cursor_off);
+                let limit = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, limit_off);
+                let new_cursor = builder.ins().iadd(cursor, required_block);
+                let fits_bump =
+                    builder
+                        .ins()
+                        .icmp(IntCC::UnsignedLessThanOrEqual, new_cursor, limit);
+                let fits_len = builder.ins().icmp_imm(
+                    IntCC::UnsignedLessThanOrEqual,
+                    payload_size,
+                    i64::from(u32::MAX),
+                );
+                let can_fast_step1 = builder.ins().band(non_neg, fits_bump);
+                let can_fast = builder.ins().band(can_fast_step1, fits_len);
+
+                let fast_blk = builder.create_block();
+                let slow_blk = builder.create_block();
+                let merge_blk = builder.create_block();
+                builder.append_block_param(merge_blk, types::I32);
+                builder.ins().brif(can_fast, fast_blk, &[], slow_blk, &[]);
+
+                builder.switch_to_block(fast_blk);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), new_cursor, ctx_ptr, cursor_off);
+                let cur_cnt = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, count_off);
+                let new_cnt = builder.ins().iadd_imm(cur_cnt, 1);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), new_cnt, ctx_ptr, count_off);
+                let cur_bytes = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), ctx_ptr, bytes_off);
+                let new_bytes = builder.ins().iadd(cur_bytes, required_block);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), new_bytes, ctx_ptr, bytes_off);
+
+                let static_sz =
+                    builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), ctx_ptr, static_off);
+                let block_abs = builder.ins().iadd(static_sz, cursor);
+                let heap_base = builder
+                    .ins()
+                    .load(ptr_ty, MemFlags::new(), ctx_ptr, heap_off);
+                let block_ptr = builder.ins().iadd(heap_base, block_abs);
+
+                let payload_size_i32 = builder.ins().ireduce(types::I32, payload_size);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), payload_size_i32, block_ptr, 0);
+                let tag_and_ref_u32: u32 = ((u32::from(BlockTag::ArrayRef.to_u8()) & 0x0F) << 28)
+                    | ((u32::from(GcColor::Black.to_u8()) & 0x03) << 26)
+                    | 1;
+                let tag_and_ref = builder.ins().iconst(types::I32, i64::from(tag_and_ref_u32));
+                builder
+                    .ins()
+                    .store(MemFlags::new(), tag_and_ref, block_ptr, 4);
+                builder.ins().store(MemFlags::new(), raw_len, block_ptr, 8);
+                let meta2_u32: u32 =
+                    (elem_size as u32) | (u32::from(vtable_id) << 8) | (u32::from(type_tag) << 24);
+                let meta2 = builder.ins().iconst(types::I32, i64::from(meta2_u32));
+                builder.ins().store(MemFlags::new(), meta2, block_ptr, 12);
+
+                let payload_abs = builder.ins().iadd_imm(block_abs, 8);
+                let payload_i32 = builder.ins().ireduce(types::I32, payload_abs);
+                builder.ins().jump(merge_blk, &[payload_i32]);
+
+                builder.switch_to_block(slow_blk);
+                let elem_sz_val = builder.ins().iconst(types::I32, elem_size as i64);
+                let type_tag_val = builder.ins().iconst(types::I32, i64::from(type_tag));
+                let vtable_val = builder.ins().iconst(types::I32, i64::from(vtable_id));
+                let call = builder.ins().call(
+                    rt_alloc_arr_ref,
+                    &[ctx_ptr, raw_len, elem_sz_val, type_tag_val, vtable_val],
+                );
+                let slow_addr = builder.inst_results(call)[0];
+                emit_trap_return_check(&mut builder, ctx_ptr);
+                builder.ins().jump(merge_blk, &[slow_addr]);
+
+                builder.switch_to_block(merge_blk);
+                let merged_addr = builder.block_params(merge_blk)[0];
+                builder.def_var(vars[inst.dst() as usize], merged_addr);
             }
             OpCode::GetFieldI32 | OpCode::GetFieldF64 => {
                 let obj = builder.use_var(vars[inst.src1() as usize]);

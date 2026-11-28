@@ -94,6 +94,7 @@ When an object's reference counter drops to zero, the runtime does not leak memo
 2. The deallocated memory block is coalesced with adjacent free blocks in physical memory.
 3. The coalesced block is returned to 32 power-of-two segregated size-class bins (`size_bins` indexed by a `u32` `non_empty_bins` bitmask) within `FreeListManager` ([`crates/solix-runtime/src/memory/deallocator.rs`](../../crates/solix-runtime/src/memory/deallocator.rs)), avoiding per-size `BTreeSet` heap allocations.
 4. Subsequent allocations match against `quick_lists` (<= 256B), the monotonic bump allocator (skipping redundant zero-fills above `high_water_zeroed`), or `FreeListManager` via `trailing_zeros()` bitmask lookup for $O(1)$ memory reuse.
+5. In Cranelift JIT execution (`vm::jit`), `JitContext` caches `static_size`, `bump_cursor`, and committed zeroed `bump_limit` so `AllocObject` and `AllocArray` allocate fresh blocks inline without an FFI call, reconciling `jit_alloc_count` and `jit_alloc_bytes` back into `VirtualHeap::commit_jit_bump` on slow-path fallbacks and JIT exit.
 
 ---
 
