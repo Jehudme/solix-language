@@ -3053,12 +3053,118 @@ fn translate_function(
                 block_terminated = true;
             }
             OpCode::IncRef => {
+                use crate::memory::MAX_REF_COUNT;
+
                 let addr = builder.use_var(vars.get(inst.dst(), RegType::Ref));
+                let is_null = builder.ins().icmp_imm(IntCC::Equal, addr, 0);
+                let non_null_blk = builder.create_block();
+                let fast_blk = builder.create_block();
+                let check_immortal_blk = builder.create_block();
+                let slow_blk = builder.create_block();
+                let done_blk = builder.create_block();
+
+                builder
+                    .ins()
+                    .brif(is_null, done_blk, &[], non_null_blk, &[]);
+
+                builder.switch_to_block(non_null_blk);
+                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let addr_ext = builder.ins().uextend(ptr_ty, addr);
+                let payload_ptr = builder.ins().iadd(heap_base, addr_ext);
+                let word = builder
+                    .ins()
+                    .load(types::I32, MemFlags::new(), payload_ptr, -4);
+                let rc = builder.ins().band_imm(word, i64::from(MAX_REF_COUNT));
+                let rc_sub1 = builder.ins().iadd_imm(rc, -1);
+                let can_fast = builder.ins().icmp_imm(
+                    IntCC::UnsignedLessThan,
+                    rc_sub1,
+                    i64::from(MAX_REF_COUNT - 2),
+                );
+                builder
+                    .ins()
+                    .brif(can_fast, fast_blk, &[], check_immortal_blk, &[]);
+
+                builder.switch_to_block(fast_blk);
+                let cleared_color = builder.ins().band_imm(word, i64::from(0xF3FF_FFFF_u32));
+                let updated = builder.ins().iadd_imm(cleared_color, 1);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), updated, payload_ptr, -4);
+                builder.ins().jump(done_blk, &[]);
+
+                builder.switch_to_block(check_immortal_blk);
+                let is_immortal =
+                    builder
+                        .ins()
+                        .icmp_imm(IntCC::Equal, rc, i64::from(MAX_REF_COUNT));
+                builder
+                    .ins()
+                    .brif(is_immortal, done_blk, &[], slow_blk, &[]);
+
+                builder.switch_to_block(slow_blk);
                 builder.ins().call(rt_inc_ref, &[ctx_ptr, addr]);
+                emit_trap_return_check(&mut builder, ctx_ptr);
+                builder.ins().jump(done_blk, &[]);
+
+                builder.switch_to_block(done_blk);
             }
             OpCode::DecRef => {
+                use crate::memory::MAX_REF_COUNT;
+                use crate::vm::jit::JitContext;
+
                 let addr = builder.use_var(vars.get(inst.dst(), RegType::Ref));
+                let is_null = builder.ins().icmp_imm(IntCC::Equal, addr, 0);
+                let non_null_blk = builder.create_block();
+                let check_cc_blk = builder.create_block();
+                let fast_blk = builder.create_block();
+                let slow_blk = builder.create_block();
+                let done_blk = builder.create_block();
+
+                builder
+                    .ins()
+                    .brif(is_null, done_blk, &[], non_null_blk, &[]);
+
+                builder.switch_to_block(non_null_blk);
+                let heap_base = builder.ins().load(ptr_ty, MemFlags::new(), ctx_ptr, 0);
+                let addr_ext = builder.ins().uextend(ptr_ty, addr);
+                let payload_ptr = builder.ins().iadd(heap_base, addr_ext);
+                let word = builder
+                    .ins()
+                    .load(types::I32, MemFlags::new(), payload_ptr, -4);
+                let rc = builder.ins().band_imm(word, i64::from(MAX_REF_COUNT));
+                let rc_sub2 = builder.ins().iadd_imm(rc, -2);
+                let can_fast_rc = builder.ins().icmp_imm(
+                    IntCC::UnsignedLessThan,
+                    rc_sub2,
+                    i64::from(MAX_REF_COUNT - 2),
+                );
+                builder
+                    .ins()
+                    .brif(can_fast_rc, check_cc_blk, &[], slow_blk, &[]);
+
+                builder.switch_to_block(check_cc_blk);
+                let cc_off = std::mem::offset_of!(JitContext, cycle_collector_enabled) as i32;
+                let cc_enabled = builder
+                    .ins()
+                    .load(types::I8, MemFlags::new(), ctx_ptr, cc_off);
+                let cc_off_flag = builder.ins().icmp_imm(IntCC::Equal, cc_enabled, 0);
+                builder
+                    .ins()
+                    .brif(cc_off_flag, fast_blk, &[], slow_blk, &[]);
+
+                builder.switch_to_block(fast_blk);
+                let updated = builder.ins().iadd_imm(word, -1);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), updated, payload_ptr, -4);
+                builder.ins().jump(done_blk, &[]);
+
+                builder.switch_to_block(slow_blk);
                 builder.ins().call(rt_dec_ref, &[ctx_ptr, addr]);
+                builder.ins().jump(done_blk, &[]);
+
+                builder.switch_to_block(done_blk);
             }
             OpCode::CallDirect | OpCode::TailCallDirect => {
                 let target_id = inst.call_target() as u32;
