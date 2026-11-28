@@ -1276,6 +1276,37 @@ pub type SlxarcInspection = SlxpInspection;
 pub type LoadedSlxarc = LoadedSlxp;
 pub type SlxarcArchive = SlxpPackage;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExtractedArchiveCacheMeta {
+    archive_size_bytes: u64,
+    archive_mtime_ns: u128,
+    manifest: Option<ProjectManifest>,
+    binary_cache_files: Vec<PathBuf>,
+    secondary_binary_cache_files: Vec<PathBuf>,
+    native_libraries: Vec<PathBuf>,
+    extracted_files: Vec<PathBuf>,
+    resource_files: Vec<PathBuf>,
+    resource_total_bytes: u64,
+}
+
+fn archive_metadata_fingerprint(archive_path: &Path) -> Option<(u64, u128)> {
+    let metadata = fs::metadata(archive_path).ok()?;
+    let modified_ns = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some((metadata.len(), modified_ns))
+}
+
+fn archive_sidecar_prefix(archive_path: &Path) -> String {
+    let canonical = fs::canonicalize(archive_path).unwrap_or_else(|_| archive_path.to_path_buf());
+    let digest = crate::hash::sha256_bytes(canonical.to_string_lossy().as_bytes());
+    let hex_full = crate::hash::format_hex_digest(&digest);
+    hex_full[..16].to_string()
+}
+
 /// Package container packager, extractor, and inspector for `.slxp` distributions.
 pub struct SlxpPackage;
 
@@ -1518,6 +1549,69 @@ impl SlxpPackage {
         archive_path: &Path,
         extract_cache_directory: &Path,
     ) -> Result<LoadedSlxp, EmissionError> {
+        let archive_fingerprint = archive_metadata_fingerprint(archive_path);
+        let sidecar_prefix = archive_sidecar_prefix(archive_path);
+        let sidecar_meta_path =
+            extract_cache_directory.join(format!(".slxp_meta_{sidecar_prefix}.bin"));
+
+        if let Some((archive_size_bytes, archive_mtime_ns)) = archive_fingerprint
+            && let Ok(meta_bytes) = fs::read(&sidecar_meta_path)
+            && let Ok(cached_meta) =
+                serde_json::from_slice::<ExtractedArchiveCacheMeta>(&meta_bytes)
+            && cached_meta.archive_size_bytes == archive_size_bytes
+            && cached_meta.archive_mtime_ns == archive_mtime_ns
+            && !cached_meta.binary_cache_files.is_empty()
+            && cached_meta
+                .native_libraries
+                .iter()
+                .all(|lib_path| lib_path.is_file())
+            && cached_meta
+                .resource_files
+                .iter()
+                .all(|res_path| res_path.is_file())
+        {
+            let mut cached_binaries = Vec::with_capacity(cached_meta.binary_cache_files.len());
+            let mut cached_secondary =
+                Vec::with_capacity(cached_meta.secondary_binary_cache_files.len());
+            let mut cache_hit_ok = true;
+
+            for bin_path in &cached_meta.binary_cache_files {
+                if let Ok(bin_bytes) = fs::read(bin_path)
+                    && let Ok(decoded_bin) = BinaryProgram::from_bytes(&bin_bytes)
+                {
+                    cached_binaries.push(decoded_bin);
+                } else {
+                    cache_hit_ok = false;
+                    break;
+                }
+            }
+
+            if cache_hit_ok {
+                for sec_path in &cached_meta.secondary_binary_cache_files {
+                    if let Ok(sec_bytes) = fs::read(sec_path)
+                        && let Ok(decoded_sec) = BinaryProgram::from_bytes(&sec_bytes)
+                    {
+                        cached_secondary.push(decoded_sec);
+                    } else {
+                        cache_hit_ok = false;
+                        break;
+                    }
+                }
+            }
+
+            if cache_hit_ok {
+                return Ok(LoadedSlxp {
+                    manifest: cached_meta.manifest,
+                    binaries: cached_binaries,
+                    native_libraries: cached_meta.native_libraries,
+                    secondary_binaries: cached_secondary,
+                    extracted_files: cached_meta.extracted_files,
+                    resource_files: cached_meta.resource_files,
+                    resource_total_bytes: cached_meta.resource_total_bytes,
+                });
+            }
+        }
+
         let archive_file = File::open(archive_path).map_err(|io_error| {
             EmissionError::ContainerSerializationFailed {
                 reason: format!(
@@ -1925,6 +2019,57 @@ impl SlxpPackage {
             let is_solix_native = is_solix_native_module_name(&file_name_lossy) || is_declared;
             if is_solix_native && !native_libraries.contains(&candidate_path) {
                 native_libraries.push(candidate_path);
+            }
+        }
+
+        if let Some((archive_size_bytes, archive_mtime_ns)) = archive_fingerprint
+            && !binaries.is_empty()
+        {
+            let mut binary_cache_files = Vec::with_capacity(binaries.len());
+            let mut secondary_binary_cache_files = Vec::with_capacity(secondary_binaries.len());
+            let mut cached_ok = true;
+
+            for (bin_idx, binary_prog) in binaries.iter().enumerate() {
+                let bin_cache_path = extract_cache_directory
+                    .join(format!(".slxb_bin_{sidecar_prefix}_{bin_idx}.slxb"));
+                if let Ok(raw_bytes) = binary_prog.try_to_bytes()
+                    && fs::write(&bin_cache_path, raw_bytes).is_ok()
+                {
+                    binary_cache_files.push(bin_cache_path);
+                } else {
+                    cached_ok = false;
+                    break;
+                }
+            }
+            if cached_ok {
+                for (sec_idx, sec_prog) in secondary_binaries.iter().enumerate() {
+                    let sec_cache_path = extract_cache_directory
+                        .join(format!(".slxb_sec_{sidecar_prefix}_{sec_idx}.slxb"));
+                    if let Ok(raw_bytes) = sec_prog.try_to_bytes()
+                        && fs::write(&sec_cache_path, raw_bytes).is_ok()
+                    {
+                        secondary_binary_cache_files.push(sec_cache_path);
+                    } else {
+                        cached_ok = false;
+                        break;
+                    }
+                }
+            }
+            if cached_ok {
+                let sidecar_meta = ExtractedArchiveCacheMeta {
+                    archive_size_bytes,
+                    archive_mtime_ns,
+                    manifest: manifest_option.clone(),
+                    binary_cache_files,
+                    secondary_binary_cache_files,
+                    native_libraries: native_libraries.clone(),
+                    extracted_files: extracted_files.clone(),
+                    resource_files: resource_files.clone(),
+                    resource_total_bytes,
+                };
+                if let Ok(encoded_meta) = serde_json::to_vec(&sidecar_meta) {
+                    let _ = fs::write(&sidecar_meta_path, encoded_meta);
+                }
             }
         }
 
@@ -2867,5 +3012,51 @@ profiles:
             1,
             "Duplicate legacy bin/<pkg>.slxb copy of root binaries.slxb must not be double-loaded"
         );
+    }
+
+    #[test]
+    fn test_slxp_extract_and_load_sidecar_cache_hit_and_corrupt_fallback() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let stage_dir = temp_dir.path().join("stage");
+        fs::create_dir_all(&stage_dir).expect("create stage dir");
+
+        let manifest_yaml = r#"configuration:
+  name: cached_pkg
+  version: "0.1.0"
+profiles:
+  release: {}
+"#;
+        fs::write(stage_dir.join("manifest.yaml"), manifest_yaml).expect("write manifest");
+
+        let mut program = BinaryProgram::new();
+        program.package_name = "cached_pkg".to_string();
+        fs::write(stage_dir.join("binaries.slxb"), program.to_bytes()).expect("write binaries");
+
+        let package_path = temp_dir.path().join("cached_pkg.slxp");
+        SlxpPackage::pack_directory(&stage_dir, &package_path).expect("pack slxp");
+
+        let extract_cache = temp_dir.path().join("cache");
+        let first_load =
+            SlxpPackage::extract_and_load(&package_path, &extract_cache).expect("first load");
+        assert_eq!(first_load.binaries.len(), 1);
+
+        let second_load =
+            SlxpPackage::extract_and_load(&package_path, &extract_cache).expect("cached load");
+        assert_eq!(second_load.binaries.len(), 1);
+        assert_eq!(second_load.binaries[0].package_name, "cached_pkg");
+
+        // Corrupt sidecar metadata and verify clean fallback to full ZIP extraction
+        for entry in fs::read_dir(&extract_cache).expect("read cache dir") {
+            let entry_path = entry.expect("dir entry").path();
+            if entry_path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with(".slxp_meta_"))
+            {
+                fs::write(&entry_path, b"corrupt_meta").expect("corrupt sidecar");
+            }
+        }
+        let fallback_load =
+            SlxpPackage::extract_and_load(&package_path, &extract_cache).expect("fallback load");
+        assert_eq!(fallback_load.binaries.len(), 1);
     }
 }
