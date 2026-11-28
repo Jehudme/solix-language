@@ -14,7 +14,8 @@ use crate::phases::phase::CompilationPhase;
 use miette::SourceSpan;
 use solix_common::bytecode::BinaryProgram;
 use solix_common::solver::{DependencyRequirement, PackageVersion, SolverError};
-use std::collections::{HashMap, VecDeque};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+use std::collections::VecDeque;
 
 /// Dependency resolution compilation phase running before lexical analysis.
 #[derive(Debug, Default, Clone)]
@@ -44,7 +45,7 @@ pub fn run_dependency_resolution(
 ) -> Result<(), Vec<CompilationDiagnostic>> {
     let mut work_queue: VecDeque<(DependencyRequirement, String)> = VecDeque::new();
     let mut solved_map: HashMap<String, (PackageVersion, BinaryProgram, Option<String>)> =
-        HashMap::new();
+        HashMap::default();
     let mut accumulated_diagnostics = Vec::new();
 
     // 1. Enqueue pre-loaded binary programs
@@ -557,7 +558,7 @@ fn get_span_slice(span: Span, source_text: &str) -> &str {
 fn collect_type_names(
     annotation: &crate::phases::parser::statements::TypeAnnotation,
     source_text: &str,
-    target_set: &mut std::collections::HashSet<String>,
+    target_set: &mut HashSet<String>,
 ) {
     use crate::phases::parser::statements::TypeAnnotation;
     match annotation {
@@ -607,7 +608,7 @@ fn collect_type_names(
     }
 }
 
-fn collect_identifiers_from_slice(slice: &str, target_set: &mut std::collections::HashSet<String>) {
+fn collect_identifiers_from_slice(slice: &str, target_set: &mut HashSet<String>) {
     let bytes = slice.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -629,7 +630,7 @@ fn collect_identifiers_from_slice(slice: &str, target_set: &mut std::collections
 
 fn collect_user_identifiers(
     context: &CompilationContext,
-    target_set: &mut std::collections::HashSet<String>,
+    target_set: &mut HashSet<String>,
 ) {
     use crate::phases::lexing::TokenKind;
     for (source_idx, source_text) in context.sources.iter().enumerate() {
@@ -658,7 +659,7 @@ fn scan_raw_source_imports(
     package_name: &str,
     has_any_package_import: &mut bool,
     has_wildcard_import: &mut bool,
-    imported_symbols: &mut std::collections::HashSet<String>,
+    imported_symbols: &mut HashSet<String>,
 ) {
     for statement in source_text.split(';') {
         let trimmed = statement.trim();
@@ -703,8 +704,8 @@ fn selectively_prune_ast(
     use crate::phases::parser::statements::{ClassMember, Declaration};
 
     let mut has_wildcard_import = false;
-    let imported_namespaces: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut imported_symbols = std::collections::HashSet::new();
+    let imported_namespaces: HashSet<String> = HashSet::default();
+    let mut imported_symbols = HashSet::default();
     let mut has_any_package_import = false;
 
     for (source_idx, user_source_text) in context.sources.iter().enumerate() {
