@@ -213,7 +213,7 @@ Used for static, direct, and virtual function dispatch:
 | `0xEA` | `GetFieldF64` | A | `dst, obj, offset` | Direct 64-bit float field load from heap object payload: reads `float64` from `obj + offset` bypassing tag validation. |
 | `0xEB` | `SetFieldI32` | A | `val, obj, offset` | Direct 32-bit integer field store into heap object payload: writes `int32` to `obj + offset` bypassing reference counting. |
 | `0xEC` | `SetFieldF64` | A | `val, obj, offset` | Direct 64-bit float field store into heap object payload: writes `float64` to `obj + offset` bypassing reference counting. |
-| `0xED` | `CallVirtualDirect` | Call | `dst, target_fn, arg_base, arg_count` | Monomorphic quickened virtual call: invokes direct function target `target_fn` if vtable ID matches cached monomorphic call site; on class miss, unquickens to `CallVirtual` with the polymorphic bit (0x8000) set in target slot to avoid repeated quickening overhead. |
+| `0xED` | `CallVirtualDirect` | Call | `dst, target_fn, arg_base, arg_count` | Monomorphic quickened virtual call: invokes direct function target `target_fn` if vtable ID matches the flat `Vec`-indexed monomorphic call site cache (`(func_id, caller_pc)`); on class miss, unquickens to `CallVirtual` with the polymorphic bit (0x8000) set in target slot to avoid repeated quickening overhead. |
 
 ---
 
