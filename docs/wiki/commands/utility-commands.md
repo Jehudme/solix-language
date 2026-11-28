@@ -24,9 +24,10 @@ solix clean [path] [options]
 Type-check a project without emitting bytecode (`solix check`) or compile and execute all zero-argument `test_*` functions (`solix test`):
 
 ```bash
-solix check [path] [--profile <name>]
-solix test [path] [--profile <name>] [--filter <pattern>]
+solix check [path] [--profile <name>] [--pkg-dir <dir>] [--no-verify]
+solix test [path] [--profile <name>] [--filter <pattern>] [--pkg-dir <dir>] [--no-verify]
 ```
+Defaults: `--profile` defaults to `debug` for `solix check` and `test` for `solix test`.
 
 ---
 
@@ -41,9 +42,9 @@ solix doc [path] [options]
 ### Key Options & Flags
 * `[path]`: Project root or `.slx` source directory [default: `.`].
 * `-o, --output <dir>`: Output directory path [default: `docs/api`].
-* `--format <html|markdown>`: Documentation output format (`html` [default] or `markdown`).
+* `-f, --format <html|markdown>`: Documentation output format (`html` [default] or `markdown`).
 * `--open`: Launches `index.html` in the system browser when complete.
-* `--profile <mode>`: Target build profile used for dependency/source resolution [default: `debug`].
+* `-p, --profile <mode>`: Target build profile used for dependency/source resolution [default: `release`].
 
 ---
 

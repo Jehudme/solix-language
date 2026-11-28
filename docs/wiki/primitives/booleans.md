@@ -4,7 +4,6 @@ The `bool` type represents logical truth values:
 * **Storage Width:** 8 bits (1 byte).
 * **Values:** `true` and `false`.
 * **Default Value:** `false`.
-* **Friendly Alias:** `boolean`.
 
 ```solix
 bool is_active = true;
@@ -21,5 +20,5 @@ Booleans support standard logical operations:
 ## Further Reading
 
 * [Built-in Primitives Index](README.md): Full listing of scalar and composite primitives.
-* [Characters Reference](chars.md): Unicode character handling.
+* [Characters Reference](chars.md): 8-bit ASCII character handling.
 * [Control Flow Guide](../../guide/03_control_flow.md): Boolean conditions in loops and branching.

@@ -22,7 +22,7 @@ This document specifies the complete type system of Solix: primitive types, refe
 
 ## 1. Primitive Types
 
-Primitive types are value types. They are stored directly in stack slots or object fields as 64-bit words; the higher bits are zero-extended or ignored depending on the type. Primitive types are **never** `null` and are never heap-allocated on their own.
+Primitive value types (`bool`, `char`, `int8`–`uint64`, `float32`, `float64`) are stored directly in stack slots or object fields as 64-bit words and are **never** `null` or heap-allocated on their own. The `tuple` primitive keyword is an ARC-managed heap reference type and defaults to `null`.
 
 | Type      | Width    | Signed | Range / Values                                      | Default Value |
 |-----------|----------|--------|-----------------------------------------------------|---------------|

@@ -36,17 +36,18 @@ The Solix **Binder (Pass 2)** is responsible for injecting `INC_REF` and `DEC_RE
 Solix allocates heap objects within a contiguous byte-addressed virtual heap (`VirtualHeap`). Every dynamically allocated heap block is preceded by an 8-byte packed header positioned immediately before the base object address:
 
 ```text
-Byte offset [Address - 8 .. Address - 5]:  [ size (u32 allocation size or element count) ]
-Byte offset [Address - 4 .. Address - 1]:  [ BlockTag (4 bits) | ref_count (28 bits)     ]
-Byte offset [Address + 0 .. Address + 7]:  [ VTable ID (64-bit virtual method table ID)   ]
-Byte offset [Address + 8 ..            ]:  [ Object Fields (naturally aligned)           ]
+Byte offset [Address - 8 .. Address - 5]:  [ size (u32 allocation size or element count)          ]
+Byte offset [Address - 4 .. Address - 1]:  [ BlockTag (4 bits) | GcColor (2 bits) | ref_count (26 bits) ]
+Byte offset [Address + 0 .. Address + 7]:  [ VTable ID (64-bit virtual method table ID)            ]
+Byte offset [Address + 8 ..            ]:  [ Object Fields (naturally aligned)                    ]
 ```
 
 | Header Field | Size | Description |
 |---|---|---|
 | `size` | 32 bits | Payload capacity in bytes (or element count for arrays) |
-| `tag` | 4 bits | Strongly typed `BlockTag` (`Object`, `ObjectPod`, `ArrayRef`, `String`, etc.) |
-| `ref_count` | 28 bits | Active reference counter (maximum 268,435,455 live references) |
+| `tag` | 4 bits | Strongly typed `BlockTag` (`Object`, `ObjectPod`, `ArrayRef`, `String`, `Tuple`, etc.) |
+| `gc_color` | 2 bits | Cycle-collector tricolor state (`GcColor`) |
+| `ref_count` | 26 bits | Active reference counter (maximum 67,108,863 live references) |
 
 ### Natural Field Alignment
 Instance fields start at `Address + 8` (after the 8-byte VTable ID) and are packed contiguously adhering to natural alignment rules:
@@ -74,18 +75,18 @@ The object address returned by `new` points to `Address + 0`. The runtime inspec
 
 Reference counting is handled by dedicated VM opcodes (`IncRef` and `DecRef`) emitted at compile time.
 
-### `INC_REF`
+### `IncRef`
 
-Pops an address off the stack, increments the reference count at `heap[address - 1] & 0xFFFFFFFF`, then pushes the address back.
+Increments the 26-bit `ref_count` field in the object's 8-byte `BlockHeader` (`Address - 4`) when a new strong reference is created.
 
 Emitted whenever:
 - A reference type variable is assigned.
 - A reference type value is passed as a method argument.
 - A reference type is stored into an object field or array slot.
 
-### `DEC_REF`
+### `DecRef`
 
-Pops an address, decrements the reference count. If count reaches zero, immediately deallocates the object (see [What Happens at Object Destruction](#what-happens-at-object-destruction)).
+Decrements the `ref_count` in the object's `BlockHeader`. If the count reaches zero, immediately deallocates the object (see [What Happens at Object Destruction](#what-happens-at-object-destruction)).
 
 Emitted whenever:
 - A local variable holding a reference goes out of scope.
@@ -274,7 +275,7 @@ A destructor is guaranteed to run deterministically in the following situations:
 
 ### Tuple RAII and Recursive Destruction
 
-Tuples in Solix are first-class primitives allocated on the dynamic heap with `BlockTag::TUPLE`. When a tuple's reference count drops to 0:
+Tuples in Solix are first-class primitives allocated on the dynamic heap with `BlockTag::Tuple`. When a tuple's reference count drops to 0:
 - The runtime automatically traverses the tuple's elements.
 - For each element marked as a reference type in the tuple's type table, the runtime decrements its reference count via `decrease_reference`.
 - If an element's reference count reaches 0, its destructor (`~ClassName()`) is triggered immediately.

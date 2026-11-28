@@ -14,10 +14,10 @@ solix compile package [path] [options]
 ### Key Options & Flags (`compile source`)
 * `-o, --output <path>`: Specifies destination `.slxb` output file path [default: `<name>.slxb`].
 * `-d, --deps <spec>`: External package dependency requirement formatted as `<name>[:<profile>][@<version>]` (can be repeated).
-* `--deps-source <path>`: External source dependency file (`.slx`) to include directly.
+* `--deps-source <path>` / `--deps-file <path>`: External source dependency file (`.slx`) to include directly.
 * `--deps-package <path>`: External package container (`.slxp`) to link against.
 * `--deps-binaries <path>`: External binary container (`.slxb`) to link against.
-* `--deps-file <path>`: External binary (`.slxb`) or package archive (`.slxp`) dependency file path (shorthand `-l`).
+* `-l, --lib <path>`: External binary (`.slxb`) or package archive (`.slxp`) dependency file path (on top-level `solix compile`, `-l, --deps-file` accepts `.slxb`/`.slxp`/`.slxarc` libraries).
 * `-n, --name <name>`: Package or module identifier name.
 * `-V, --version <semver>`: Semantic version embedded into binary metadata [default: `0.1.0`].
 * `--description <desc>`: Package description string.
@@ -50,8 +50,15 @@ solix compile source src/main.slx --check
 solix compile source src/main.slx -d math_utils@0.2.0 --static --metrics
 ```
 
+### Key Options & Flags (`compile package`)
+* `[path]`: Project directory containing `manifest.yaml` [default: `.`].
+* `-p, --profile <name>`: Target profile (`release`, `debug`, `test`).
+* `-o, --output <path>`: Destination `.slxb` path.
+* `--pkg-dir <dir>`: Package store root directory override.
+* `--check`, `--time`, `--metrics [<format>]`, `--no-verify`: Same behavior as `compile source`.
+
 ### Upward Manifest Auto-Discovery
-If `solix compile source` or `solix compile package` is executed inside a project tree without explicit `--deps`, `--entry`, or `--name` parameters, it automatically traverses parent directories (up to 12 levels) to discover `manifest.yaml` (or legacy `manifest.toml`). Dependencies and entry points from `profiles`, and project metadata from `configuration` are inherited automatically.
+If `solix compile source` or `solix compile package` is executed inside a project tree without explicit `--deps`, `--entry`, or `--name` parameters, it automatically traverses parent directories (up to 12 levels, stopping at `.git` or `$HOME`) to discover `manifest.yaml` (or legacy `manifest.toml`). Dependencies and entry points from `profiles`, and project metadata from `configuration` are inherited automatically.
 
 ---
 
@@ -83,11 +90,11 @@ solix build [path] [options]
 
 ### Practical Examples
 ```bash
-# Build the project in the current directory with debug profile
+# Build the project in the current directory with default release profile
 solix build
 
-# Build optimized release package container (build/release/<name>.slxp)
-solix build --release
+# Build debug package container (build/debug/<name>.slxp)
+solix build --debug
 
 # Build test package including test suite fixtures (build/test/<name>.slxp)
 solix build --test

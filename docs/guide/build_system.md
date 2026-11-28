@@ -37,7 +37,7 @@ my_solix_project/
 ├── src/                             # Primary Solix source code (.slx)
 ├── tests/                           # Solix test suites (.slx)
 ├── resources/                       # Static assets packaged into package res://
-├── lib/                             # Optional prebuilt native libraries
+├── bin/                             # Optional prebuilt target-tripled native libraries (`bin/<target_triple>/`)
 ├── natives/                         # Native subprojects (auto-detected Cargo or CMake)
 │   ├── rust_bridge/                 # Cargo crate (`Cargo.toml`, `solix-native` feature)
 │   └── c_bridge/                    # CMake project (`CMakeLists.txt`, `SOLIX_NATIVE_BUILD`)
@@ -47,7 +47,7 @@ my_solix_project/
     │   ├── cmake/                   # Per-native, per-target CMake configure & build dirs
     │   └── stage/<profile>/
     │       ├── binaries.slxb
-    │       ├── bin/<target_triple>/native_<name>.<ext>
+    │       ├── bin/<target_triple>/__native_<name>.<ext>
     │       └── resources/
     ├── debug/
     │   └── <name>.slxp
@@ -88,8 +88,8 @@ Specifying an OS name under `platforms` expands automatically to every architect
 
 | Platform Token | Expanded Targets | Native Compiler Strategy |
 | :--- | :--- | :--- |
-| `linux` | `linux-x86_64`, `linux-aarch64` | Native Clang/GCC/Cargo or `cargo-zigbuild` / `zig cc` |
-| `macos` | `macos-x86_64`, `macos-aarch64` | Native macOS Clang (`--target`) or `cargo-zigbuild` / `zig cc` |
+| `linux` | `linux-x86_64`, `linux-aarch64` | Native Clang/GCC/Cargo or containerized `cross` / `dockcross` |
+| `macos` | `macos-x86_64`, `macos-aarch64` | Containerized OSXCross (`solix/apple-darwin-cross:15.5-ubuntu`) |
 | `windows` | `windows-x86_64` | `x86_64-pc-windows-gnu` (or `x86_64-pc-windows-msvc` on native Windows host / `--target host`) |
 | `all` | All 5 desktop targets | Combines `linux`, `macos`, `windows` |
 | `host` | Current host triple | Native host compiler toolchain |

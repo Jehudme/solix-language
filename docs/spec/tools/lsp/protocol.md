@@ -1,6 +1,6 @@
 # Solix Language Server Protocol (LSP) Specification
 
-The Solix Language Server (`solix-lsp`, or invoked via `solix lsp`) implements the standard Language Server Protocol (LSP 3.17) over standard I/O (`stdin`/`stdout`). It provides editor-agnostic language intelligence, live diagnostic squiggles, and native project manifest integration (`manifest.toml`) with support for `solix-ffi` native bridges.
+The Solix Language Server (`solix lsp`) implements the standard Language Server Protocol (LSP 3.17) over standard I/O (`stdin`/`stdout`). It provides editor-agnostic language intelligence, live diagnostic squiggles, and native project manifest integration (`manifest.yaml`) with support for `solix-ffi` native bridges.
 
 ---
 
@@ -100,15 +100,14 @@ The Solix Language Server maintains an in-memory document cache (`DocumentStore`
 
 ---
 
-## 3. Project Manifest Integration (`manifest.toml`)
+## 3. Project Manifest Integration (`manifest.yaml`)
 
-When `initialize` provides a `rootUri`, the server automatically discovers `manifest.toml` in the root workspace folder:
+When `initialize` provides a `rootUri`, the server automatically discovers `manifest.yaml` (with `manifest.toml` fallback) in the root workspace folder:
 
 1. **Dependency Resolution**:
-   - Uses `solix::cli::DependencyManager` and `DependencyResolver` to resolve:
-     - Standard Library (`solixlib`) from `$SOLIX_HOME/installed/solixlib` registry.
-     - Local source dependencies (`type: "source"`).
-     - Local and installed project dependencies (`type: "project"`).
+   - Uses `ClientModuleSolver` and `solix_common::project::ProjectManifest` to resolve:
+     - Standard Library (`solix`) from the local package store (`~/.solix/packages`).
+     - Profile-scoped package dependencies declared under `profiles.<name>.dependencies`.
 2. **Buffer Overrides**:
    - Any open virtual document in the editor takes precedence over on-disk files.
 3. **Multi-File Context**:
@@ -131,7 +130,7 @@ Errors and warnings captured by `solix::Diagnostic` are transformed into LSP dia
     "diagnostics": [
       {
         "severity": 1,
-        "code": "E_PARSE",
+        "code": "E0101",
         "source": "solix",
         "message": "Expected ';' after expression",
         "range": {
@@ -200,12 +199,11 @@ Parameter names and types are preserved across all compiler passes (`SymbolEntry
 
 ### 7.5 Strict Import Resolution Parity
 The Language Server enforces diagnostic parity with the CLI compiler (`solix compile` / `solix build`):
-1. **Builtin Packages**: Only `std::*` standard library packages are recognized without project dependencies.
-2. **External Packages**: Any external package (such as `solix.*` or `raylib.*`) requires an explicit dependency entry in `manifest.toml` or an `extern import` declaration. Wildcard imports targeting undeclared external packages consistently emit `CannotResolveImport` (`E0232`).
+1. **External Packages**: Any external package (such as `solix.*` or `raylib.*`) requires an explicit dependency entry in `manifest.yaml` or an `extern import` declaration. Wildcard imports targeting undeclared external packages consistently emit `CannotResolveImport` (`E0232`).
 
 ### 7.6 Workspace Manifest Dependency Table Resolution
-The LSP `WorkspaceManager` locates `manifest.toml` in project parent directories and deserializes `[dependencies]` using strictly-typed table notation:
-- Dependencies are declared as `package_name = { version = "<version>", profile = "<profile>" }`.
+The LSP `WorkspaceManager` locates `manifest.yaml` in project parent directories and deserializes `profiles.<name>.dependencies` using strictly-typed mapping notation:
+- Dependencies are declared as `<package_name>: { version: "<version>", profile: "<profile>" }`.
 - When `profile` is omitted, the profile defaults to `"release"`.
 - Each resolved dependency propagates both semantic version requirements and build profiles into the language server compilation options, ensuring background diagnostics match CLI build output.
 

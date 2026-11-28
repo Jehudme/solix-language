@@ -1,6 +1,6 @@
 # Application Packaging & Resources
 
-This guide explains how to package Solix applications into single-file portable distribution packages (`.slxp`), bundle native shared libraries and static assets, and access internal resources using the `solix.io.filesystem.Resource` API.
+This guide explains how to package Solix applications into single-file portable distribution packages (`.slxp`), bundle native shared libraries and static assets, and access internal resources using the `solix.io.Resource` API.
 
 ---
 
@@ -10,7 +10,7 @@ This guide explains how to package Solix applications into single-file portable 
 2. [The Anatomy of a `.slxp` Package](#the-anatomy-of-a-slxp-package)
 3. [Packaging with `solix build`](#packaging-with-solix-build)
 4. [Executing Packages with `solix run`](#executing-packages-with-solix-run)
-5. [The Resource API (`solix.io.filesystem.Resource`)](#the-resource-api-solixiofilesystemresource)
+5. [The Resource API (`solix.io.Resource`)](#the-resource-api-solixioresource)
 6. [The `res://` Virtual URI Scheme](#the-res-virtual-uri-scheme)
 7. [Dual-Location Filesystem API](#dual-location-filesystem-api)
 8. [Multi-Depth (Transitive) Dependency Bundling & Staging](#multi-depth-transitive-dependency-bundling--staging)
@@ -41,8 +41,8 @@ my_app.slxp
 ├── binaries.slxb       # Primary compiled bytecode container at package root
 ├── bin/                # Target-tripled native shared libraries
 │   └── x86_64-unknown-linux-gnu/
-│       ├── native_plugin.so
-│       └── libnative_helper.so
+│       ├── __native_plugin.so
+│       └── lib__native_helper.so
 └── resources/          # Static application assets
     ├── config.json
     ├── templates/
@@ -60,7 +60,7 @@ my_app.slxp
 
 > [!IMPORTANT]
 > **Strict Native Loader Isolation Policy:**
-> - To avoid polluting the Solix VM FFI symbol table or executing unintended third-party code, the VM dynamic loader **only** loads libraries whose filenames match `native_*` or `libnative_*` (or are explicitly declared in the manifest).
+> - To avoid polluting the Solix VM FFI symbol table or executing unintended third-party code, the VM dynamic loader **only** loads libraries whose filenames match `__native_*` or `lib__native_*` (or are explicitly declared in the manifest).
 > - Auxiliary/transitive native libraries (such as `libz.so` or vendor support binaries) residing in `bin/<target>/` are available for host OS dynamic linkers (`dlopen` / `LoadLibrary`) but are **not** loaded into the Solix VM FFI dispatch table.
 > - The runtime strictly inspects the package's `bin/<target>/` directory for the active host target triple and **never searches the host system PATH**.
 
@@ -72,11 +72,11 @@ The `solix build` command builds the specified project and packages the build ar
 
 ### Basic Invocations
 
-Build the default profile:
+Build the default (`release`) profile:
 ```bash
 solix build
 ```
-This builds the default `debug` profile and emits `<project_name>.slxp` into `build/debug/`.
+Emits `<project_name>.slxp` into `build/release/` (pass `solix build --debug` to build the `debug` profile into `build/debug/`).
 
 Build with a specific profile (e.g. `release`):
 ```bash
@@ -88,9 +88,6 @@ Build for a specific target platform (building all architectures for that platfo
 ```bash
 solix build --platform linux
 ```
-
-> [!NOTE]
-> The legacy command `solix pack` is maintained as a backward-compatibility alias for `solix build`.
 
 ---
 
@@ -117,23 +114,24 @@ When executing an `.slxp` package:
    - **Linux / macOS**: `/tmp/solix_pac/<app_name>_<sha256_short>/`
    - **Windows**: `%TEMP%\solix_pac\<app_name>_<sha256_short>\`
 3. If an identical package was previously unpacked and remains unmodified, extraction is skipped and execution begins immediately ($O(1)$ startup).
-4. All companion native shared libraries matching `native_*` in `bin/<host_target>/` are automatically registered into `RuntimeOptions::native_libraries`.
+4. All companion native shared libraries matching `__native_*` in `bin/<host_target>/` are automatically registered into `RuntimeOptions::native_libraries`.
 5. The `resources/` directory is mounted into `RuntimeOptions::resource_directory` and exported as `SOLIX_RESOURCE_ROOT`.
 6. The VM boots and executes the bundled root `binaries.slxb`.
 
 ---
 
-## The Resource API (`solix.io.filesystem.Resource`)
+## The Resource API (`solix.io.Resource`)
 
-To read bundled assets from inside your Solix program, import `solix.io.filesystem.Resource`:
+To read bundled assets from inside your Solix program, import `solix.io.Resource` and `solix.core.String`:
 
 ```solix
-import solix.io.filesystem.Resource;
+import solix.core.String;
+import solix.io.Resource;
 
 class Main {
     public static int32 main() {
         if (Resource::exists("config.json")) {
-            string config_text = Resource::read_to_string("config.json");
+            String config_text = Resource::read_to_string("config.json");
             // Process configuration...
         }
         return 0;
@@ -148,7 +146,7 @@ class Main {
 Application code can reference embedded resources using standard `res://` URIs:
 
 ```solix
-string shader_source = Resource::read_to_string("res://shaders/basic.vert");
+String shader_source = Resource::read_to_string("res://shaders/basic.vert");
 ```
 
 ---
@@ -214,14 +212,14 @@ profiles:
       - python3 scripts/build_native.py
 ```
 
-`solix build --release` compiles native subprojects under `natives/` across expanded target architectures and packages the resulting shared libraries into `bin/<target_triple>/native_<name>.<ext>` inside `.slxp`.
+`solix build --release` compiles native subprojects under `natives/` across expanded target architectures and packages the resulting shared libraries into `bin/<target_triple>/__native_<name>.<ext>` inside `.slxp`.
 
 ---
 
 ## 11. Summary of Best Practices
 
 1. **Keep Assets in `resources/`**: Place all read-only application assets inside `<project_root>/resources/`.
-2. **Name Native Libraries with `native_` Prefix**: Ensure companion shared libraries follow the `native_*` or `libnative_*` naming pattern so the runtime loads them securely into the FFI registry.
+2. **Name Native Libraries with `__native_` Prefix**: Ensure companion shared libraries follow the `__native_*` or `lib__native_*` naming pattern so the runtime loads them securely into the FFI registry.
 3. **Keep Native Binaries in `bin/<target_triple>/`**: Organize prebuilt native libraries under target-specific subdirectories.
 4. **Use `manifest.yaml`**: Author manifests using declarative YAML 1.2 syntax (`manifest.toml` is reserved for legacy backwards compatibility).
 5. **Use `res://` for Uniform Paths**: Use `res://` URIs for internal assets so that configuration strings and file paths remain clear and distinct from host paths.

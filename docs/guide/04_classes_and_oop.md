@@ -116,18 +116,18 @@ public class Counter {
     private static int32 instance_count = 0;
 
     public Counter() {
-        Counter.instance_count++;
+        Counter::instance_count++;
     }
 
     public static int32 get_count() {
-        return Counter.instance_count;
+        return Counter::instance_count;
     }
 }
 
 // Usage
 Counter a = new Counter();
 Counter b = new Counter();
-Console::println(Counter.get_count());   // 2
+Console::println(Counter::get_count());   // 2
 ```
 
 Static methods cannot access instance fields (`this` is not available inside a static method).
@@ -268,7 +268,7 @@ public class Square extends Shape {
 }
 ```
 
-Attempting to call an abstract method directly (e.g., on an abstract-type reference whose concrete subclass does not override it) causes a `THROW_ABSTRACT` at runtime.
+Attempting to call an abstract method directly (e.g., on an abstract-type reference whose concrete subclass does not override it) throws an `AbstractMethodError` at runtime.
 
 ---
 
@@ -426,7 +426,7 @@ public class FileStream {
         this.handle = 1;
     }
 
-    public ~FileStream() {
+    ~FileStream() {
         // Deterministically release resource when ref_count reaches 0
         if (this.handle != 0) {
             this.handle = 0;
@@ -442,7 +442,7 @@ public class FileStream {
 4. **Automatic Reverse-Inheritance Chaining**: When a derived class instance is destroyed, its destructor runs first, followed automatically by the parent class destructor. You do **not** call `super` manually:
    ```solix
    public class BaseResource {
-       public ~BaseResource() {
+       ~BaseResource() {
            Console::println("Base cleaned up");
        }
    }

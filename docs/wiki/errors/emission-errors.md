@@ -8,10 +8,10 @@ This section documents bytecode emission diagnostics ([`EmissionError`](../../..
 
 ---
 
-### `E0301`: Manifest
-* **Diagnostic Message:** `{0}`
-* **Variant:** `EmissionError::Manifest`
-* **Resolution:** 
+### `E0301`: Constant Pool Overflow
+* **Diagnostic Message:** `Constant pool limit exceeded: <count> entries exceeds u16 maximum (65,535)`
+* **Variant:** `EmissionError::ConstantPoolOverflow`
+* **Resolution:** Reduce the number of unique string/float/int64 constants in a single compilation unit or split large data tables into external resource files (`res://`). Note: `EmissionError::Manifest` delegates directly to `ManifestError::error_code()` (`E0401`–`E0405`).
 
 ---
 
@@ -142,7 +142,7 @@ This section documents bytecode emission diagnostics ([`EmissionError`](../../..
 
 ### `E0341`: Invalid Cycle Collector Threshold Configuration
 * **Cause:** `--cycle-threshold` was passed as `0` on `solix run`, which would trigger cycle collection on every object allocation.
-* **Resolution:** Provide a positive integer `--cycle-threshold` greater than zero (default: `256`).
+* **Resolution:** Provide a positive integer `--cycle-threshold` greater than zero (default: `1024`).
 
 ---
 

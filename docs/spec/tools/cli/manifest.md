@@ -96,9 +96,9 @@ Contains foundational metadata identifying the package and its authors.
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `name` | String | **Yes** | — | Unique package identifier. Must be a valid identifier (alphanumeric, underscores, hyphens). |
-| `version` | String | **Yes** | `"0.1.0"` | Semantic version string adhering to SemVer 2.0 (`MAJOR.MINOR.PATCH`). |
-| `description` | String | No | `""` | Human-readable summary of the package. |
-| `license` | String | No | `"Apache-2.0"` | SPDX license identifier (e.g., `Apache-2.0`, `MIT`). |
+| `version` | String | No | `"0.1.0"` | Semantic version string adhering to SemVer 2.0 (`MAJOR.MINOR.PATCH`). |
+| `description` | String | No | `None` | Human-readable summary of the package. |
+| `license` | String | No | `None` (`"Apache-2.0"` in `solix new`) | SPDX license identifier (e.g., `Apache-2.0`, `MIT`). |
 | `authors` | List of Strings | No | `[]` | List of author names or name/email pairs. |
 
 ---
@@ -110,33 +110,34 @@ Profiles govern compiler optimization, AST function inlining, debug symbol emiss
 #### Self-Contained Profile Rules (Zero Inheritance):
 1. **No `inherits`:** Every profile under `profiles.<name>` is completely self-contained. Declaring `inherits` in `manifest.yaml` is explicitly rejected with a schema error.
 2. **Baseline Defaults per Profile Name:** When fields are omitted in a profile:
-   * `release`: `optimization_level: 3`, `inline_threshold: 16`, `debug_symbols: false`, `static: true`, `link: "dynamic"`, `sources: ["src"]`, `platforms: ["host"]`, `entrypoint: None`
-   * `debug`: `optimization_level: 0`, `inline_threshold: 8`, `debug_symbols: true`, `static: false`, `link: "dynamic"`, `sources: ["src"]`, `platforms: ["host"]`, `entrypoint: None`
-   * `test`: `optimization_level: 0`, `inline_threshold: 8`, `debug_symbols: true`, `static: false`, `link: "dynamic"`, `sources: ["tests"]`, `platforms: ["host"]`, `entrypoint: "TestRunner::test"`
-   * Custom profile names: use the release baseline with `entrypoint: None` and `sources: ["src"]`.
+   * `release`: `optimization_level: 3`, `inline_threshold: 16`, `debug_symbols: false`, `static: true`, `link: "static"`, `sources: ["src"]`, `platforms: ["all"]`, `entrypoint: "Main::main"`, `verify_checksum: false`
+   * `debug`: `optimization_level: 0`, `inline_threshold: 8`, `debug_symbols: true`, `static: false`, `link: "dynamic"`, `sources: ["src"]`, `platforms: ["host"]`, `entrypoint: "Main::main"`, `verify_checksum: false`
+   * `test`: `optimization_level: 0`, `inline_threshold: 8`, `debug_symbols: true`, `static: false`, `link: "dynamic"`, `sources: ["src", "tests"]`, `platforms: ["host"]`, `entrypoint: "TestRunner::test"`, `verify_checksum: false`
+   * Custom profile names: use the debug baseline (`entrypoint: "Main::main"`, `sources: ["src"]`, `platforms: ["host"]`).
 3. **Profile Validation:** Requesting an undeclared custom profile name (not `release`, `debug`, or `test`) produces an immediate resolution error.
 
 #### Profile Options:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `entrypoint` | String | `None` (`"TestRunner::test"` for `test`) | Canonical fully-qualified entry point method. |
+| `entrypoint` | String | `"Main::main"` (`"TestRunner::test"` for `test`) | Canonical fully-qualified entry point method. |
 | `optimization_level` | Integer | `3` (`release`) / `0` (`debug`/`test`) | Bytecode optimizer level (`0..=3`). Alias: `opt_level`. |
 | `inline_threshold` | Integer | `16` (`release`) / `8` (`debug`/`test`) | Maximum statement count for AST inlining. |
 | `debug_symbols` | Boolean | `false` (`release`) / `true` (`debug`/`test`) | Emits source line mappings and debug symbols in `.slxb`. |
-| `static` | Boolean | `true` (`release`) / `false` (`debug`/`test`) | Static linking mode (relocates dependency bytecode). Alias: `is_static`. |
-| `link` | String | `"dynamic"` | Linking mode for dependencies: `"dynamic"` or `"static"`. |
+| `static` | Boolean | `true` (`release`) / `false` (`debug`/`test`) | Static linking mode (relocates dependency bytecode). |
+| `link` | String | `"static"` (`release`) / `"dynamic"` (`debug`/`test`) | Linking mode for dependencies: `"dynamic"` or `"static"`. |
 | `emit_disassembly` | Boolean | `false` | Emits human-readable register VM disassembly files during compilation. |
 | `warnings_as_errors` | Boolean | `false` | Treats compiler warnings as fatal errors. |
-| `verify_checksum` | Boolean | `false` (static) / `true` (dynamic release) / `false` (`debug`/`test`) | Validates dependency cryptographic SHA-256 hashes against pinned manifests (bypassed on static, debug, and test profiles for speed). |
+| `verify_checksum` | Boolean | `false` (static, `debug`, `test`) / `true` (dynamic `release`) | Validates dependency cryptographic SHA-256 hashes against pinned manifests (bypassed on static, debug, and test profiles for speed). |
 | `memory_limit_mb` | Integer | `None` | Maximum virtual heap allocation limit in megabytes. |
-| `sources` | List of Strings | `["src"]` (`["tests"]` for `test`) | Recursive directory paths to discover `.slx` source files. |
-| `platforms` | List of Strings | `["host"]` | OS names or architecture targets (see Platform Expansion below). |
+| `sources` | List of Strings | `["src"]` (`["src", "tests"]` for `test`) | Recursive directory paths to discover `.slx` source files. |
+| `platforms` | List of Strings | `["all"]` (`release`) / `["host"]` (`debug`/`test`) | OS names or architecture targets (see Platform Expansion below). |
 | `pre_compile` | List of Strings | `[]` | Shell/tool commands run sequentially before native and Solix compilation. |
 | `post_compile` | List of Strings | `[]` | Shell/tool commands run sequentially after `.slxp` package packaging. |
 | `dependencies` | Mapping | `{}` | Profile-scoped dependency map (`name -> { version, profile }`, where `version` is semver or `>=`/`^`/`~`/`=`/`*` constraint). |
 | `natives` | Mapping | `{}` | Native subprojects compiled automatically for this profile. |
 | `libraries` | List of Strings | `[]` | External pre-compiled shared libraries (`.so`, `.dll`, `.dylib`) verified across all profile target platforms under `bin/<target_triple>/`. |
+| `dynamic_libraries` | List of Strings | `[]` | Runtime dynamic shared library dependencies staged alongside the package. |
 
 ---
 
@@ -198,10 +199,10 @@ supported_platforms:
   - macos-aarch64
 
 native_library_checksums:
-  "bin/x86_64-unknown-linux-gnu/native_solixlib.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
+  "bin/x86_64-unknown-linux-gnu/__native_solixlib.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
 ```
 
-When installing or loading an `.slxp` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxpPackage::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`), caching an `(archive_size, mtime)` sidecar metadata entry so repeated runs skip ZIP/YAML parsing. Companion native shared libraries must follow the `native_*` naming convention for dynamic loading into the VM FFI table.
+When installing or loading an `.slxp` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxpPackage::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`), caching an `(archive_size, mtime)` sidecar metadata entry so repeated runs skip ZIP/YAML parsing. Companion native shared libraries must follow the `__native_*` (or `lib__native_*`) naming convention for dynamic loading into the VM FFI table.
 
 ---
 

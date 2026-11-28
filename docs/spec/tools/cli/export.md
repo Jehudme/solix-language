@@ -7,8 +7,8 @@ The `export` subcommand exports packaged containers (`.slxp`) or compiled byteco
 ## Synopsis
 
 ```bash
-solix export package <target> [options]
-solix export binaries <binary> [options]
+solix export package [path] [options]
+solix export binaries [path] [options]
 ```
 
 ---
@@ -21,17 +21,14 @@ Exports a built package artifact or project directory into a distributable archi
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<target>` | Path | **Yes** | Path to a project root directory containing `manifest.yaml` or an existing package archive. |
+| `[path]` | Path | Optional (default: `.`) | Path to a project root directory containing `manifest.yaml`. |
 
 ### Options & Flags
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--output <path>` | `-o` | Path | None | Destination file or directory path for the exported package. Defaults to `build/<profile>/<name>.slxp`. |
-| `--profile <mode>` | | String | `"release"` | Target build profile (`release`, `debug`, or `test`). |
-| `--debug` | | Flag | `false` | Shorthand for `--profile debug`. |
-| `--release` | | Flag | `false` | Shorthand for `--profile release`. |
-| `--test` | | Flag | `false` | Shorthand for `--profile test`. |
+| `--output <path>` | `-o` | Path | None | Destination file or directory path for the exported package. Defaults to `<name>.slxp` in project or current directory. |
+| `--profile <mode>` | `-p` | String | `"release"` | Target build profile (`release`, `debug`, or `test`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving dependencies. |
 
 ### Example
@@ -44,22 +41,24 @@ solix export package ./my_library --output ./dist/my_library.slxp
 
 ## Subcommand 2: `solix export binaries`
 
-Exports a compiled bytecode container (`.slxb`) to a destination path or distribution folder.
+Exports a standalone compiled `.slxb` bytecode container from a Solix project directory.
 
 ### Positional Arguments
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<binary>` | Path | **Yes** | Path to the compiled `.slxb` bytecode binary container. |
+| `[path]` | Path | Optional (default: `.`) | Path to a project root directory containing `manifest.yaml`. |
 
 ### Options & Flags
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--output <path>` | `-o` | Path | None | Destination file path or directory for the exported binary container. |
+| `--output <path>` | `-o` | Path | None | Destination file path or directory for the exported binary container (`<name>.slxb`). |
+| `--profile <mode>` | `-p` | String | `"release"` | Target build profile (`release`, `debug`, or `test`). |
+| `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving dependencies. |
 
 ### Example
 
 ```bash
-solix export binaries build/release/app.slxb --output ./dist/app.slxb
+solix export binaries ./my_library --output ./dist/app.slxb
 ```

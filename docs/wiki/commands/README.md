@@ -9,8 +9,12 @@ The Solix toolchain provides a unified command-line executable (`solix`) for pro
 | Subcommand | Purpose | Wiki Article | Formal Specification |
 |---|---|---|---|
 | `new` | Scaffolds application or library project workspaces | [Package Commands](package-commands.md#1-solix-new) | [`docs/spec/tools/cli/new.md`](../../spec/tools/cli/new.md) |
+| `init` | Initializes `manifest.yaml` in an existing directory | [Utility Commands](utility-commands.md) | [`docs/spec/tools/cli/init.md`](../../spec/tools/cli/init.md) |
+| `add` | Adds a package dependency to `manifest.yaml` | [Utility Commands](utility-commands.md) | [`docs/spec/tools/cli/add.md`](../../spec/tools/cli/add.md) |
 | `compile` | Compiles `.slx` files into `.slxb` containers | [Compile & Build](compile-and-build.md#1-solix-compile) | [`docs/spec/tools/cli/compile.md`](../../spec/tools/cli/compile.md) |
 | `build` | Builds multi-file projects into `.slxp` packages | [Compile & Build](compile-and-build.md#2-solix-build) | [`docs/spec/tools/cli/build.md`](../../spec/tools/cli/build.md) |
+| `check` | Type-checks a Solix project without emitting bytecode | [Utility Commands](utility-commands.md#1b-solix-check--solix-test) | [`docs/spec/tools/cli/check.md`](../../spec/tools/cli/check.md) |
+| `test` | Compiles and runs `test_*` functions or `TestRunner::test` | [Utility Commands](utility-commands.md#1b-solix-check--solix-test) | [`docs/spec/tools/cli/test.md`](../../spec/tools/cli/test.md) |
 | `run` | Executes `.slxb`, `.slxp`, or `.slx` source files | [Run & Info](run-and-info.md#1-solix-run) | [`docs/spec/tools/cli/run.md`](../../spec/tools/cli/run.md) |
 | `info` | Inspects container metadata, disassembly, or APIs | [Run & Info](run-and-info.md#2-solix-info) | [`docs/spec/tools/cli/info.md`](../../spec/tools/cli/info.md) |
 | `install` | Installs `.slxb` or `.slxp` into local store | [Package Commands](package-commands.md#2-solix-install) | [`docs/spec/tools/cli/install.md`](../../spec/tools/cli/install.md) |

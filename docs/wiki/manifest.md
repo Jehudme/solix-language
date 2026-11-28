@@ -34,7 +34,7 @@ profiles:
     inline_threshold: 16
     debug_symbols: false
     static: true
-    link: dynamic
+    link: static
     sources: *src_dirs
     platforms: *desktop_targets
     pre_compile:
@@ -105,9 +105,9 @@ Because `manifest.yaml` uses standard YAML 1.2 parsing (`serde-saphyr`), you can
 | Key | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `name` | String | **Yes** | — | Unique package identifier (alphanumeric, `_`, `-`) |
-| `version` | String | **Yes** | `"0.1.0"` | SemVer 2.0 package version (`MAJOR.MINOR.PATCH`) |
-| `description` | String | No | `""` | Short project summary |
-| `license` | String | No | `"Apache-2.0"` | SPDX license identifier |
+| `version` | String | No | `"0.1.0"` | SemVer 2.0 package version (`MAJOR.MINOR.PATCH`) |
+| `description` | String | No | `None` | Short project summary |
+| `license` | String | No | `None` (`"Apache-2.0"` in `solix new`) | SPDX license identifier |
 | `authors` | List of Strings | No | `[]` | Author names or `Name <email>` entries |
 
 ---
@@ -116,28 +116,30 @@ Because `manifest.yaml` uses standard YAML 1.2 parsing (`serde-saphyr`), you can
 
 Every profile under `profiles.<profile_name>` is **strictly self-contained**:
 * **Zero inheritance:** `inherits` is rejected with a manifest validation error.
-* Built-in profile names (`release`, `debug`, `test`) receive curated defaults for omitted fields; any custom profile name (such as `cmake_backend` or `rust_backend`) uses the `release` baseline with `entrypoint: None` and `sources: ["src"]`.
+* Built-in profile names (`release`, `debug`, `test`) receive curated defaults for omitted fields; any custom profile name (such as `cmake_backend` or `rust_backend`) uses the `debug` baseline (`entrypoint: "Main::main"`, `sources: ["src"]`, `platforms: ["host"]`).
 
 #### Profile Fields Reference
 
 | Field | Type | `release` Default | `debug` Default | `test` Default | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `entrypoint` | String | `None` | `None` | `"TestRunner::test"` | Canonical `Class::method` entrypoint symbol |
+| `entrypoint` | String | `"Main::main"` | `"Main::main"` | `"TestRunner::test"` | Canonical `Class::method` entrypoint symbol |
 | `optimization_level` | Integer (`0..=3`) | `3` | `0` | `0` | Compiler optimizer level (alias: `opt_level`) |
 | `inline_threshold` | Integer | `16` | `8` | `8` | Max statement count for AST inlining |
 | `debug_symbols` | Boolean | `false` | `true` | `true` | Emits line tables and debug symbols in `.slxb` |
-| `static` | Boolean | `true` | `false` | `false` | Relocates dependencies statically (alias: `is_static`) |
-| `link` | `"dynamic"` \| `"static"` | `"dynamic"` | `"dynamic"` | `"dynamic"` | Dependency link mode override |
+| `static` | Boolean | `true` | `false` | `false` | Relocates dependencies statically |
+| `link` | `"dynamic"` \| `"static"` | `"static"` | `"dynamic"` | `"dynamic"` | Dependency link mode override |
 | `emit_disassembly` | Boolean | `false` | `false` | `false` | Emits `.slxasm` disassembly artifacts |
 | `warnings_as_errors` | Boolean | `false` | `false` | `false` | Promotes compiler warnings to hard errors |
 | `verify_checksum` | Boolean | `false` (static) / `true` (dynamic) | `false` | `false` | Enforces SHA-256 verification on dependencies (bypassed on static, debug, and test profiles for speed; enforced on dynamic release) |
 | `memory_limit_mb` | Integer | `None` | `None` | `None` | Optional runtime heap cap in MiB |
-| `sources` | List of Strings | `["src"]` | `["src"]` | `["tests"]` | Directories scanned recursively for `.slx` files |
-| `platforms` | List of Strings | `["host"]` | `["host"]` | `["host"]` | Target OS tokens, `<os>-<arch>` pairs, or Rust triples |
+| `sources` | List of Strings | `["src"]` | `["src"]` | `["src", "tests"]` | Directories scanned recursively for `.slx` files |
+| `platforms` | List of Strings | `["all"]` | `["host"]` | `["host"]` | Target OS tokens, `<os>-<arch>` pairs, or Rust triples |
 | `pre_compile` | List of Strings | `[]` | `[]` | `[]` | Commands executed sequentially before native & Solix compilation |
 | `post_compile` | List of Strings | `[]` | `[]` | `[]` | Commands executed sequentially after `.slxp` packaging |
 | `dependencies` | Mapping | `{}` | `{}` | `{}` | Profile-scoped dependency requirements |
 | `natives` | Mapping | `{}` | `{}` | `{}` | Auto-detected native subprojects compiled for this profile |
+| `libraries` | List of Strings | `[]` | `[]` | `[]` | Prebuilt native libraries verified in `bin/<target_triple>/` |
+| `dynamic_libraries` | List of Strings | `[]` | `[]` | `[]` | Runtime dynamic shared libraries staged alongside the package |
 
 ---
 
@@ -179,6 +181,9 @@ Entries under `profiles.<name>.natives.<key>` never require a `type` field. Soli
 | `profile` | String | Parent Solix profile | Native optimization profile (`debug` or `release`) |
 | `platforms` | List of Strings | Parent `platforms` | Optional target list overriding the profile's `platforms` |
 | `flags` | List of Strings | `[]` | Extra flags passed directly to Cargo or CMake (`-D...`, `--features ...`) |
+| `strategy` | String | `"docker"` | Containerized compilation strategy (`"docker"` / `"container"`) |
+| `docker` | Boolean | `true` | Enables containerized cross-compilation (`cross` / `dockcross`) |
+| `docker_image` | String | Standard image | Custom Docker container image override |
 
 ---
 
@@ -189,16 +194,17 @@ Dependencies under `profiles.<name>.dependencies` map package name -> metadata o
 ```yaml
 dependencies:
   solix:
-    version: "2.0.0"
+    version: "2.2.1"
     profile: release
-  local_math: "0.1.0"
+  local_math:
+    version: "0.1.0"
 ```
 
 ---
 
 ### 7. Generated Package Integrity Fields
 
-During `solix build`, packaged `.slxp` packages receive automatically stamped `supported_platforms` and `native_library_checksums` mappings (FIPS 180-4 SHA-256 digests keyed by `bin/<target_triple>/<library_filename>`). Companion native shared libraries must follow the `native_*` naming convention for runtime dynamic loading.
+During `solix build`, packaged `.slxp` packages receive automatically stamped `supported_platforms` and `native_library_checksums` mappings (FIPS 180-4 SHA-256 digests keyed by `bin/<target_triple>/<library_filename>`). Companion native shared libraries must follow the `__native_*` (or `lib__native_*`) naming convention for runtime dynamic loading.
 
 ---
 

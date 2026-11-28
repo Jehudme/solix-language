@@ -101,7 +101,7 @@ endif()
 | `SolixCValue` | `{ uint32_t tag; uint32_t flags; uint64_t payload; }` | 16-byte C-ABI value container |
 | `SolixNativeFunctionPtr` | `SolixCValue (*)(void* vm_context, const SolixCValue* args, uint32_t arg_count, SolixCValue* out_error)` | Canonical native function pointer signature |
 | `SolixRegisterCallback` | `void (*)(void* collector_context, const char* symbol_name, SolixNativeFunctionPtr fn_ptr)` | VM registration callback passed into `solix_register_natives` |
-| `SolixNativeEntry` | `{ const char* symbol_name; SolixNativeFunctionPtr fn_ptr; }` | Symbol-to-function descriptor used by `SOLIX_REGISTER_MODULE` |
+| `SolixNativeEntry` | `{ const char* symbol; SolixNativeFunctionPtr function_pointer; }` | Symbol-to-function descriptor used by `SOLIX_REGISTER_MODULE` |
 | `SolixVmContext` | `{ magic, vm_ptr, get_field_i32, set_field_i32, read_bytes, alloc_string, alloc_chars, alloc_byte_array, alloc_array, array_len, array_get_u64, array_set_u64, alloc_object, read_field_u64, write_field_u64, get_class_vtable_id, get_vm_metric, collect_cycles, set_cycle_threshold, get_field_i32_by_index, set_field_i32_by_index, get_field_i32_by_offset, set_field_i32_by_offset, read_field_u64_by_index, write_field_u64_by_index, read_field_u64_by_offset, write_field_u64_by_offset }` | Live VM callback vtable supplied by `vm_context` |
 
 ---
@@ -190,10 +190,10 @@ static SolixCValue native_greet(
         return solix_cvalue_null();
     }
 
-    uint32_t name_len = 0;
+    size_t name_len = 0;
     char* guest_name = solix_vm_read_string_alloc(ctx, solix_cvalue_as_ref(args[0]), &name_len);
     if (guest_name == NULL) {
-        solix_vm_set_error(ctx, out_error, "Failed to read guest string");
+        solix_vm_set_error(vm_context, out_error, "Failed to read guest string");
         return solix_cvalue_null();
     }
 

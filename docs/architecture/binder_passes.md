@@ -18,7 +18,7 @@ flowchart TD
 ---
 
 ## 2. Pass 1a: Symbol Discovery & Package Registration
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass1_symbol_discovery.rs`](../../crates/solix-compilation/src/phases/binder/passes/pass1_symbol_discovery.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/binder.rs`](../../crates/solix-compilation/src/phases/binder/binder.rs)
 - **Goal**: Register the names of all top-level types across all compilation units before inspecting any bodies.
 - **Operations**:
   - Traverses the `Program` AST across all parsed source files.
@@ -30,7 +30,7 @@ flowchart TD
 ---
 
 ## 3. Pass 1b: Type Hierarchy & Member Registration
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass2_type_hierarchy.rs`](../../crates/solix-compilation/src/phases/binder/passes/pass2_type_hierarchy.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/binder.rs`](../../crates/solix-compilation/src/phases/binder/binder.rs)
 - **Goal**: Establish inheritance relationships and calculate physical class memory layouts without type-checking method bodies.
 - **Operations**:
   - Resolves `extends` base classes and `implements` interfaces against registered symbols.
@@ -44,7 +44,7 @@ flowchart TD
 ---
 
 ## 4. Pass 2: Type Checking, Scoping & ARC Insertion
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass3_type_checking.rs`](../../crates/solix-compilation/src/phases/binder/passes/pass3_type_checking.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/binder.rs`](../../crates/solix-compilation/src/phases/binder/binder.rs)
 - **Goal**: Full semantic validation of statements and expressions, call resolution, and insertion of memory management hooks.
 - **Operations**:
   - Validates expression types, binary operations, method argument matching, and explicit type casts.

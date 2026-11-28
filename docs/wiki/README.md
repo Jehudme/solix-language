@@ -14,7 +14,7 @@ Exhaustive reference for every diagnostic code emitted by the compiler and virtu
 * [**Parser Errors (`E0101`–`E0200`)**](errors/parser-errors.md): Grammar violations, mismatched delimiters, missing semicolons, malformed signatures.
 * [**Binder & Semantic Errors (`E0201`–`E0299`)**](errors/binder-errors.md): Type mismatches, undefined symbols, invalid static access (`.` vs `::`), vtable conflicts, missing interface methods.
 * [**Emission Errors (`E0300`–`E0350`)**](errors/emission-errors.md): Register overflow, malformed container headers, constant pool exhaustion.
-* [**Runtime Execution Errors (`R0001`–`R0024`)**](errors/runtime-errors.md): Stack overflow, null reference dereference, division by zero, invalid cast traps, entrypoint signature mismatches.
+* [**Runtime Execution Errors (`R0000`–`R0027`)**](errors/runtime-errors.md): Stack overflow, null reference dereference, division by zero, invalid cast traps, entrypoint signature mismatches.
 
 ### 2. [Built-in Primitive Types (`primitives/`)](primitives/README.md)
 All built-in primitive scalar and structural types, memory layouts, ranges, and conversion rules:
@@ -32,7 +32,7 @@ Comprehensive flag descriptions, usage syntax, and output options:
 * [**Package & Scaffolding Commands**](commands/package-commands.md): `solix new`, `solix new native`, `solix install`, `solix uninstall`, and `solix list`.
 
 ### 4. [Language Keywords Dictionary (`keywords/`)](keywords/README.md)
-Alphabetical reference for all 45+ reserved language keywords across control flow, declarations, modifiers, and expressions.
+Alphabetical reference for all 58 reserved language and primitive type keywords across control flow, declarations, modifiers, and expressions.
 
 ### 5. [Lexical Cheat Sheet](lexical.md)
 Tokenization, numeric literals, escape sequences, operators, and comment rules.

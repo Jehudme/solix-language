@@ -18,7 +18,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `[target]` | Path | Optional (for `package`) | Path to a Solix project root directory or `.slxp` package archive (defaults to current directory). |
+| `<target>` | Path | **Yes** (for `package`) | Path to a Solix project root directory or `.slxp` package archive. |
 | `<sources...>` | Paths | **Yes** (for `source`) | One or more `.slx` source files to compile in-memory and execute directly. |
 | `<binaries...>` | Paths | **Yes** (for direct invocation) | One or more `.slxb` binary containers, `.slxp` packages, or `.slx` source files to execute. |
 
@@ -35,7 +35,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 | `--heap-size <size>` | | String | `"32MB"` | Virtual heap allocation capacity limit (e.g., `"16MB"`, `"64MB"`, `"1GB"`). |
 | `--max-stack <depth>` | | Integer | `1024` | Maximum call stack frame depth limit. |
 | `--cycle-collector <mode>` | | String | `"on"` | Controls the Bacon & Rajan cycle collector (`on`/`true`/`1` or `off`/`false`/`0`). |
-| `--cycle-threshold <count>` | | Integer | `256` | Potential-cycle candidate buffer threshold triggering background collection (must be `>= 1`, otherwise halts with `[E0341]`). |
+| `--cycle-threshold <count>` | | Integer | `1024` | Potential-cycle candidate buffer threshold triggering background collection (must be `>= 1`, otherwise halts with `[E0341]`). |
 | `--cycle-budget-us <us>` | | Integer | None | Optional per-pause microsecond time budget for incremental cycle collection steps. |
 | `--verbose` | `-v` | Flag | `false` | Prints VM execution statistics and memory report upon process completion. |
 | `--safe` | | Flag | `false` | Executes in safe mode with defensive invariant validation and strict bounds checking. |
@@ -71,7 +71,7 @@ solix run bin/app.slxb
 
 When given a package container, the runtime:
 1. Inspects embedded `manifest.yaml` (or legacy `manifest.toml`).
-2. Automatically stages and loads bundled companion native shared libraries matching `native_*` in `bin/<target_triple>/*` (with fallback to `lib/<target_triple>/*`).
+2. Automatically stages and loads bundled companion native shared libraries matching `__native_*` (or `lib__native_*`) in `bin/<target_triple>/*` (with fallback to `lib/<target_triple>/*`).
 3. Sets `SOLIX_RESOURCE_ROOT` to the package resources directory.
 4. Selects the target entry point using strict precedence:
    - Explicit `--entry <symbol>` override on the CLI (validating symbol existence, throwing `[E0301]` on missing entrypoint).

@@ -137,13 +137,25 @@ Used for static, direct, and virtual function dispatch:
 | `0x33` | `EqBool`| A | `dst, src1, src2` | `dst = (src1 == src2)`. |
 | `0x34` | `EqString`| A | `dst, src1, src2` | String equality comparison. |
 | `0x35` | `EqRef` | A | `dst, src1, src2` | Object address identity comparison. |
-| `0x36` | `NeqI32`| A | `dst, src1, src2` | `dst = (src1 != src2)`. |
+| `0x36` | `NeqI32` | A | `dst, src1, src2` | `dst = (src1 != src2)`. |
+| `0x37` | `NeqI64` | A | `dst, src1, src2` | `dst = (src1 != src2)`. |
+| `0x38` | `NeqF64` | A | `dst, src1, src2` | `dst = (src1 != src2)`. |
+| `0x39` | `NeqBool` | A | `dst, src1, src2` | `dst = (src1 != src2)`. |
+| `0x3A` | `NeqString` | A | `dst, src1, src2` | String inequality comparison. |
+| `0x3B` | `NeqRef` | A | `dst, src1, src2` | Object address inequality comparison. |
 | `0x3C` | `LtI32` | A | `dst, src1, src2` | `dst = (src1 < src2)`. |
 | `0x3D` | `LtI64` | A | `dst, src1, src2` | `dst = (src1 < src2)`. |
 | `0x3E` | `LtF64` | A | `dst, src1, src2` | `dst = (src1 < src2)`. |
-| `0x3F` | `LteI32`| A | `dst, src1, src2` | `dst = (src1 <= src2)`. |
+| `0x3F` | `LteI32` | A | `dst, src1, src2` | `dst = (src1 <= src2)`. |
+| `0x40` | `LteI64` | A | `dst, src1, src2` | `dst = (src1 <= src2)`. |
+| `0x41` | `LteF64` | A | `dst, src1, src2` | `dst = (src1 <= src2)`. |
 | `0x42` | `GtI32` | A | `dst, src1, src2` | `dst = (src1 > src2)`. |
-| `0x45` | `GteI32`| A | `dst, src1, src2` | `dst = (src1 >= src2)`. |
+| `0x43` | `GtI64` | A | `dst, src1, src2` | `dst = (src1 > src2)`. |
+| `0x44` | `GtF64` | A | `dst, src1, src2` | `dst = (src1 > src2)`. |
+| `0x45` | `GteI32` | A | `dst, src1, src2` | `dst = (src1 >= src2)`. |
+| `0x46` | `GteI64` | A | `dst, src1, src2` | `dst = (src1 >= src2)`. |
+| `0x47` | `GteF64` | A | `dst, src1, src2` | `dst = (src1 >= src2)`. |
+| `0x48` | `Not` | A | `dst, src1` | Logical boolean negation (`!src1`). |
 | `0x49` | `LtU32` | A | `dst, src1, src2` | `dst = (src1 < src2)` unsigned 32-bit. |
 | `0x4A` | `LteU32`| A | `dst, src1, src2` | `dst = (src1 <= src2)` unsigned 32-bit. |
 | `0x4B` | `GtU32` | A | `dst, src1, src2` | `dst = (src1 > src2)` unsigned 32-bit. |
@@ -153,28 +165,51 @@ Used for static, direct, and virtual function dispatch:
 | `0x4F` | `GtU64` | A | `dst, src1, src2` | `dst = (src1 > src2)` unsigned 64-bit. |
 | `0xEE` | `GteU64`| A | `dst, src1, src2` | `dst = (src1 >= src2)` unsigned 64-bit. |
 
-### 3.5. Memory & Object Allocation (`0x60` .. `0x6F`)
+### 3.5. Control Flow (`0x50` .. `0x53`)
 | Opcode Hex | Name | Format | Operands | Description |
 |---|---|---|---|---|
-| `0x60` | `NewObject` | B | `dst, class_id` | Allocates class instance on heap with 8-byte header. |
-| `0x61` | `GetField` | A | `dst, obj, offset` | Reads field word from heap object. |
-| `0x62` | `SetField` | A | `obj, offset, src` | Writes field word to heap object. |
-| `0x63` | `GetStatic` | B | `dst, static_addr` | Reads from static partition. |
-| `0x64` | `SetStatic` | B | `src, static_addr` | Writes to static partition. |
-| `0x65` | `IncRef` | A | `obj` | Increments 28-bit reference count. |
-| `0x66` | `DecRef` | A | `obj` | Decrements reference count; triggers cleanup at 0. |
+| `0x50` | `Jump` | C | `offset` | Unconditional signed jump: `pc += offset`. |
+| `0x51` | `JumpIfTrue` | C | `cond, offset` | Conditional jump if `cond != 0`. |
+| `0x52` | `JumpIfFalse` | C | `cond, offset` | Conditional jump if `cond == 0`. |
+| `0x53` | `Switch` | B | `reg, table_idx` | Jump-table dispatch on integer/enum value. |
 
-### 3.6. Control Flow & Function Calls (`0x80` .. `0x8F`)
+### 3.6. Function Invocations & Returns (`0x60` .. `0x69`)
 | Opcode Hex | Name | Format | Operands | Description |
 |---|---|---|---|---|
-| `0x80` | `Jump` | C | `offset` | Unconditional signed jump: `pc += offset`. |
-| `0x81` | `JumpIfTrue` | C | `cond, offset` | Conditional jump if `cond != 0`. |
-| `0x82` | `JumpIfFalse`| C | `cond, offset` | Conditional jump if `cond == 0`. |
-| `0x83` | `CallDirect` | Call | `dst, fn_id, base, count` | Direct static function call with sliding window. |
-| `0x84` | `CallVirtual`| Call | `dst, slot, base, count` | Virtual method dispatch via VTable. |
-| `0x85` | `CallInterface`| Call | `dst, itable_slot, base, count` | Interface method dispatch via ITable. |
-| `0x86` | `Ret` | A | `val` | Returns `val` to caller's destination register. |
-| `0x87` | `RetVoid` | A | — | Returns `void`. |
+| `0x60` | `CallDirect` | Call | `dst, fn_id, base, count` | Direct static function call with sliding window. |
+| `0x61` | `CallVirtual` | Call | `dst, slot, base, count` | Virtual method dispatch via VTable. |
+| `0x62` | `CallInterface` | Call | `dst, itable_slot, base, count` | Interface method dispatch via ITable. |
+| `0x63` | `CallSymbol` | Call | `dst, sym_idx, base, count` | Dynamic symbol dispatch. |
+| `0x64` | `CallCallable` | Call | `dst, fn_reg, base, count` | Invokes a closure or function pointer register. |
+| `0x65` | `Return` | A | — | Returns `void`. |
+| `0x66` | `ReturnValue` | A | `val` | Returns `val` to caller's destination register. |
+| `0x67` | `Exit` | A | `code` | Terminates VM execution with exit status `code`. |
+| `0x68` | `CallExtern` | Call | `dst, sym_idx, base, count` | Invokes an external library function by symbol. |
+| `0x69` | `CallNativeDirect` | Call | `dst, native_id, base, count` | Direct native FFI invocation by resolved index. |
+
+### 3.7. Objects, Fields, Statics & ARC (`0x70` .. `0x79`, `0xC0` .. `0xC1`)
+| Opcode Hex | Name | Format | Operands | Description |
+|---|---|---|---|---|
+| `0x70` | `AllocObject` | B | `dst, class_id` | Allocates class instance on heap with 8-byte header. |
+| `0x71` | `GetField` | A | `dst, obj, offset` | Reads field word from heap object (`FLAG_WEAK` supported). |
+| `0x72` | `SetField` | A | `obj, offset, src` | Writes field word to heap object (`FLAG_WEAK` / `FLAG_MOVE` supported). |
+| `0x73` | `GetStatic` | B | `dst, static_addr` | Reads from static partition. |
+| `0x74` | `SetStatic` | B | `src, static_addr` | Writes to static partition. |
+| `0x75` | `GetStaticGlobal` | B | `dst, sym_idx` | Reads global static slot by symbol index. |
+| `0x76` | `GetStaticDirect` | B | `dst, slot` | Reads resolved static slot directly. |
+| `0x77` | `SetStaticGlobal` | B | `src, sym_idx` | Writes global static slot by symbol index. |
+| `0x78` | `SetStaticDirect` | B | `src, slot` | Writes resolved static slot directly. |
+| `0x79` | `AllocObjectExtern` | B | `dst, sym_idx` | Allocates external dependency class by symbol index. |
+| `0x90` | `PackClosure` | Call | `dst, fn_id, base, count` | Allocates closure environment capturing `count` registers. |
+| `0x91` | `UnpackCaptures` | A | `base, count` | Unpacks captured variables into registers starting at `base`. |
+| `0xA0` | `Instanceof` | B | `dst, obj, vtable_id` | Runtime class/interface type check. |
+| `0xA1` | `CastCheck` | B | `dst, obj, vtable_id` | Checked reference cast (throws `TypeCastException` on mismatch). |
+| `0xA2` | `ConvIToF` | A | `dst, src` | Converts integer register to `float64`. |
+| `0xA3` | `ConvFToI` | A | `dst, src` | Converts `float64` register to `int64`. |
+| `0xA4` | `TupleInstanceof` | B | `dst, tuple_reg, idx` | Checks runtime type tag of tuple element at `idx`. |
+| `0xB0` | `Throw` | A | `exception_reg` | Throws exception and initiates stack unwinding. |
+| `0xC0` | `IncRef` | A | `obj` | Increments 26-bit reference count. |
+| `0xC1` | `DecRef` | A | `obj` | Decrements reference count; triggers cleanup at 0. |
 
 ### 3.7. Array Operations & Element Tagging
 - `AllocArray`: Allocates typed `ArrayRef` on the heap with element count capacity, exact storage byte stride (`1` byte for `int8`/`uint8`/`bool`/`char`, `2` bytes for `int16`/`uint16`, `4` bytes for `int32`/`uint32`/`float32`, and `8` bytes for 64-bit scalars and object references), and element type tag. For object reference arrays, Format A operand `src2` delivers the 16-bit target class `vtable_id` encoded into array header metadata bytes `5..7` to prevent truncated 7-bit vtable mismatches during monomorphized array store verification (`ArrayStoreMismatch`).

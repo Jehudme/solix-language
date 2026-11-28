@@ -25,9 +25,9 @@ solix doc [path] [options]
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
 | `--output <dir>` | `-o` | Path | `docs/api` | Directory where generated documentation artifacts are written. |
-| `--format <format>` | | String | `"html"` | Output documentation format: `html` (responsive web app) or `markdown` (`md`). |
+| `--format <format>` | `-f` | String | `"html"` | Output documentation format: `html` (responsive web app) or `markdown` (`md`). |
 | `--open` | | Flag | `false` | Automatically opens `index.html` in the user's default web browser upon completion. |
-| `--profile <mode>` | | String | `"debug"` | Target build profile to resolve dependencies and source manifests. |
+| `--profile <mode>` | `-p` | String | `"release"` | Target build profile to resolve dependencies and source manifests. |
 
 ---
 

@@ -44,8 +44,12 @@ solix <subcommand> --help
 | Subcommand | Description | Specification Link |
 |---|---|---|
 | [`new`](new.md) | Scaffolds a new Solix project workspace with build automation, test harness, and native bridge | [new.md](new.md) |
+| [`init`](init.md) | Initializes a `manifest.yaml` in an existing directory without overwriting sources | [init.md](init.md) |
+| [`add`](add.md) | Adds a package dependency to the project's `manifest.yaml` | [add.md](add.md) |
 | [`compile`](compile.md) | Compiles `.slx` source files into an executable binary container (`.slxb`) | [compile.md](compile.md) |
 | [`build`](build.md) | Orchestrates building a project and packages it into a package container (`.slxp`) | [build.md](build.md) |
+| [`check`](check.md) | Type-checks a Solix project without emitting bytecode | [check.md](check.md) |
+| [`test`](test.md) | Compiles and runs discovered `test_*` functions or `TestRunner::test` | [test.md](test.md) |
 | [`run`](run.md) | Executes `.slxb` binaries, `.slxp` packages, or `.slx` source files on the 64-bit Register VM | [run.md](run.md) |
 | [`info`](info.md) | Inspects metadata, export manifests, disassembly, or synthesized APIs of `.slxb` or `.slxp` | [info.md](info.md) |
 | [`install`](install.md) | Installs a `.slxb` binary, `.slxp` package, or project directory into the local package store | [install.md](install.md) |
@@ -84,11 +88,16 @@ solix <subcommand> --help
 ## Detailed Subcommand Specifications
 
 - [**`new` Subcommand**](new.md): Project scaffolding, applications, libraries (`--lib`), dual-mode C/C++/Rust native bridges (`--native`, `new native`), and pure Solix projects (`--no-native`).
+- [**`init` Subcommand**](init.md): Initializing `manifest.yaml` in an existing directory without overwriting sources.
+- [**`add` Subcommand**](add.md): Adding package dependencies (`<name>@<version>`) to `manifest.yaml`.
 - [**`compile` Subcommand**](compile.md): Multi-file compilation, static linking (`--static`), syntax checking (`--check`), and performance telemetry.
 - [**`build` Subcommand**](build.md): Profile-driven (`--release`, `--debug`, `--test`) build orchestration and `.slxp` package generation.
+- [**`check` Subcommand**](check.md): Fast type-checking across project sources without emitting bytecode.
+- [**`test` Subcommand**](test.md): Compiling and executing `test_*` functions and test runners.
 - [**`run` Subcommand**](run.md): VM runtime execution, direct `.slx` execution, `.slxp` package ingestion, and guest argument passing.
 - [**`info` Subcommand**](info.md): Disassembly (`--disasm`), API reconstruction (`--api`), and JSON manifest extraction (`--json`).
 - [**`install` Subcommand**](install.md): Installing `.slxb` and `.slxp` packages into the local store.
+- [**`export` Subcommand**](export.md): Exporting `.slxp` packages and standalone `.slxb` binaries for distribution.
 - [**`clean` Subcommand**](clean.md): Cleaning project build artifacts (`build/`) and intermediate caches (`build/.cache/`).
 - [**`uninstall` Subcommand**](uninstall.md): Removing packages and versions from the local store.
 - [**`list` Subcommand**](list.md): Listing installed packages with tabular and `--json` formatting.

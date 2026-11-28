@@ -7,7 +7,7 @@ The `solix lsp` subcommand starts the official Solix Language Server Protocol (L
 ## 1. Synopsis
 
 ```bash
-solix lsp [options]
+solix lsp [path] [options]
 ```
 
 > [!NOTE]
@@ -17,9 +17,11 @@ solix lsp [options]
 
 ## 2. Key Options & Flags
 
+* `[path]`: Optional project root directory [default: `.`].
 * `--stdio`: Runs the Language Server over standard input and standard output streams [default: `true`].
+* `--pkg-dir <DIR>`: Package store root directory override.
 * `-h, --help`: Prints command help information.
-* `-V, --version`: Prints version information for `solix-lsp`.
+* `-V, --version`: Prints version information for the unified `solix` CLI.
 
 ---
 
@@ -75,7 +77,7 @@ The Solix Language Server supports 32 language intelligence features:
 
 1. **Protocol & Lifecycle**: LSP 3.17 initialization, shutdown, exit handshake.
 2. **Document Overlay**: Live in-memory buffer synchronization (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`).
-3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.yaml` / `manifest.toml` discovery, unified `configuration` and self-contained `profiles` dependency resolution (supporting mapping notation `name: { version: "...", profile: "..." }` and shorthand notation), and `ClientModuleSolver` dependency resolution (`~/.solix/packages`).
+3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.yaml` (and legacy `manifest.toml`) discovery, unified `configuration` and self-contained `profiles` dependency resolution (using mapping notation `name: { version: "...", profile: "..." }`), and `ClientModuleSolver` dependency resolution (`~/.solix/packages`).
 4. **Resilient Compilation**: AST and semantic cache retention during partial typing or syntax errors.
 5. **Push Diagnostics**: Real-time error and warning squiggles strictly isolated by `source_id` with strict compiler import resolution parity (exempting only `std::*`), linked to the repository error reference documentation (`https://github.com/Jehudme/solix-language/blob/master/docs/wiki/errors/` and offline via `solix wiki`).
 6. **Code Navigation**: Go-to Definition (`gd`), Type Definition (`gy`), Implementation (`gi`), and Find All References (`gr`).

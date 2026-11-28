@@ -16,13 +16,13 @@ solix run source <file.slx> [options] [-- [guest_args...]]
 * `<binaries...>`: One or more target binary files (`.slxb`), package containers (`.slxp`), or raw source files (`.slx`).
 * `-l, --lib <path>`: External library binary or native shared object (`.so`, `.dll`, `.dylib`) to link (can be repeated).
 * `-e, --entry <symbol>`: Overrides application entry point method [default: `Main::main`].
-* `--test`: Executes test entry point defined in package `manifest.yaml` (`profiles.test.entrypoint`, or legacy `[entrypoints].test`).
+* `--test`: Executes test entry point defined in package `manifest.yaml` (`profiles.test.entrypoint`).
 * `-p, --profile <profile>`: Target build profile to execute (`release`, `debug`, `test`).
 * `--inline-threshold <N>`: Inlining statement threshold limit for in-memory source compilation [default: `8`].
 * `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`]. Returns `RuntimeError::OutOfMemory` immediately if initial constant pool string interning exceeds this limit.
 * `--max-stack <depth>`: Maximum call stack frame depth [default: `1024`].
 * `--cycle-collector <on|off>`: Enables or disables Bacon & Rajan cyclic garbage collection during execution [default: `on`].
-* `--cycle-threshold <count>`: Cycle root buffer threshold triggering collection [default: `256`]. Values of `0` fail with `[E0341]`.
+* `--cycle-threshold <count>`: Cycle root buffer threshold triggering collection [default: `1024`]. Values of `0` fail with `[E0341]`.
 * `--cycle-budget-us <microseconds>`: Optional incremental time budget per collection step in microseconds.
 * `-v, --verbose`: Prints VM execution summary and heap statistics upon completion.
 * `--safe`: Executes in defensive safe mode with bounds checking and invariant assertions.
@@ -71,11 +71,12 @@ solix info <binary> [options]
 ```
 
 ### Key Options & Flags
-* `<binary>`: Path to compiled binary container (`*.slxb`) or package container (`*.slxp`).
+* `<target>`: Path to compiled binary container (`*.slxb`), package container (`*.slxp` / `*.slxarc`), project directory, or installed package name (`<name>` or `<name>@<version>`).
 * `-o, --output <file>`: Destination file path for inspection data [default: `stdout`].
 * `--disasm`: Disassembles all functions into human-readable 64-bit Register VM opcodes.
 * `--api`: Emits reconstructed Solix public API interface declarations (`.slx`).
 * `--json`: Emits container metadata, sections, classes, and manifests as structured JSON.
+* `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
 
 ### Practical Examples
 ```bash

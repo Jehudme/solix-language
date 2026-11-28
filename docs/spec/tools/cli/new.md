@@ -7,6 +7,7 @@ The `new` subcommand initializes Solix project workspaces configured with `manif
 ## Synopsis
 
 ```bash
+solix new [path] [options]
 solix new package <path> [options]
 solix new native <name> [options]
 ```
@@ -27,7 +28,7 @@ solix new native <name> [options]
 |---|---|---|---|---|
 | `--name <name>` | | String | Target directory name | Project and package identifier name. |
 | `--version <version>` | | String | `"0.1.0"` | Initial semantic version for the package. |
-| `--description <desc>` | | String | `"A Solix project"` | Human-readable package description. |
+| `--description <desc>` | | String | `"A Solix project"` (`"A Solix package"` for `new package`) | Human-readable package description. |
 | `--license <id>` | | String | `"Apache-2.0"` | SPDX license identifier. |
 | `--author <name>` | | String (Repeated) | `[]` | Author attribution name (can be repeated). |
 | `--main <symbol>` | | String | `"Main::main"` | Canonical application entry point symbol. |
@@ -127,7 +128,7 @@ profiles:
         profile: release
     dependencies:
       solix:
-        version: "2.0.1"
+        version: "2.2.1"
         profile: release
 
   debug:
@@ -145,7 +146,7 @@ profiles:
         profile: debug
     dependencies:
       solix:
-        version: "2.0.1"
+        version: "2.2.1"
         profile: release
 
   test:
@@ -164,7 +165,7 @@ profiles:
         profile: debug
     dependencies:
       solix:
-        version: "2.0.1"
+        version: "2.2.1"
         profile: release
 ```
 

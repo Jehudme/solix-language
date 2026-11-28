@@ -14,7 +14,7 @@ Every Solix release includes binary installers and standalone portable archives:
 | **Fedora / RHEL** | `.rpm` | `cargo-generate-rpm` | Red Hat package installer |
 | **Linux (Generic)** | `.tar.gz` | `tar` | Portable archive with precompiled standard library |
 | **macOS (Generic)** | `.tar.gz` | `tar` | Portable archive for Apple Silicon (`aarch64`) & Intel (`x86_64`) |
-| **Windows (Generic)**| `.zip` | `zip` | Portable archive with `solix.exe`, `solix-lsp.exe`, `solix-dbg.exe` |
+| **Windows (Generic)**| `.zip` | `zip` | Portable archive with `solix.exe` unified CLI |
 | **VS Code Extension**| `.vsix` | `vsce` | Language Server client, syntax highlighting, and snippets |
 
 ---
@@ -28,16 +28,14 @@ To build and package Solix locally using Cargo:
 cargo build --release --workspace
 ```
 
-The compiled binaries are generated in `target/release/`:
-- `solix` — Unified CLI compiler, runner, and package manager
-- `solix-lsp` — Language Server Protocol daemon
-- `solix-dbg` — Interactive command-line debugger
+The compiled unified CLI binary is generated in `target/release/`:
+- `solix` — Unified CLI compiler, runner, package manager, LSP (`solix lsp`), and DAP (`solix dap`)
 
 ### Step 2: Assemble Portable Distribution Archive
 ```bash
 # Package portable distribution bundle
 tar -czvf solix-x86_64-unknown-linux-gnu.tar.gz \
-    -C target/release solix solix-lsp solix-dbg \
+    -C target/release solix \
     -C ../libraries solixlib
 ```
 
@@ -50,9 +48,7 @@ Generated release packages distribute the following directory hierarchy:
 ```text
 <install_prefix>/
 ├── bin/
-│   ├── solix            # CLI compiler, runner, and package tool
-│   ├── solix-lsp        # Language server daemon
-│   └── solix-dbg        # Interactive bytecode debugger
+│   └── solix            # Unified CLI compiler, runner, package tool, LSP, and DAP
 └── share/
     ├── doc/solix/
     │   ├── LICENSE
@@ -60,7 +56,7 @@ Generated release packages distribute the following directory hierarchy:
     └── solix/
         ├── solixlib/    # Bundled official standard library
         │   ├── manifest.yaml
-        │   ├── lib/libsolixlib_native.so
+        │   ├── bin/x86_64-unknown-linux-gnu/libsolixlib_native.so
         │   └── src/solix/...
         └── vscode/
             └── solix-vscode.vsix # Bundled editor extension

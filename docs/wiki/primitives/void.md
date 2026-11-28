@@ -2,7 +2,7 @@
 
 The `void` type signifies the absence of a value:
 * **Function Returns:** Indicates that a function returns no value (`void main()`).
-* **Invariants:** Cannot be used as a variable type, struct field, or generic type argument (`void x;` is compile error `E0245`).
+* **Invariants:** Cannot be used as a variable type, struct field, or generic type argument (`void invalid_var;` is compile error `E0254`).
 
 ```solix
 public void log_event(string message) {

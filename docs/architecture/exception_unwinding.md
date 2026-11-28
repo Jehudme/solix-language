@@ -19,12 +19,16 @@ pub struct ExceptionHandlerEntry {
     pub try_start_pc: u32,
     /// Ending bytecode instruction offset (exclusive).
     pub try_end_pc: u32,
-    /// Target bytecode offset of the catch handler block.
-    pub catch_pc: u32,
-    /// Expected exception Class ID (0 matches any Exception type).
-    pub class_id: u32,
+    /// Expected exception class symbol (`None` matches any Exception type).
+    pub catch_type_symbol: Option<String>,
     /// Virtual register allocated to receive the exception instance reference.
-    pub target_register: u16,
+    pub catch_reg: u16,
+    /// Target bytecode offset of the catch handler block.
+    pub handler_pc: u32,
+    /// Optional target bytecode offset of the `finally` block.
+    pub finally_pc: Option<u32>,
+    /// Reference-holding registers active inside the `try` scope for unwinding cleanup.
+    pub try_ref_regs: Vec<u16>,
 }
 ```
 
@@ -36,13 +40,13 @@ When a `throw` statement executes:
 
 ```mermaid
 flowchart TD
-    ThrowInstruction["Throw (OpCode 0x84)\nRead Exception Object Address"] --> SearchHandlers["Search Function Exception Table\nfind_matching_handler(handlers, current_pc)"]
+    ThrowInstruction["Throw (OpCode 0xB0)\nRead Exception Object Address"] --> SearchHandlers["Search Function Exception Table\nfind_matching_handler(handlers, current_pc)"]
     SearchHandlers --> CheckHandler{"Handler Found?"}
-    CheckHandler -->|Yes| CheckType{"Exception instanceof ClassID?"}
-    CheckType -->|Match| DispatchCatch["1. Decrement reference registers in unwound scope\n2. Store exception into target_register\n3. Jump to catch_pc"]
+    CheckHandler -->|Yes| CheckType{"Exception instanceof catch_type_symbol?"}
+    CheckType -->|Match| DispatchCatch["1. Decrement try_ref_regs in unwound scope\n2. Store exception into catch_reg\n3. Jump to handler_pc"]
     CheckType -->|Mismatch| NextHandler["Search Next Outermost Handler"]
     NextHandler --> CheckHandler
-    CheckHandler -->|No| CheckFinally{"Finally Block Pending?"}
+    CheckHandler -->|No| CheckFinally{"finally_pc Pending?"}
     CheckFinally -->|Yes| ExecFinally["Execute Finally Trampoline"]
     ExecFinally --> PopFrame["Pop Current Call Frame\nDecrement Frame Registers"]
     CheckFinally -->|No| PopFrame
@@ -67,9 +71,9 @@ Reverse lookup guarantees that innermost nested `try-catch` blocks take preceden
 
 ### 3.2. Polymorphic Catch Matching
 Catch blocks check type compatibility by traversing the class inheritance hierarchy via the object's virtual table ID. A handler matches if:
-1. `class_id == 0` (untyped or root `solix.core.Exception` catch block).
-2. The thrown instance's `class_id` equals `entry.class_id`.
-3. The thrown instance's class inherits from `entry.class_id`.
+1. `catch_type_symbol` is `None` (untyped or catch-all handler).
+2. The thrown instance's class symbol equals `catch_type_symbol`.
+3. The thrown instance's class inherits from `catch_type_symbol`.
 
 ### 3.3. Deterministic ARC Cleanup During Unwinding
 When propagating out of a guarded scope, the virtual machine tracks reference registers allocated within that scope (`try_ref_regs`). Before entering the `catch` block or popping the call frame, the runtime invokes `dec_ref()` on all active reference registers, ensuring zero leaks during exception propagation.
